@@ -165,7 +165,7 @@ class DynamicController extends \App\Http\Controllers\Controller
         return response()->json($data, 200);
     }
 
-    public function store(Request $request, $model)
+    public function store(Request $request, $model = null)
     {
         $error = '';
 
@@ -227,7 +227,7 @@ class DynamicController extends \App\Http\Controllers\Controller
         return response()->json(['data' => $resource ?? '', 'error' => $error ?? ''], $error == '' ? 200 : 400);
     }
 
-    public function update(Request $request, $model, $id)
+    public function update(Request $request, $model = null, $id)
     {
         $error = '';
 
