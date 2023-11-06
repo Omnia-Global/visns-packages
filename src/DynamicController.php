@@ -1,5 +1,7 @@
 <?php
 
+namespace Visnsstudio\VisnsPackages;
+
 use App\Models\File;
 
 use Illuminate\Http\Request;
