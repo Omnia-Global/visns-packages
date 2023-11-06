@@ -55,11 +55,25 @@ class DynamicController extends \App\Http\Controllers\Controller
         // Fields to be retrieved, defaulting to ['id', 'label']
         foreach ($query->get($fields) as $item) {
             $itemData = [];
-            foreach ($fields as $field) {
-                $itemData[$field] = $item->{$field};
+
+            // First key-value pair
+            $firstKey = $fields[0];
+            $itemData[$firstKey] = $item->{$firstKey};
+
+            // Set 'label' to be the value of the second key in $fields
+            $secondKey = $fields[1] ?? 'label'; // Default to 'label' if there is no second key
+            $itemData['label'] = $item->{$secondKey};
+
+            // Add remaining fields
+            foreach ($fields as $key => $field) {
+                if ($key > 1) {
+                    $itemData[$field] = $item->{$field};
+                }
             }
+
             array_push($data, $itemData);
         }
+
 
         return response()->json(['data' => $data]);
     }
