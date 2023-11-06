@@ -169,7 +169,7 @@ class DynamicController extends \App\Http\Controllers\Controller
     {
         // Validate the request based on the model's rules
         $validatedData = $request->validate(
-            $this->model->validationRules($request->all())
+            $this->model->validationRules('store', $request->all())
         );
 
         // Iterate over the $casts array of the model
@@ -231,7 +231,7 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         // Validate the request based on the model's rules
         $validatedData = $request->validate(
-            $this->model->validationRules($request->all())
+            $this->model->validationRules('update', $request->all())
         );
 
         // Iterate over the $casts array of the model
