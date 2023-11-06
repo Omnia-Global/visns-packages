@@ -1,0 +1,22 @@
+{
+	"name": "visnsstudio/visns-packages",
+	"description": "Laravel/PHP packages used for Visns Studio Projects",
+	"type": "library",
+	"license": "MIT",
+	"autoload": {
+		"psr-4": {
+			"Visnsstudio\\VisnsPackages\\": "src/"
+		}
+	},
+	"authors": [
+		{
+			"name": "Visns Studio",
+			"email": "team@visns.studio"
+		}
+	],
+	"minimum-stability": "stable",
+	"require": {
+		"php": "^8.2",
+		"laravel": "^10.0"
+	}
+}
