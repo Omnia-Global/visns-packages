@@ -75,7 +75,7 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
 
 
-        return response()->json(['data' => $data]);
+        return response()->json(['data' => $data], 200);
     }
 
     public function show($model, $id)
@@ -162,11 +162,13 @@ class DynamicController extends \App\Http\Controllers\Controller
         $perPage = $request->input('take', 10);
         $data = $query->paginate($perPage);
 
-        return response()->json($data);
+        return response()->json($data, 200);
     }
 
-    public function store(Request $request, $relationshipMethod = 'file')
+    public function store(Request $request, $model)
     {
+        $error = '';
+
         // Validate the request based on the model's rules
         $validatedData = $request->validate(
             $this->model->validationRules('store', $request->all())
@@ -190,7 +192,8 @@ class DynamicController extends \App\Http\Controllers\Controller
         $resource = $this->model::create($validatedData);
 
         // Handle file upload if 'key' is present in the request
-        if ($request->has('key')) {
+        if ($request->has('key') && $request->has('file_relationship')) {
+            $relationshipMethod = $request->input('file_relationship');
             $unique_name =
                 $request->input('uuid') . '.' . $request->input('extension');
             $path = $this->folder . '/' . $unique_name;
@@ -221,11 +224,13 @@ class DynamicController extends \App\Http\Controllers\Controller
             $resource->assignRole($request->input('role'));
         }
 
-        return response()->json(['error' => '']);
+        return response()->json(['data' => $resource ?? '', 'error' => $error ?? ''], $error == '' ? 200 : 400);
     }
 
     public function update(Request $request, $model, $id)
     {
+        $error = '';
+
         // Find the resource
         $resource = $this->model::findOrFail($id);
 
@@ -252,7 +257,8 @@ class DynamicController extends \App\Http\Controllers\Controller
         $resource->update($validatedData);
 
         // Handle file upload if 'key' is present in the request
-        if ($request->has('key')) {
+        if ($request->has('key') && $request->has('file_relationship')) {
+            $relationshipMethod = $request->input('file_relationship');
             $unique_name =
                 $request->input('uuid') . '.' . $request->input('extension');
             $path = $this->folder . '/' . $unique_name;
@@ -284,13 +290,14 @@ class DynamicController extends \App\Http\Controllers\Controller
             $resource->syncRoles([$request->input('role')]);
         }
 
-        return response()->json(['error' => '']);
+        return response()->json(['data' => $resource ?? '', 'error' => $error ?? ''], $error == '' ? 200 : 400);
     }
 
     public function destroy($id)
     {
         $item = $this->model::findOrFail($id);
         $item->delete();
-        return response()->json(['error' => '']);
+
+        return response()->json(['error' => ''], 200);
     }
 }
