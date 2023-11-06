@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Storage;
 
 use Carbon\Carbon;
 
-class DynamicController extends App\Http\Controllers\Controller
+class DynamicController extends Controller
 {
     protected $model;
 
