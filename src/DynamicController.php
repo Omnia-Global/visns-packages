@@ -34,10 +34,17 @@ class DynamicController extends \App\Http\Controllers\Controller
     {
         $data = [];
 
+        // Determine the sorting field
+        $sortField = 'label'; // default sorting field
+        $fields = $request->input('fields', ['id', 'label']);
+        if (count($fields) >= 2) {
+            $sortField = $fields[1]; // use the second key if available
+        }
+
         // Assuming a default ordering method if customOrder is not available
         $query = method_exists($this->model, 'scopeCustomOrder')
-            ? $this->model::customOrder('label', 'asc')
-            : $this->model::orderBy('label', 'asc');
+            ? $this->model::customOrder($sortField, 'asc')
+            : $this->model::orderBy($sortField, 'asc');
 
         if ($request->has('where') && $request->filled('where')) {
             foreach ($request->input('where') as $condition) {
@@ -46,8 +53,6 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
 
         // Fields to be retrieved, defaulting to ['id', 'label']
-        $fields = $request->input('fields', ['id', 'label']);
-
         foreach ($query->get($fields) as $item) {
             $itemData = [];
             foreach ($fields as $field) {
