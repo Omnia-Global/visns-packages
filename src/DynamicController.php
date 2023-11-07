@@ -13,26 +13,22 @@ use Carbon\Carbon;
 
 class DynamicController extends \App\Http\Controllers\Controller
 {
-    protected $model;
-
-    public function __construct(Request $request)
+    protected function getModelInstance($model)
     {
-        // Resolve model dynamically from the route parameter
-        $modelName = Str::singular(ucfirst($request->route('model')));
+        $modelName = Str::singular(ucfirst($model));
         $modelClass = "App\\Models\\$modelName";
 
-        // Check if the model class exists
-        if (class_exists($modelClass)) {
-            $this->model = new $modelClass();
-
-            // Set the folder based on the route
-            $this->folder = $request->route('model');
+        if (!class_exists($modelClass)) {
+            throw new \Exception("Model class {$modelClass} does not exist.");
         }
+
+        return app($modelClass);
     }
 
-    public function dropdown(Request $request)
+    public function dropdown(Request $request, $model)
     {
         $data = [];
+        $modelInstance = $this->getModelInstance($model);
 
         // Determine the sorting field
         $sortField = 'label'; // default sorting field
@@ -42,9 +38,9 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
 
         // Assuming a default ordering method if customOrder is not available
-        $query = method_exists($this->model, 'scopeCustomOrder')
-            ? $this->model::customOrder($sortField, 'asc')
-            : $this->model::orderBy($sortField, 'asc');
+        $query = method_exists($modelInstance, 'scopeCustomOrder')
+            ? $modelInstance::customOrder($sortField, 'asc')
+            : $modelInstance::orderBy($sortField, 'asc');
 
         if ($request->has('where') && $request->filled('where')) {
             foreach ($request->input('where') as $condition) {
@@ -78,38 +74,41 @@ class DynamicController extends \App\Http\Controllers\Controller
         return response()->json(['data' => $data], 200);
     }
 
-    public function show($model, $id)
+    public function show($id, $model)
     {
-        $resource = $this->model::findOrFail($id);
+        $modelInstance = $this->getModelInstance($model);
+        $resource = $modelInstance::findOrFail($id);
 
         // Check if the model has defined loadable relations
-        if (method_exists($this->model, 'loadableRelations')) {
-            $resource->load($this->model->loadableRelations());
+        if (method_exists($modelInstance, 'loadableRelations')) {
+            $resource->load($modelInstance->loadableRelations());
         }
 
         return response()->json($resource);
     }
 
-    public function table(Request $request)
+    public function table(Request $request, $model)
     {
+        $modelInstance = $this->getModelInstance($model);
+
         // Get array of casts on the model
-        $casts = $this->model->getCasts();
+        $casts = $modelInstance->getCasts();
 
         // Assuming the model has defined relationships and custom methods
-        $query = $this->model::query();
+        $query = $modelInstance::query();
 
-        if (method_exists($this->model, 'loadableRelations')) {
-            $query->with($this->model->loadableRelations());
+        if (method_exists($modelInstance, 'loadableRelations')) {
+            $query->with($modelInstance->loadableRelations());
         }
 
         // Custom ordering and searching methods
-        if (method_exists($this->model, 'scopeCustomOrder')) {
+        if (method_exists($modelInstance, 'scopeCustomOrder')) {
             $query->customOrder(
                 $request->input('sortBy'),
                 $request->input('sort')
             );
         }
-        if (method_exists($this->model, 'scopeCustomSearch')) {
+        if (method_exists($modelInstance, 'scopeCustomSearch')) {
             $query->customSearch($request->input('search'));
         }
 
@@ -167,15 +166,16 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     public function store(Request $request, $model = null)
     {
+        $modelInstance = $this->getModelInstance($model);
         $error = '';
 
         // Validate the request based on the model's rules
         $validatedData = $request->validate(
-            $this->model->validationRules('store', $request->all())
+            $modelInstance->validationRules('store', $request->all())
         );
 
         // Iterate over the $casts array of the model
-        foreach ($this->model->getCasts() as $field => $type) {
+        foreach ($modelInstance->getCasts() as $field => $type) {
             // Check if the field is cast as 'datetime' or 'date' and is present in the validated data
             if (
                 ($type === 'datetime' || $type === 'date') &&
@@ -189,20 +189,20 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
 
         // Create a new resource
-        $resource = $this->model::create($validatedData);
+        $resource = $modelInstance::create($validatedData);
 
         // Handle file upload if 'key' is present in the request
         if ($request->has('key') && $request->has('file_relationship')) {
             $relationshipMethod = $request->input('file_relationship');
             $unique_name =
                 $request->input('uuid') . '.' . $request->input('extension');
-            $path = $this->folder . '/' . $unique_name;
+            $path = $model . '/' . $unique_name;
 
             Storage::copy(
                 $request->input('key'),
                 str_replace(
                     'tmp/',
-                    $this->folder . '/',
+                    $model . '/',
                     $request->input('key')
                 ) .
                     '.' .
@@ -220,7 +220,7 @@ class DynamicController extends \App\Http\Controllers\Controller
             $resource->$relationshipMethod()->save($file);
         }
 
-        if ($this->folder == 'users' && $request->has('role')) {
+        if ($model == 'users' && $request->has('role')) {
             $resource->assignRole($request->input('role'));
         }
 
@@ -229,18 +229,19 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     public function update(Request $request, $model = null, $id)
     {
+        $modelInstance = $this->getModelInstance($model);
         $error = '';
 
         // Find the resource
-        $resource = $this->model::findOrFail($id);
+        $resource = $modelInstance::findOrFail($id);
 
         // Validate the request based on the model's rules
         $validatedData = $request->validate(
-            $this->model->validationRules('update', $request->all())
+            $modelInstance->validationRules('update', $request->all())
         );
 
         // Iterate over the $casts array of the model
-        foreach ($this->model->getCasts() as $field => $type) {
+        foreach ($modelInstance->getCasts() as $field => $type) {
             // Check if the field is cast as 'datetime' or 'date' and is present in the validated data
             if (
                 ($type === 'datetime' || $type === 'date') &&
@@ -261,13 +262,13 @@ class DynamicController extends \App\Http\Controllers\Controller
             $relationshipMethod = $request->input('file_relationship');
             $unique_name =
                 $request->input('uuid') . '.' . $request->input('extension');
-            $path = $this->folder . '/' . $unique_name;
+            $path = $model . '/' . $unique_name;
 
             Storage::copy(
                 $request->input('key'),
                 str_replace(
                     'tmp/',
-                    $this->folder . '/',
+                    $model . '/',
                     $request->input('key')
                 ) .
                     '.' .
@@ -286,16 +287,17 @@ class DynamicController extends \App\Http\Controllers\Controller
             $resource->$relationshipMethod()->save($file);
         }
 
-        if ($this->folder == 'users' && $request->has('role')) {
+        if ($model == 'users' && $request->has('role')) {
             $resource->syncRoles([$request->input('role')]);
         }
 
         return response()->json(['data' => $resource ?? '', 'error' => $error ?? ''], $error == '' ? 200 : 400);
     }
 
-    public function destroy($id)
+    public function destroy($id, $model)
     {
-        $item = $this->model::findOrFail($id);
+        $modelInstance = $this->getModelInstance($model);
+        $item = $modelInstance::findOrFail($id);
         $item->delete();
 
         return response()->json(['error' => ''], 200);
