@@ -191,22 +191,25 @@ class DynamicController extends \App\Http\Controllers\Controller
 			$this->model->validationRules("store", $request->all())
 		);
 
+		// Merge validated data with the entire request data
+		$allData = array_merge($request->all(), $validatedData);
+
 		// Iterate over the $casts array of the model
 		foreach ($this->model->getCasts() as $field => $type) {
 			// Check if the field is cast as 'datetime' or 'date' and is present in the validated data
 			if (
 				($type === "datetime" || $type === "date") &&
-				isset($validatedData[$field])
+				isset($allData[$field])
 			) {
 				// Convert the field using Carbon
-				$validatedData[$field] = Carbon::createFromTimestamp(
-					strtotime($validatedData[$field])
+				$allData[$field] = Carbon::createFromTimestamp(
+					strtotime($allData[$field])
 				);
 			}
 		}
 
 		// Create a new resource
-		$resource = $this->model::create($validatedData);
+		$resource = $this->model::create($allData);
 
 		// Handle file upload if 'key' is present in the request
 		if ($request->has("key") && $request->has("file_relationship")) {
@@ -259,22 +262,25 @@ class DynamicController extends \App\Http\Controllers\Controller
 			$this->model->validationRules("update", $request->all())
 		);
 
+		// Merge validated data with the entire request data
+		$allData = array_merge($request->all(), $validatedData);
+
 		// Iterate over the $casts array of the model
 		foreach ($this->model->getCasts() as $field => $type) {
 			// Check if the field is cast as 'datetime' or 'date' and is present in the validated data
 			if (
 				($type === "datetime" || $type === "date") &&
-				isset($validatedData[$field])
+				isset($allData[$field])
 			) {
 				// Convert the field using Carbon
-				$validatedData[$field] = Carbon::createFromTimestamp(
-					strtotime($validatedData[$field])
+				$allData[$field] = Carbon::createFromTimestamp(
+					strtotime($allData[$field])
 				);
 			}
 		}
 
 		// Update the resource
-		$resource->update($validatedData);
+		$resource->update($allData);
 
 		// Handle file upload if 'key' is present in the request
 		if ($request->has("key") && $request->has("file_relationship")) {
