@@ -13,293 +13,314 @@ use Carbon\Carbon;
 
 class DynamicController extends \App\Http\Controllers\Controller
 {
-    protected function getModelInstance($model)
-    {
-        $modelName = Str::singular(ucfirst($model));
-        $modelClass = "App\\Models\\$modelName";
+	protected $model;
+	protected $folder;
 
-        if (!class_exists($modelClass)) {
-            throw new \Exception("Model class {$modelClass} does not exist.");
-        }
+	public function __construct(Request $request)
+	{
+		// Get the current path from the request
+		$path = $request->path(); // e.g., "ajax/companies/something"
 
-        return app($modelClass);
-    }
+		// Split the path into segments
+		$segments = explode("/", $path);
 
-    public function dropdown(Request $request, $model)
-    {
-        $data = [];
-        $modelInstance = $this->getModelInstance($model);
+		// Find the index of 'ajax' segment to determine where the model name should be
+		$ajaxIndex = array_search("ajax", $segments);
 
-        // Determine the sorting field
-        $sortField = 'label'; // default sorting field
-        $fields = $request->input('fields', ['id', 'label']);
-        if (count($fields) >= 2) {
-            $sortField = $fields[1]; // use the second key if available
-        }
+		// Assuming the segment after 'ajax' is the model name
+		$modelNameSegment = $segments[$ajaxIndex + 1] ?? null;
 
-        // Assuming a default ordering method if customOrder is not available
-        $query = method_exists($modelInstance, 'scopeCustomOrder')
-            ? $modelInstance::customOrder($sortField, 'asc')
-            : $modelInstance::orderBy($sortField, 'asc');
+		// Convert the URL segment to StudlyCase as it's the convention for model names in Laravel
+		$modelName = $modelNameSegment
+			? Str::studly(Str::singular($modelNameSegment))
+			: null;
 
-        if ($request->has('where') && $request->filled('where')) {
-            foreach ($request->input('where') as $condition) {
-                $query->where($condition['id'], $condition['value']);
-            }
-        }
+		// Generate the fully qualified class name of the model
+		$modelClass = $modelName ? "App\\Models\\{$modelName}" : null;
 
-        // Fields to be retrieved, defaulting to ['id', 'label']
-        foreach ($query->get($fields) as $item) {
-            $itemData = [];
+		// Check if the model class exists and instantiate it if it does
+		if ($modelClass && class_exists($modelClass)) {
+			$this->model = new $modelClass();
+			$this->folder = $modelName;
+		} else {
+			// Handle the case where the model does not exist or the segment is not provided
+			// You might want to throw an exception or handle this case appropriately
+		}
+	}
 
-            // First key-value pair
-            $firstKey = $fields[0];
-            $itemData[$firstKey] = $item->{$firstKey};
+	public function dropdown(Request $request)
+	{
+		$data = [];
 
-            // Set 'label' to be the value of the second key in $fields
-            $secondKey = $fields[1] ?? 'label'; // Default to 'label' if there is no second key
-            $itemData['label'] = $item->{$secondKey};
+		// Determine the sorting field
+		$sortField = "label"; // default sorting field
+		$fields = $request->input("fields", ["id", "label"]);
+		if (count($fields) >= 2) {
+			$sortField = $fields[1]; // use the second key if available
+		}
 
-            // Add remaining fields
-            foreach ($fields as $key => $field) {
-                if ($key > 1) {
-                    $itemData[$field] = $item->{$field};
-                }
-            }
+		// Assuming a default ordering method if customOrder is not available
+		$query = method_exists($this->model, "scopeCustomOrder")
+			? $this->model::customOrder($sortField, "asc")
+			: $this->model::orderBy($sortField, "asc");
 
-            array_push($data, $itemData);
-        }
+		if ($request->has("where") && $request->filled("where")) {
+			foreach ($request->input("where") as $condition) {
+				$query->where($condition["id"], $condition["value"]);
+			}
+		}
 
+		// Fields to be retrieved, defaulting to ['id', 'label']
+		foreach ($query->get($fields) as $item) {
+			$itemData = [];
 
-        return response()->json(['data' => $data], 200);
-    }
+			// First key-value pair
+			$firstKey = $fields[0];
+			$itemData[$firstKey] = $item->{$firstKey};
 
-    public function show($id, $model)
-    {
-        $modelInstance = $this->getModelInstance($model);
-        $resource = $modelInstance::findOrFail($id);
+			// Set 'label' to be the value of the second key in $fields
+			$secondKey = $fields[1] ?? "label"; // Default to 'label' if there is no second key
+			$itemData["label"] = $item->{$secondKey};
 
-        // Check if the model has defined loadable relations
-        if (method_exists($modelInstance, 'loadableRelations')) {
-            $resource->load($modelInstance->loadableRelations());
-        }
+			// Add remaining fields
+			foreach ($fields as $key => $field) {
+				if ($key > 1) {
+					$itemData[$field] = $item->{$field};
+				}
+			}
 
-        return response()->json($resource);
-    }
+			array_push($data, $itemData);
+		}
 
-    public function table(Request $request, $model)
-    {
-        $modelInstance = $this->getModelInstance($model);
+		return response()->json(["data" => $data], 200);
+	}
 
-        // Get array of casts on the model
-        $casts = $modelInstance->getCasts();
+	public function show($id)
+	{
+		$resource = $this->model::findOrFail($id);
 
-        // Assuming the model has defined relationships and custom methods
-        $query = $modelInstance::query();
+		// Check if the model has defined loadable relations
+		if (method_exists($this->model, "loadableRelations")) {
+			$resource->load($this->model->loadableRelations());
+		}
 
-        if (method_exists($modelInstance, 'loadableRelations')) {
-            $query->with($modelInstance->loadableRelations());
-        }
+		return response()->json($resource);
+	}
 
-        // Custom ordering and searching methods
-        if (method_exists($modelInstance, 'scopeCustomOrder')) {
-            $query->customOrder(
-                $request->input('sortBy'),
-                $request->input('sort')
-            );
-        }
-        if (method_exists($modelInstance, 'scopeCustomSearch')) {
-            $query->customSearch($request->input('search'));
-        }
+	public function table(Request $request)
+	{
+		// Get array of casts on the model
+		$casts = $this->model->getCasts();
 
-        // Filtering
-        if ($request->has('where') && $request->filled('where')) {
-            foreach ($request->input('where') as $condition) {
-                $value = $condition['value'];
+		// Assuming the model has defined relationships and custom methods
+		$query = $this->model::query();
 
-                if (isset($casts[$condition['id']])) {
-                    switch ($casts[$condition['id']]) {
-                        case 'datetime':
-                            $value = Carbon::createFromTimestamp(
-                                strtotime($value)
-                            );
-                            break;
-                        case 'date':
-                            $value = Carbon::createFromTimestamp(
-                                strtotime($value)
-                            );
-                            break;
-                    }
-                }
+		if (method_exists($this->model, "loadableRelations")) {
+			$query->with($this->model->loadableRelations());
+		}
 
-                if (isset($condition['operator'])) {
-                    switch ($condition['operator']) {
-                        case 'contains':
-                            $query->where(
-                                $condition['id'],
-                                'like',
-                                '%' . $value . '%'
-                            );
-                            break;
-                        case 'inlist':
-                            $query->whereIn($condition['id'], $value);
-                            break;
-                        case 'inrange':
-                            $query->whereBetween($condition['id'], $value);
-                            break;
-                        default:
-                            $query->where($condition['id'], $value);
-                            break;
-                    }
-                } else {
-                    $query->where($condition['id'], $value);
-                }
-            }
-        }
+		// Custom ordering and searching methods
+		if (method_exists($this->model, "scopeCustomOrder")) {
+			$query->customOrder(
+				$request->input("sortBy"),
+				$request->input("sort")
+			);
+		}
+		if (method_exists($this->model, "scopeCustomSearch")) {
+			$query->customSearch($request->input("search"));
+		}
 
-        // Pagination
-        $perPage = $request->input('take', 10);
-        $data = $query->paginate($perPage);
+		// Filtering
+		if ($request->has("where") && $request->filled("where")) {
+			foreach ($request->input("where") as $condition) {
+				$value = $condition["value"];
 
-        return response()->json($data, 200);
-    }
+				if (isset($casts[$condition["id"]])) {
+					switch ($casts[$condition["id"]]) {
+						case "datetime":
+							$value = Carbon::createFromTimestamp(
+								strtotime($value)
+							);
+							break;
+						case "date":
+							$value = Carbon::createFromTimestamp(
+								strtotime($value)
+							);
+							break;
+					}
+				}
 
-    public function store(Request $request, $model = null)
-    {
-        $modelInstance = $this->getModelInstance($model);
-        $error = '';
+				if (isset($condition["operator"])) {
+					switch ($condition["operator"]) {
+						case "contains":
+							$query->where(
+								$condition["id"],
+								"like",
+								"%" . $value . "%"
+							);
+							break;
+						case "inlist":
+							$query->whereIn($condition["id"], $value);
+							break;
+						case "inrange":
+							$query->whereBetween($condition["id"], $value);
+							break;
+						default:
+							$query->where($condition["id"], $value);
+							break;
+					}
+				} else {
+					$query->where($condition["id"], $value);
+				}
+			}
+		}
 
-        // Validate the request based on the model's rules
-        $validatedData = $request->validate(
-            $modelInstance->validationRules('store', $request->all())
-        );
+		// Pagination
+		$perPage = $request->input("take", 10);
+		$data = $query->paginate($perPage);
 
-        // Iterate over the $casts array of the model
-        foreach ($modelInstance->getCasts() as $field => $type) {
-            // Check if the field is cast as 'datetime' or 'date' and is present in the validated data
-            if (
-                ($type === 'datetime' || $type === 'date') &&
-                isset($validatedData[$field])
-            ) {
-                // Convert the field using Carbon
-                $validatedData[$field] = Carbon::createFromTimestamp(
-                    strtotime($validatedData[$field])
-                );
-            }
-        }
+		return response()->json($data, 200);
+	}
 
-        // Create a new resource
-        $resource = $modelInstance::create($validatedData);
+	public function store(Request $request)
+	{
+		$error = "";
 
-        // Handle file upload if 'key' is present in the request
-        if ($request->has('key') && $request->has('file_relationship')) {
-            $relationshipMethod = $request->input('file_relationship');
-            $unique_name =
-                $request->input('uuid') . '.' . $request->input('extension');
-            $path = $model . '/' . $unique_name;
+		// Validate the request based on the model's rules
+		$validatedData = $request->validate(
+			$this->model->validationRules("store", $request->all())
+		);
 
-            Storage::copy(
-                $request->input('key'),
-                str_replace(
-                    'tmp/',
-                    $model . '/',
-                    $request->input('key')
-                ) .
-                    '.' .
-                    $request->input('extension')
-            );
+		// Iterate over the $casts array of the model
+		foreach ($this->model->getCasts() as $field => $type) {
+			// Check if the field is cast as 'datetime' or 'date' and is present in the validated data
+			if (
+				($type === "datetime" || $type === "date") &&
+				isset($validatedData[$field])
+			) {
+				// Convert the field using Carbon
+				$validatedData[$field] = Carbon::createFromTimestamp(
+					strtotime($validatedData[$field])
+				);
+			}
+		}
 
-            $file = new File([
-                'file_path' => $path,
-                'file_name' => $request->input('filename'),
-                'file_extension' => $request->input('extension'),
-                'file_size' => $request->input('filesize'),
-            ]);
+		// Create a new resource
+		$resource = $this->model::create($validatedData);
 
-            // Dynamically attach the file to the resource
-            $resource->$relationshipMethod()->save($file);
-        }
+		// Handle file upload if 'key' is present in the request
+		if ($request->has("key") && $request->has("file_relationship")) {
+			$relationshipMethod = $request->input("file_relationship");
+			$unique_name =
+				$request->input("uuid") . "." . $request->input("extension");
+			$path = $this->folder . "/" . $unique_name;
 
-        if ($model == 'users' && $request->has('role')) {
-            $resource->assignRole($request->input('role'));
-        }
+			Storage::copy(
+				$request->input("key"),
+				str_replace(
+					"tmp/",
+					$this->folder . "/",
+					$request->input("key")
+				) .
+					"." .
+					$request->input("extension")
+			);
 
-        return response()->json(['data' => $resource ?? '', 'error' => $error ?? ''], $error == '' ? 200 : 400);
-    }
+			$file = new File([
+				"file_path" => $path,
+				"file_name" => $request->input("filename"),
+				"file_extension" => $request->input("extension"),
+				"file_size" => $request->input("filesize"),
+			]);
 
-    public function update(Request $request, $model = null, $id)
-    {
-        $modelInstance = $this->getModelInstance($model);
-        $error = '';
+			// Dynamically attach the file to the resource
+			$resource->$relationshipMethod()->save($file);
+		}
 
-        // Find the resource
-        $resource = $modelInstance::findOrFail($id);
+		if ($this->folder == "users" && $request->has("role")) {
+			$resource->assignRole($request->input("role"));
+		}
 
-        // Validate the request based on the model's rules
-        $validatedData = $request->validate(
-            $modelInstance->validationRules('update', $request->all())
-        );
+		return response()->json(
+			["data" => $resource ?? "", "error" => $error ?? ""],
+			$error == "" ? 200 : 400
+		);
+	}
 
-        // Iterate over the $casts array of the model
-        foreach ($modelInstance->getCasts() as $field => $type) {
-            // Check if the field is cast as 'datetime' or 'date' and is present in the validated data
-            if (
-                ($type === 'datetime' || $type === 'date') &&
-                isset($validatedData[$field])
-            ) {
-                // Convert the field using Carbon
-                $validatedData[$field] = Carbon::createFromTimestamp(
-                    strtotime($validatedData[$field])
-                );
-            }
-        }
+	public function update(Request $request, $id)
+	{
+		$error = "";
 
-        // Update the resource
-        $resource->update($validatedData);
+		// Find the resource
+		$resource = $this->model::findOrFail($id);
 
-        // Handle file upload if 'key' is present in the request
-        if ($request->has('key') && $request->has('file_relationship')) {
-            $relationshipMethod = $request->input('file_relationship');
-            $unique_name =
-                $request->input('uuid') . '.' . $request->input('extension');
-            $path = $model . '/' . $unique_name;
+		// Validate the request based on the model's rules
+		$validatedData = $request->validate(
+			$this->model->validationRules("update", $request->all())
+		);
 
-            Storage::copy(
-                $request->input('key'),
-                str_replace(
-                    'tmp/',
-                    $model . '/',
-                    $request->input('key')
-                ) .
-                    '.' .
-                    $request->input('extension')
-            );
+		// Iterate over the $casts array of the model
+		foreach ($this->model->getCasts() as $field => $type) {
+			// Check if the field is cast as 'datetime' or 'date' and is present in the validated data
+			if (
+				($type === "datetime" || $type === "date") &&
+				isset($validatedData[$field])
+			) {
+				// Convert the field using Carbon
+				$validatedData[$field] = Carbon::createFromTimestamp(
+					strtotime($validatedData[$field])
+				);
+			}
+		}
 
-            $file = new File([
-                'file_path' => $path,
-                'file_name' => $request->input('filename'),
-                'file_extension' => $request->input('extension'),
-                'file_size' => $request->input('filesize'),
-            ]);
+		// Update the resource
+		$resource->update($validatedData);
 
-            // Dynamically attach the file to the resource
-            $resource->$relationshipMethod()->delete();
-            $resource->$relationshipMethod()->save($file);
-        }
+		// Handle file upload if 'key' is present in the request
+		if ($request->has("key") && $request->has("file_relationship")) {
+			$relationshipMethod = $request->input("file_relationship");
+			$unique_name =
+				$request->input("uuid") . "." . $request->input("extension");
+			$path = $this->folder . "/" . $unique_name;
 
-        if ($model == 'users' && $request->has('role')) {
-            $resource->syncRoles([$request->input('role')]);
-        }
+			Storage::copy(
+				$request->input("key"),
+				str_replace(
+					"tmp/",
+					$this->folder . "/",
+					$request->input("key")
+				) .
+					"." .
+					$request->input("extension")
+			);
 
-        return response()->json(['data' => $resource ?? '', 'error' => $error ?? ''], $error == '' ? 200 : 400);
-    }
+			$file = new File([
+				"file_path" => $path,
+				"file_name" => $request->input("filename"),
+				"file_extension" => $request->input("extension"),
+				"file_size" => $request->input("filesize"),
+			]);
 
-    public function destroy($id, $model)
-    {
-        $modelInstance = $this->getModelInstance($model);
-        $item = $modelInstance::findOrFail($id);
-        $item->delete();
+			// Dynamically attach the file to the resource
+			$resource->$relationshipMethod()->delete();
+			$resource->$relationshipMethod()->save($file);
+		}
 
-        return response()->json(['error' => ''], 200);
-    }
+		if ($this->folder == "users" && $request->has("role")) {
+			$resource->syncRoles([$request->input("role")]);
+		}
+
+		return response()->json(
+			["data" => $resource ?? "", "error" => $error ?? ""],
+			$error == "" ? 200 : 400
+		);
+	}
+
+	public function destroy($id)
+	{
+		$item = $this->model::findOrFail($id);
+		$item->delete();
+
+		return response()->json(["error" => ""], 200);
+	}
 }
