@@ -176,7 +176,7 @@ class DynamicController extends \App\Http\Controllers\Controller
 					) {
 						$query->whereHas($condition["whereHas"], function (
 							$q
-						) use ($condition) {
+						) use ($condition, $value) {
 							$q->where($condition["id"], $value);
 						});
 					} else {
