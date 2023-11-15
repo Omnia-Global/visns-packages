@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace Visnsstudio\VisnsPackages;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -15,7 +15,7 @@ use App\Models\User;
 
 use Carbon\Carbon;
 
-class AuthController extends Controller
+class AuthController extends \App\Http\Controllers\Controller
 {
 	public function forgot(Request $request)
 	{
