@@ -170,7 +170,18 @@ class DynamicController extends \App\Http\Controllers\Controller
 							break;
 					}
 				} else {
-					$query->where($condition["id"], $value);
+					if (
+						isset($condition["whereHas"]) &&
+						$condition["whereHas"] != ""
+					) {
+						$query->whereHas($condition["whereHas"], function (
+							$q
+						) use ($condition) {
+							$q->where($condition["id"], $value);
+						});
+					} else {
+						$query->where($condition["id"], $value);
+					}
 				}
 			}
 		}
