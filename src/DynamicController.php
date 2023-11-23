@@ -352,7 +352,7 @@ class DynamicController extends \App\Http\Controllers\Controller
 		$resource->update($allData);
 
 		// Update any many to many relationships
-		$class = new ReflectionClass($this->model);
+		$class = new \ReflectionClass($this->model);
 		$belongsToManyRelations = [];
 
 		foreach ($class->getMethods() as $method) {
