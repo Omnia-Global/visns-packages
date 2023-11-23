@@ -186,11 +186,15 @@ class DynamicController extends \App\Http\Controllers\Controller
 						isset($condition["whereHas"]) &&
 						$condition["whereHas"] != ""
 					) {
-						$query->whereHas($condition["whereHas"], function (
-							$q
-						) use ($condition, $value) {
-							$q->where($condition["id"], $value);
-						});
+						if (!isset($condition["id"])) {
+							$query->whereHas($condition["whereHas"]);
+						} else {
+							$query->whereHas($condition["whereHas"], function (
+								$q
+							) use ($condition, $value) {
+								$q->where($condition["id"], $value);
+							});
+						}
 					} else {
 						$query->where($condition["id"], $value);
 					}
