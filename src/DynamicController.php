@@ -159,11 +159,23 @@ class DynamicController extends \App\Http\Controllers\Controller
 								"%" . $value . "%"
 							);
 							break;
+						case "gt":
+							$query->where($condition["id"], ">", $value);
+							break;
+						case "gte":
+							$query->where($condition["id"], ">=", $value);
+							break;
 						case "inlist":
 							$query->whereIn($condition["id"], $value);
 							break;
 						case "inrange":
 							$query->whereBetween($condition["id"], $value);
+							break;
+						case "lt":
+							$query->where($condition["id"], "<", $value);
+							break;
+						case "lte":
+							$query->where($condition["id"], "<=", $value);
 							break;
 						default:
 							$query->where($condition["id"], $value);
