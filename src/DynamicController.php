@@ -234,18 +234,8 @@ class DynamicController extends \App\Http\Controllers\Controller
 		$resource = $this->model::create($allData);
 
 		// Update any many to many relationships
-		$class = new \ReflectionClass($this->model);
-		$belongsToManyRelations = [];
-
-		foreach ($class->getMethods() as $method) {
-			if ($method->class != get_class($this->model)) {
-				continue;
-			}
-			$returnType = $method->getReturnType();
-
-			if ($returnType && $returnType->getName() == BelongsToMany::class) {
-				$belongsToManyRelations[] = $method->name;
-			}
+		foreach ($this->model->loadableRelations() as $relation) {
+			$belongsToManyRelations[] = $relation;
 		}
 
 		foreach ($belongsToManyRelations as $relationship) {
@@ -352,18 +342,8 @@ class DynamicController extends \App\Http\Controllers\Controller
 		$resource->update($allData);
 
 		// Update any many to many relationships
-		$class = new \ReflectionClass($this->model);
-		$belongsToManyRelations = [];
-
-		foreach ($class->getMethods() as $method) {
-			if ($method->class != get_class($this->model)) {
-				continue;
-			}
-			$returnType = $method->getReturnType();
-
-			if ($returnType && $returnType->getName() == BelongsToMany::class) {
-				$belongsToManyRelations[] = $method->name;
-			}
+		foreach ($this->model->loadableRelations() as $relation) {
+			$belongsToManyRelations[] = $relation;
 		}
 
 		foreach ($belongsToManyRelations as $relationship) {
