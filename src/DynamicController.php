@@ -238,7 +238,7 @@ class DynamicController extends \App\Http\Controllers\Controller
 		$belongsToManyRelations = [];
 
 		foreach ($class->getMethods() as $method) {
-			if ($method->class != get_class(new User())) {
+			if ($method->class != get_class($this->model)) {
 				continue;
 			}
 			$returnType = $method->getReturnType();
@@ -356,7 +356,7 @@ class DynamicController extends \App\Http\Controllers\Controller
 		$belongsToManyRelations = [];
 
 		foreach ($class->getMethods() as $method) {
-			if ($method->class != get_class(new User())) {
+			if ($method->class != get_class($this->model)) {
 				continue;
 			}
 			$returnType = $method->getReturnType();
