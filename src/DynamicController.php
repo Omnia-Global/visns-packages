@@ -233,6 +233,42 @@ class DynamicController extends \App\Http\Controllers\Controller
 		// Create a new resource
 		$resource = $this->model::create($allData);
 
+		// Update any many to many relationships
+		$class = new ReflectionClass($this->model);
+		$belongsToManyRelations = [];
+
+		foreach ($class->getMethods() as $method) {
+			if ($method->class != get_class(new User())) {
+				continue;
+			}
+			$returnType = $method->getReturnType();
+
+			if ($returnType && $returnType->getName() == BelongsToMany::class) {
+				$belongsToManyRelations[] = $method->name;
+			}
+		}
+
+		foreach ($belongsToManyRelations as $relationship) {
+			if ($request->filled($relationship)) {
+				$input = $request->input($relationship);
+
+				// Check if input is an array of objects and extract IDs
+				if (
+					is_array($input) &&
+					isset($input[0]) &&
+					is_array($input[0])
+				) {
+					$ids = array_map(function ($item) {
+						return $item["id"] ?? $item["value"]; // Assuming each item has either 'id' or 'value' key
+					}, $input);
+				} else {
+					$ids = $input; // Assuming direct array of IDs
+				}
+
+				$resource->$relationship()->sync($ids);
+			}
+		}
+
 		// Handle file upload if 'key' is present in the request
 		if ($request->has("key") && $request->has("file_relationship")) {
 			$relationshipMethod = $request->input("file_relationship");
@@ -314,6 +350,42 @@ class DynamicController extends \App\Http\Controllers\Controller
 
 		// Update the resource
 		$resource->update($allData);
+
+		// Update any many to many relationships
+		$class = new ReflectionClass($this->model);
+		$belongsToManyRelations = [];
+
+		foreach ($class->getMethods() as $method) {
+			if ($method->class != get_class(new User())) {
+				continue;
+			}
+			$returnType = $method->getReturnType();
+
+			if ($returnType && $returnType->getName() == BelongsToMany::class) {
+				$belongsToManyRelations[] = $method->name;
+			}
+		}
+
+		foreach ($belongsToManyRelations as $relationship) {
+			if ($request->filled($relationship)) {
+				$input = $request->input($relationship);
+
+				// Check if input is an array of objects and extract IDs
+				if (
+					is_array($input) &&
+					isset($input[0]) &&
+					is_array($input[0])
+				) {
+					$ids = array_map(function ($item) {
+						return $item["id"] ?? $item["value"]; // Assuming each item has either 'id' or 'value' key
+					}, $input);
+				} else {
+					$ids = $input; // Assuming direct array of IDs
+				}
+
+				$resource->$relationship()->sync($ids);
+			}
+		}
 
 		// Handle file upload if 'key' is present in the request
 		if ($request->has("key") && $request->has("file_relationship")) {
