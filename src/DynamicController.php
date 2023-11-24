@@ -152,6 +152,19 @@ class DynamicController extends \App\Http\Controllers\Controller
 					}
 				}
 
+				if (isset($condition["type"])) {
+					switch ($condition["type"]) {
+						case "date":
+							$value =
+								$value == "now"
+									? Carbon::now()
+									: Carbon::createFromTimestamp(
+										strtotime($value)
+									);
+							break;
+					}
+				}
+
 				if (isset($condition["operator"])) {
 					switch ($condition["operator"]) {
 						case "contains":
