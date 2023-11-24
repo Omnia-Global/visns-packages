@@ -135,21 +135,20 @@ class DynamicController extends \App\Http\Controllers\Controller
 			foreach ($request->input("where") as $condition) {
 				$value = isset($condition["value"]) ? $condition["value"] : "";
 
-				if (
-					isset($casts[$condition["id"]]) &&
-					isset($condition["id"])
-				) {
-					switch ($casts[$condition["id"]]) {
-						case "datetime":
-							$value = Carbon::createFromTimestamp(
-								strtotime($value)
-							);
-							break;
-						case "date":
-							$value = Carbon::createFromTimestamp(
-								strtotime($value)
-							);
-							break;
+				if (isset($condition["id"])) {
+					if (isset($casts[$condition["id"]])) {
+						switch ($casts[$condition["id"]]) {
+							case "datetime":
+								$value = Carbon::createFromTimestamp(
+									strtotime($value)
+								);
+								break;
+							case "date":
+								$value = Carbon::createFromTimestamp(
+									strtotime($value)
+								);
+								break;
+						}
 					}
 				}
 
