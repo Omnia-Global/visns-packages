@@ -133,7 +133,7 @@ class DynamicController extends \App\Http\Controllers\Controller
 		// Filtering
 		if ($request->has("where") && $request->filled("where")) {
 			foreach ($request->input("where") as $condition) {
-				$value = $condition["value"];
+				$value = isset($condition["value"]) ? $condition["value"] : "";
 
 				if (isset($casts[$condition["id"]])) {
 					switch ($casts[$condition["id"]]) {
