@@ -57,16 +57,16 @@ class DynamicController extends \App\Http\Controllers\Controller
 		$sort = "asc";
 		$fields = $request->input("fields", ["id", "label"]);
 
-		if ($request->filled("sortBy")) {
-			$sortField = $request->input("sortBy");
-		}
-
-		if ($request->filled("sort")) {
-			$sort = $request->input("sort");
+		if ($request->filled("order")) {
+			$sort = $request->input("order");
 		}
 
 		if (count($fields) >= 2) {
-			$sortField = $fields[1]; // use the second key if available
+			if ($request->filled("orderBy")) {
+				$sortField = $request->input("orderBy");
+			} else {
+				$sortField = $fields[1]; // use the second key if available
+			}
 		}
 
 		// Assuming a default ordering method if customOrder is not available
