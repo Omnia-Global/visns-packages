@@ -466,6 +466,10 @@ class DynamicController extends \App\Http\Controllers\Controller
 		]);
 
 		if ($request->filled("key")) {
+			$file_path =
+				str_replace("tmp/", "", $request->input("key")) .
+				"." .
+				$request->input("extension");
 			$path =
 				$this->original .
 				"/" .
@@ -482,7 +486,7 @@ class DynamicController extends \App\Http\Controllers\Controller
 
 			$file = new File([
 				"fileable_field" => $request->input("fileable_field"),
-				"file_path" => str_replace("tmp/", "", $request->input("key")),
+				"file_path" => $file_path,
 				"file_name" => $request->input("filename"),
 				"file_extension" => $request->input("extension"),
 				"file_size" => $request->input("filename"),
