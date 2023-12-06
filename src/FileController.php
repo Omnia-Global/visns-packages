@@ -202,17 +202,10 @@ class FileController extends \App\Http\Controllers\Controller
 			}
 
 			// Check if file exists in storage (S3 or local)
-			if (!Storage::disk("s3")->exists($file->file_path)) {
-				return response()->json(
-					[
-						"error" => "File does not exist in storage.",
-					],
-					404
-				);
+			if (Storage::disk("s3")->exists($file->file_path)) {
+				// Delete file from storage
+				Storage::disk("s3")->delete($file->file_path);
 			}
-
-			// Delete file from storage
-			Storage::disk("s3")->delete($file->file_path);
 
 			// Delete the file record from the database
 			$file->delete();

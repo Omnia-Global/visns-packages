@@ -470,7 +470,13 @@ class DynamicController extends \App\Http\Controllers\Controller
 
 			Storage::copy(
 				$request->input("key"),
-				str_replace("tmp/", "", $request->input("key")) .
+				str_replace(
+					"tmp/",
+					"",
+					$request->input("fileable_field") .
+						"/" .
+						$request->input("key")
+				) .
 					"." .
 					$request->input("extension")
 			);
