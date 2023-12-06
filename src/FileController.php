@@ -155,28 +155,79 @@ class FileController extends \App\Http\Controllers\Controller
 
 	public function update(Request $request, $id)
 	{
-		$error = "";
-
-		$file = File::find($id);
-		$file->file_name = $request->input("file_name");
-		$file->save();
-
-		return response()->json([
-			"error" => $error,
+		// Validate the request
+		$validated = $request->validate([
+			"file_name" => "required|string|max:255", // Add validation rules as needed
 		]);
+
+		try {
+			// Retrieve the file and check if it exists
+			$file = File::findOrFail($id);
+
+			// Update the file's name
+			$file->file_name = $validated["file_name"];
+			$file->save();
+
+			return response()->json([
+				"error" => "",
+			]);
+		} catch (\Exception $e) {
+			return response()->json(
+				[
+					"error" => $e->getMessage(),
+				],
+				500
+			);
+		}
 	}
 
 	public function delete(Request $request)
 	{
-		$error = "";
-
-		if ($request->has("file_id") && $request->filled("file_id")) {
-			$file = File::find($request->input("file_id"));
-			$file->delete();
-		}
-
-		return response()->json([
-			"error" => $error,
+		// Validate the request
+		$validated = $request->validate([
+			"file_id" => "required|exists:files,id",
 		]);
+
+		try {
+			// Retrieve the file from the database
+			$file = File::find($validated["file_id"]);
+
+			if (!$file) {
+				return response()->json(
+					[
+						"error" => "File not found.",
+					],
+					404
+				);
+			}
+
+			// Check if file exists in storage (S3 or local)
+			if (!Storage::disk("s3")->exists($file->file_path)) {
+				return response()->json(
+					[
+						"error" => "File does not exist in storage.",
+					],
+					404
+				);
+			}
+
+			// Delete file from storage
+			Storage::disk("s3")->delete($file->file_path);
+
+			// Delete the file record from the database
+			$file->delete();
+
+			return response()->json([
+				"error" => "",
+			]);
+		} catch (\Exception $e) {
+			return response()->json(
+				[
+					"success" => false,
+					"error" => $e->getMessage(),
+				],
+				500
+			);
+		}
 	}
 }
