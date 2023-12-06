@@ -475,7 +475,7 @@ class DynamicController extends \App\Http\Controllers\Controller
 					$request->input("extension")
 			);
 
-			$nextOrder = File::where("fileable_id", $project->id)
+			$nextOrder = File::where("fileable_id", $resource->id)
 				->where("fileable_field", $request->input("fileable_field"))
 				->where("fileable_type", $request->input("fileable_type"))
 				->max("sort_order");
