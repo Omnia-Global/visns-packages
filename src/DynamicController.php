@@ -489,8 +489,13 @@ class DynamicController extends \App\Http\Controllers\Controller
 				"sort_order" => $nextOrder + 1,
 			]);
 
-			$project->{$request->input("fileable_field")}()->save($file);
+			$resource->{$request->input("fileable_field")}()->save($file);
 		}
+
+		return response()->json(
+			["data" => $resource ?? "", "error" => $error ?? ""],
+			$error == "" ? 200 : 400
+		);
 	}
 
 	public function destroy($id)
