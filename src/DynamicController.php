@@ -466,20 +466,13 @@ class DynamicController extends \App\Http\Controllers\Controller
 
 		if ($request->filled("key")) {
 			$path =
-				$request->input("uuid") . "." . $request->input("extension");
+				$request->input("fileable_field") .
+				"/" .
+				str_replace("tmp/", "", $request->input("key")) .
+				"." .
+				$request->input("extension");
 
-			Storage::copy(
-				$request->input("key"),
-				str_replace(
-					"tmp/",
-					"",
-					$request->input("fileable_field") .
-						"/" .
-						$request->input("key")
-				) .
-					"." .
-					$request->input("extension")
-			);
+			Storage::copy($request->input("key"), $path);
 
 			$nextOrder = File::where("fileable_id", $resource->id)
 				->where("fileable_field", $request->input("fileable_field"))

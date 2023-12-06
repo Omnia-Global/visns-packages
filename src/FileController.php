@@ -156,16 +156,16 @@ class FileController extends \App\Http\Controllers\Controller
 	public function update(Request $request, $id)
 	{
 		// Validate the request
-		$validated = $request->validate([
+		$request->validate([
 			"file_name" => "required|string|max:255", // Add validation rules as needed
 		]);
 
 		try {
 			// Retrieve the file and check if it exists
 			$file = File::findOrFail($id);
-
-			// Update the file's name
-			$file->file_name = $validated["file_name"];
+			$file->file_name = $request->input("file_name");
+			$file->file_title = $request->input("file_title");
+			$file->file_description = $request->input("file_description");
 			$file->save();
 
 			return response()->json([
