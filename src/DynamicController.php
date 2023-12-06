@@ -42,6 +42,7 @@ class DynamicController extends \App\Http\Controllers\Controller
 		if ($modelClass && class_exists($modelClass)) {
 			$this->model = new $modelClass();
 			$this->folder = $modelName;
+			$this->original = $modelNameSegment;
 		} else {
 			// Handle the case where the model does not exist or the segment is not provided
 			// You might want to throw an exception or handle this case appropriately
@@ -466,7 +467,7 @@ class DynamicController extends \App\Http\Controllers\Controller
 
 		if ($request->filled("key")) {
 			$path =
-				$request->input("fileable_field") .
+				$this->original .
 				"/" .
 				$request->input("uuid") .
 				"." .
