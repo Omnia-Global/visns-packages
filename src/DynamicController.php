@@ -466,18 +466,18 @@ class DynamicController extends \App\Http\Controllers\Controller
 		]);
 
 		if ($request->filled("key")) {
-			$file_path =
+			$filePath =
 				str_replace("tmp/", "", $request->input("key")) .
 				"." .
 				$request->input("extension");
-			$path =
+			$destinationPath =
 				$this->original .
 				"/" .
 				$request->input("uuid") .
 				"." .
 				$request->input("extension");
 
-			Storage::copy($request->input("key"), $path);
+			Storage::copy($request->input("key"), $destinationPath);
 
 			$nextOrder = File::where("fileable_id", $resource->id)
 				->where("fileable_field", $request->input("fileable_field"))
@@ -486,7 +486,7 @@ class DynamicController extends \App\Http\Controllers\Controller
 
 			$file = new File([
 				"fileable_field" => $request->input("fileable_field"),
-				"file_path" => $file_path,
+				"file_path" => $filePath,
 				"file_name" => $request->input("filename"),
 				"file_extension" => $request->input("extension"),
 				"file_size" => $request->input("filename"),

@@ -153,10 +153,25 @@ class AuthController extends \App\Http\Controllers\Controller
 
 	public function login_api(Request $request)
 	{
+		$isEmail =
+			filter_var($request->input("username"), FILTER_VALIDATE_EMAIL) !==
+			false;
+
+		// Prepare credentials based on the input type
+		$credentials = $isEmail
+			? [
+				"email" => $request->input("username"),
+				"password" => $request->input("password"),
+			]
+			: [
+				"username" => $request->input("username"),
+				"password" => $request->input("password"),
+			];
+
 		$username = $request->input("username");
 		$password = $request->input("password");
 
-		if (Auth::attempt(["email" => $username, "password" => $password])) {
+		if (Auth::attempt($credentials)) {
 			$user = Auth::user();
 			$token = $user->createToken("authToken");
 			return response()->json(["id" => $token->plainTextToken], 200);
