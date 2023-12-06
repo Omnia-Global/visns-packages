@@ -448,6 +448,51 @@ class DynamicController extends \App\Http\Controllers\Controller
 		);
 	}
 
+	public function updateGallery(Request $request, $id)
+	{
+		$error = "";
+
+		// Find the resource
+		$resource = $this->model::findOrFail($id);
+
+		$validated = $request->validate([
+			"key" => ["required"],
+			"uuid" => ["required"],
+			"extension" => ["required"],
+			"filename" => ["required"],
+			"fileable_field" => ["required"],
+			"fileable_type" => ["required"],
+		]);
+
+		if ($request->filled("key")) {
+			$path =
+				$request->input("uuid") . "." . $request->input("extension");
+
+			Storage::copy(
+				$request->input("key"),
+				str_replace("tmp/", "", $request->input("key")) .
+					"." .
+					$request->input("extension")
+			);
+
+			$nextOrder = File::where("fileable_id", $project->id)
+				->where("fileable_field", $request->input("fileable_field"))
+				->where("fileable_type", $request->input("fileable_type"))
+				->max("sort_order");
+
+			$file = new File([
+				"fileable_field" => $request->input("fileable_field"),
+				"file_path" => $path,
+				"file_name" => $request->input("filename"),
+				"file_extension" => $request->input("extension"),
+				"file_size" => $request->input("filename"),
+				"sort_order" => $nextOrder + 1,
+			]);
+
+			$project->{$request->input("fileable_field")}()->save($file);
+		}
+	}
+
 	public function destroy($id)
 	{
 		$item = $this->model::findOrFail($id);
