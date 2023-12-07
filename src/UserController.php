@@ -44,6 +44,10 @@ class UserController extends \App\Http\Controllers\Controller
 	{
 		$user = Auth::user();
 
-		return response()->json($user->load("roles.permissions"));
+		if (method_exists(User::class, "loadableRelations")) {
+			$user->load(User::class->loadableRelations());
+		}
+
+		return response()->json($user);
 	}
 }
