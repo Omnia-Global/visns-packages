@@ -67,16 +67,6 @@ class FileController extends \App\Http\Controllers\Controller
         return $types[strtolower($extension)] ?? $types["default"];
     }
 
-    // Function to convert folder name from plural to singular and capitalize the first letter
-    private function singularizeAndCapitalize($folder)
-    {
-        // Convert folder name from plural to singular using Doctrine Inflector
-        $folder = Inflector::singularize($folder);
-
-        // Capitalize the first letter
-        return ucfirst($folder);
-    }
-
     public function download($id, $folder)
     {
         $file = $this->getFile($id, $folder);
@@ -93,7 +83,8 @@ class FileController extends \App\Http\Controllers\Controller
     protected function getFile($id, $folder)
     {
         // Prepare possible folder names
-        $singularFolder = Inflector::singularize($folder);
+        $inflector = new Inflector();
+        $singularFolder = $inflector->singularize($folder);
         $capitalizedSingular = ucfirst($singularFolder);
         $capitalizedPlural = ucfirst($folder);
         $folderOptions = [
