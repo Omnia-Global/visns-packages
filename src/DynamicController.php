@@ -275,6 +275,8 @@ class DynamicController extends \App\Http\Controllers\Controller
         // Create a new resource
         $resource = $this->model::create($allData);
 
+        $belongsToManyRelations = [];
+
         // Update any many to many relationships
         foreach ($this->model->loadableRelations() as $relation) {
             $belongsToManyRelations[] = $relation;
@@ -382,6 +384,8 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         // Update the resource
         $resource->update($allData);
+
+        $belongsToManyRelations = [];
 
         // Update any many to many relationships
         foreach ($this->model->loadableRelations() as $relation) {
