@@ -96,7 +96,7 @@ class FileController extends \App\Http\Controllers\Controller
 
     protected function getFile($id, $folder)
     {
-        if ($folder == "") {
+        if ($folder == "null") {
             return File::find($id);
         } else {
             $type = "App\\Models\\" . $this->singularizeAndCapitalize($folder);
@@ -120,30 +120,34 @@ class FileController extends \App\Http\Controllers\Controller
     {
         $folderArray = [];
 
-        if (Str::plural($folder)) {
-            $folderArray[] = strtolower($folder);
-            $folderArray[] = ucfirst(strtolower($folder));
-            $folderArray[] = strtolower(Str::singular($folder));
-            $folderArray[] = ucfirst(strtolower(Str::singular($folder)));
+        if ($folder == "null") {
+            $f = str_replace("App\\Models\\", "", $file->fileable_type);
         } else {
-            $folderArray[] = strtolower($folder);
-            $folderArray[] = ucfirst(strtolower($folder));
-            $folderArray[] = strtolower(Str::plural($folder));
-            $folderArray[] = ucfirst(strtolower(Str::plural($folder)));
+            $f = $folder;
         }
 
-        foreach ($folderArray as $folder) {
-            if (strpos($file->file_path, $folder . "/") === false) {
+        if (Str::plural($f)) {
+            $folderArray[] = strtolower($f);
+            $folderArray[] = ucfirst(strtolower($f));
+            $folderArray[] = strtolower(Str::singular($f));
+            $folderArray[] = ucfirst(strtolower(Str::singular($f)));
+        } else {
+            $folderArray[] = strtolower($f);
+            $folderArray[] = ucfirst(strtolower($f));
+            $folderArray[] = strtolower(Str::plural($f));
+            $folderArray[] = ucfirst(strtolower(Str::plural($f)));
+        }
+
+        foreach ($folderArray as $item) {
+            if (strpos($file->file_path, $item . "/") === false) {
                 if (
-                    Storage::disk("s3")->exists(
-                        $folder . "/" . $file->file_path
-                    )
+                    Storage::disk("s3")->exists($item . "/" . $file->file_path)
                 ) {
-                    return $folder . "/" . $file->file_path;
+                    return $item . "/" . $file->file_path;
                 }
             } else {
                 if (Storage::disk("s3")->exists($file->file_path)) {
-                    return $folder . "/" . $file->file_path;
+                    return $item . "/" . $file->file_path;
                 }
             }
         }
