@@ -67,6 +67,20 @@ class FileController extends \App\Http\Controllers\Controller
         return $types[strtolower($extension)] ?? $types["default"];
     }
 
+    // Function to convert folder name from plural to singular and capitalize the first letter
+    private function singularizeAndCapitalize($folder)
+    {
+        if (Str::plural($folder)) {
+            // Convert folder name from plural to singular using Doctrine Inflector
+            $folder = Str::singular($folder);
+
+            // Capitalize the first letter
+            return ucfirst($folder);
+        } else {
+            return ucfirst($folder);
+        }
+    }
+
     public function download($id, $folder)
     {
         $file = $this->getFile($id, $folder);
@@ -82,47 +96,15 @@ class FileController extends \App\Http\Controllers\Controller
 
     protected function getFile($id, $folder)
     {
-        // Prepare possible folder names
-        $singularFolder = Str::singular($folder);
-        $capitalizedSingular = ucfirst($singularFolder);
-        $capitalizedPlural = ucfirst($folder);
-        $folderOptions = [
-            $singularFolder,
-            $capitalizedSingular,
-            $folder,
-            $capitalizedPlural,
-        ];
+        if ($folder == "") {
+            return File::find($id);
+        } else {
+            $type = "App\\Models\\" . $this->singularizeAndCapitalize($folder);
 
-        foreach ($folderOptions as $folderName) {
-            $type = "App\\Models\\" . $folderName;
-            $file = File::where("fileable_id", $id)
+            return File::where("fileable_id", $id)
                 ->where("fileable_type", $type)
-                ->first();
-
-            if ($file) {
-                return $file;
-            }
+                ->firstOrFail();
         }
-
-        throw new \Exception("File not found");
-    }
-
-    protected function determineFilePath($file, $folder)
-    {
-        $folderOptions = [
-            Inflector::singularize($folder),
-            ucfirst(Inflector::singularize($folder)),
-            $folder,
-            ucfirst($folder),
-        ];
-
-        foreach ($folderOptions as $folderName) {
-            if (strpos($file->file_path, $folderName . "/") !== false) {
-                return $file->file_path;
-            }
-        }
-
-        return $folder . "/" . $file->file_path; // Default path if none matched
     }
 
     protected function formatFileName($file)
@@ -132,6 +114,39 @@ class FileController extends \App\Http\Controllers\Controller
             $filename .= "." . $file->file_extension;
         }
         return str_replace(",", "", $filename);
+    }
+
+    protected function determineFilePath($file, $folder)
+    {
+        $folderArray = [];
+
+        if (Str::plural($folder)) {
+            $folderArray[] = strtolower($folder);
+            $folderArray[] = ucfirst(strtolower($folder));
+            $folderArray[] = strtolower(Str::singular($folder));
+            $folderArray[] = ucfirst(strtolower(Str::singular($folder)));
+        } else {
+            $folderArray[] = strtolower($folder);
+            $folderArray[] = ucfirst(strtolower($folder));
+            $folderArray[] = strtolower(Str::plural($folder));
+            $folderArray[] = ucfirst(strtolower(Str::plural($folder)));
+        }
+
+        foreach ($folderArray as $folder) {
+            if (strpos($file->file_path, $folder . "/") === false) {
+                if (
+                    Storage::disk("s3")->exists(
+                        $folder . "/" . $file->file_path
+                    )
+                ) {
+                    return $folder . "/" . $file->file_path;
+                }
+            } else {
+                if (Storage::disk("s3")->exists($file->file_path)) {
+                    return $folder . "/" . $file->file_path;
+                }
+            }
+        }
     }
 
     protected function downloadFromS3($filepath, $filename)
