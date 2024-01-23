@@ -18,7 +18,6 @@
 	"prefer-stable": true,
 	"require": {
 		"php": "^8.0",
-		"laravel/framework": "^10.0",
-		"doctrine/inflector": "^2.0"
+		"laravel/framework": "^10.0"
 	}
 }

@@ -6,7 +6,7 @@ use App\Models\File;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Storage;
-use Doctrine\Common\Inflector\Inflector;
+use Illuminate\Support\Str;
 
 class FileController extends \App\Http\Controllers\Controller
 {
@@ -83,8 +83,7 @@ class FileController extends \App\Http\Controllers\Controller
     protected function getFile($id, $folder)
     {
         // Prepare possible folder names
-        $inflector = new Inflector();
-        $singularFolder = $inflector->singularize($folder);
+        $singularFolder = Str::singular($folder);
         $capitalizedSingular = ucfirst($singularFolder);
         $capitalizedPlural = ucfirst($folder);
         $folderOptions = [
