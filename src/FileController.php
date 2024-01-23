@@ -87,11 +87,15 @@ class FileController extends \App\Http\Controllers\Controller
         $filename = $this->formatFileName($file);
         $filepath = $this->determineFilePath($file, $folder);
 
-        if (config("filesystems.default") == "s3") {
-            return $this->downloadFromS3($filepath, $filename);
-        }
+        if (!is_null($filepath)) {
+            if (config("filesystems.default") == "s3") {
+                return $this->downloadFromS3($filepath, $filename);
+            }
 
-        return $this->downloadFromFilesystem($filepath, $filename);
+            return $this->downloadFromFilesystem($filepath, $filename);
+        } else {
+            return response()->json(["error" => "File not found."], 404);
+        }
     }
 
     protected function getFile($id, $folder)
@@ -116,6 +120,15 @@ class FileController extends \App\Http\Controllers\Controller
         return str_replace(",", "", $filename);
     }
 
+    protected function isPlural($word)
+    {
+        // Pluralize the word
+        $plural = Str::plural($word);
+
+        // Compare the pluralized word with the original word
+        return $word === $plural;
+    }
+
     protected function determineFilePath($file, $folder)
     {
         $folderArray = [];
@@ -126,7 +139,7 @@ class FileController extends \App\Http\Controllers\Controller
             $f = $folder;
         }
 
-        if (Str::plural($f)) {
+        if ($this->isPlural($f)) {
             $folderArray[] = strtolower($f);
             $folderArray[] = ucfirst(strtolower($f));
             $folderArray[] = strtolower(Str::singular($f));
@@ -151,6 +164,8 @@ class FileController extends \App\Http\Controllers\Controller
                 }
             }
         }
+
+        return null;
     }
 
     protected function downloadFromS3($filepath, $filename)
