@@ -118,79 +118,6 @@ class DynamicController extends \App\Http\Controllers\Controller
         return response()->json($resource);
     }
 
-    /**
-     * Handle casting for date and datetime types.
-     */
-    private function handleCasts($id, $value, $casts)
-    {
-        if (in_array($casts[$id], ["date", "datetime"])) {
-            return $this->parseDateValue($value);
-        }
-        return $value;
-    }
-
-    /**
-     * Parse date value(s) from the given input.
-     */
-    private function parseDateValue($value)
-    {
-        if (is_array($value)) {
-            return array_map(function ($v) {
-                return Carbon::createFromTimestamp(strtotime($v));
-            }, $value);
-        }
-
-        return $value === "now"
-            ? Carbon::now()
-            : Carbon::createFromTimestamp(strtotime($value));
-    }
-
-    /**
-     * Apply a given condition to the query.
-     */
-    private function applyConditionToQuery($query, $condition, $value)
-    {
-        if (isset($condition["operator"])) {
-            // Handle different operators
-            switch ($condition["operator"]) {
-                case "contains":
-                    $query->where($condition["id"], "like", "%$value%");
-                    break;
-                case "gt":
-                    $query->where($condition["id"], ">", $value);
-                    break;
-                // Add other operators here...
-                default:
-                    $query->where($condition["id"], $value);
-            }
-        } elseif (
-            isset($condition["whereHas"]) &&
-            $condition["whereHas"] !== ""
-        ) {
-            // Handle 'whereHas' condition
-            $this->applyWhereHasCondition($query, $condition, $value);
-        } else {
-            $query->where($condition["id"], $value);
-        }
-    }
-
-    /**
-     * Apply 'whereHas' condition to the query.
-     */
-    private function applyWhereHasCondition($query, $condition, $value)
-    {
-        if (!isset($condition["id"])) {
-            $query->whereHas($condition["whereHas"]);
-        } else {
-            $query->whereHas($condition["whereHas"], function ($q) use (
-                $condition,
-                $value
-            ) {
-                $q->where($condition["id"], $value);
-            });
-        }
-    }
-
     public function table(Request $request)
     {
         // Get array of casts on the model
@@ -217,27 +144,120 @@ class DynamicController extends \App\Http\Controllers\Controller
         // Filtering
         if ($request->has("where") && $request->filled("where")) {
             foreach ($request->input("where") as $condition) {
-                $value = $condition["value"] ?? "";
+                $value = isset($condition["value"]) ? $condition["value"] : "";
 
-                if (
-                    isset($condition["id"]) &&
-                    isset($casts[$condition["id"]])
-                ) {
-                    $value = $this->handleCasts(
-                        $condition["id"],
-                        $value,
-                        $casts
-                    );
+                if (isset($condition["id"])) {
+                    if (isset($casts[$condition["id"]])) {
+                        switch ($casts[$condition["id"]]) {
+                            case "datetime":
+                                if (is_array($value)) {
+                                    $value = [
+                                        Carbon::createFromTimestamp(
+                                            strtotime($value[0])
+                                        ),
+                                        Carbon::createFromTimestamp(
+                                            strtotime($value[1])
+                                        ),
+                                    ];
+                                } else {
+                                    $value = Carbon::createFromTimestamp(
+                                        strtotime($value)
+                                    );
+                                }
+                                break;
+                            case "date":
+                                if (is_array($value)) {
+                                    $value = [
+                                        Carbon::createFromTimestamp(
+                                            strtotime($value[0])
+                                        ),
+                                        Carbon::createFromTimestamp(
+                                            strtotime($value[1])
+                                        ),
+                                    ];
+                                } else {
+                                    $value = Carbon::createFromTimestamp(
+                                        strtotime($value)
+                                    );
+                                }
+                                break;
+                        }
+                    }
                 }
 
-                if (
-                    isset($condition["type"]) &&
-                    $condition["type"] === "date"
-                ) {
-                    $value = $this->parseDateValue($value);
+                if (isset($condition["type"])) {
+                    switch ($condition["type"]) {
+                        case "date":
+                            if (is_array($value)) {
+                                $value = [
+                                    Carbon::createFromTimestamp(
+                                        strtotime($value[0])
+                                    ),
+                                    Carbon::createFromTimestamp(
+                                        strtotime($value[1])
+                                    ),
+                                ];
+                            } else {
+                                $value =
+                                    $value == "now"
+                                        ? Carbon::now()
+                                        : Carbon::createFromTimestamp(
+                                            strtotime($value)
+                                        );
+                            }
+                            break;
+                    }
                 }
 
-                $this->applyConditionToQuery($query, $condition, $value);
+                if (isset($condition["operator"])) {
+                    switch ($condition["operator"]) {
+                        case "contains":
+                            $query->where(
+                                $condition["id"],
+                                "like",
+                                "%" . $value . "%"
+                            );
+                            break;
+                        case "gt":
+                            $query->where($condition["id"], ">", $value);
+                            break;
+                        case "gte":
+                            $query->where($condition["id"], ">=", $value);
+                            break;
+                        case "inlist":
+                            $query->whereIn($condition["id"], $value);
+                            break;
+                        case "inrange":
+                            $query->whereBetween($condition["id"], $value);
+                            break;
+                        case "lt":
+                            $query->where($condition["id"], "<", $value);
+                            break;
+                        case "lte":
+                            $query->where($condition["id"], "<=", $value);
+                            break;
+                        default:
+                            $query->where($condition["id"], $value);
+                            break;
+                    }
+                } else {
+                    if (
+                        isset($condition["whereHas"]) &&
+                        $condition["whereHas"] != ""
+                    ) {
+                        if (!isset($condition["id"])) {
+                            $query->whereHas($condition["whereHas"]);
+                        } else {
+                            $query->whereHas($condition["whereHas"], function (
+                                $q
+                            ) use ($condition, $value) {
+                                $q->where($condition["id"], $value);
+                            });
+                        }
+                    } else {
+                        $query->where($condition["id"], $value);
+                    }
+                }
             }
         }
 
