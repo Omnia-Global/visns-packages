@@ -6,221 +6,247 @@ use App\Models\File;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Storage;
+use Doctrine\Common\Inflector\Inflector;
 
 class FileController extends \App\Http\Controllers\Controller
 {
-	public function downloadContent($id)
-	{
-		$file = File::find($id);
+    public function downloadContent($id)
+    {
+        $file = File::find($id);
 
-		if (!$file) {
-			return response()->json(["error" => "File not found."], 404);
-		}
+        if (!$file) {
+            return response()->json(["error" => "File not found."], 404);
+        }
 
-		$content = Storage::get($file->file_path);
-		$contentType = $this->getContentType($file->file_extension);
+        $content = Storage::get($file->file_path);
+        $contentType = $this->getContentType($file->file_extension);
 
-		return Response::make($content, 200, [
-			"Content-Type" => $contentType,
-			"Content-Disposition" =>
-				'inline; filename="' . $file->file_name . '"',
-		]);
-	}
+        return Response::make($content, 200, [
+            "Content-Type" => $contentType,
+            "Content-Disposition" =>
+                'inline; filename="' . $file->file_name . '"',
+        ]);
+    }
 
-	private function getContentType($extension)
-	{
-		$types = [
-			"css" => "text/css",
-			"csv" => "text/csv",
-			"doc" => "application/msword",
-			"docx" =>
-				"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-			"flac" => "audio/flac",
-			"gif" => "image/gif",
-			"html" => "text/html",
-			"jpeg" => "image/jpeg",
-			"jpg" => "image/jpeg",
-			"js" => "application/javascript",
-			"json" => "application/json",
-			"mp3" => "audio/mpeg",
-			"mp4" => "video/mp4",
-			"ogg" => "audio/ogg",
-			"pdf" => "application/pdf",
-			"png" => "image/png",
-			"ppt" => "application/vnd.ms-powerpoint",
-			"pptx" =>
-				"application/vnd.openxmlformats-officedocument.presentationml.presentation",
-			"rar" => "application/x-rar-compressed",
-			"svg" => "image/svg+xml",
-			"txt" => "text/plain",
-			"wav" => "audio/wav",
-			"xls" => "application/vnd.ms-excel",
-			"xlsx" =>
-				"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-			"xml" => "application/xml",
-			"zip" => "application/zip",
-			// ... add more types as needed ...
-			"default" => "application/octet-stream",
-		];
+    private function getContentType($extension)
+    {
+        $types = [
+            "css" => "text/css",
+            "csv" => "text/csv",
+            "doc" => "application/msword",
+            "docx" =>
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "flac" => "audio/flac",
+            "gif" => "image/gif",
+            "html" => "text/html",
+            "jpeg" => "image/jpeg",
+            "jpg" => "image/jpeg",
+            "js" => "application/javascript",
+            "json" => "application/json",
+            "mp3" => "audio/mpeg",
+            "mp4" => "video/mp4",
+            "ogg" => "audio/ogg",
+            "pdf" => "application/pdf",
+            "png" => "image/png",
+            "ppt" => "application/vnd.ms-powerpoint",
+            "pptx" =>
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "rar" => "application/x-rar-compressed",
+            "svg" => "image/svg+xml",
+            "txt" => "text/plain",
+            "wav" => "audio/wav",
+            "xls" => "application/vnd.ms-excel",
+            "xlsx" =>
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "xml" => "application/xml",
+            "zip" => "application/zip",
+            // ... add more types as needed ...
+            "default" => "application/octet-stream",
+        ];
 
-		return $types[strtolower($extension)] ?? $types["default"];
-	}
+        return $types[strtolower($extension)] ?? $types["default"];
+    }
 
-	public function sort_update(Request $request)
-	{
-		$request->validate(["list" => "required"]);
+    // Function to convert folder name from plural to singular and capitalize the first letter
+    private function singularizeAndCapitalize($folder)
+    {
+        // Convert folder name from plural to singular using Doctrine Inflector
+        $folder = Inflector::singularize($folder);
 
-		foreach ($request->input("list") as $index => $item) {
-			File::where("id", $item["id"])->update(["sort_order" => $index]);
-		}
+        // Capitalize the first letter
+        return ucfirst($folder);
+    }
 
-		return response()->json(["error" => ""]);
-	}
+    public function download($id, $folder)
+    {
+        $file = $this->getFile($id, $folder);
+        $filename = $this->formatFileName($file);
+        $filepath = $this->determineFilePath($file, $folder);
 
-	// Function to convert folder name from plural to singular and capitalize the first letter
-	private function singularizeAndCapitalize($folder)
-	{
-		// Convert folder name from plural to singular
-		// This is a basic implementation and might need to be expanded based on specific naming conventions
-		if (substr($folder, -1) == "s") {
-			$folder = substr($folder, 0, -1);
-		}
+        if (config("filesystems.default") == "s3") {
+            return $this->downloadFromS3($filepath, $filename);
+        }
 
-		// Capitalize the first letter
-		return ucfirst($folder);
-	}
+        return $this->downloadFromFilesystem($filepath, $filename);
+    }
 
-	public function download($id, $folder)
-	{
-		$file = $this->getFile($id, $folder);
-		$filename = $this->formatFileName($file);
-		$filepath = $this->determineFilePath($file, $folder);
+    protected function getFile($id, $folder)
+    {
+        // Prepare possible folder names
+        $singularFolder = Inflector::singularize($folder);
+        $capitalizedSingular = ucfirst($singularFolder);
+        $capitalizedPlural = ucfirst($folder);
+        $folderOptions = [
+            $singularFolder,
+            $capitalizedSingular,
+            $folder,
+            $capitalizedPlural,
+        ];
 
-		if (config("filesystems.default") == "s3") {
-			return $this->downloadFromS3($filepath, $filename);
-		}
+        foreach ($folderOptions as $folderName) {
+            $type = "App\\Models\\" . $folderName;
+            $file = File::where("fileable_id", $id)
+                ->where("fileable_type", $type)
+                ->first();
 
-		return $this->downloadFromFilesystem($filepath, $filename);
-	}
+            if ($file) {
+                return $file;
+            }
+        }
 
-	protected function getFile($id, $folder)
-	{
-		$type = "App\\Models\\" . $this->singularizeAndCapitalize($folder);
+        throw new \Exception("File not found");
+    }
 
-		return File::where("fileable_id", $id)
-			->where("fileable_type", $type)
-			->firstOrFail();
-	}
+    protected function determineFilePath($file, $folder)
+    {
+        $folderOptions = [
+            Inflector::singularize($folder),
+            ucfirst(Inflector::singularize($folder)),
+            $folder,
+            ucfirst($folder),
+        ];
 
-	protected function formatFileName($file)
-	{
-		$filename = str_replace([" ", "-"], "_", $file->file_name);
-		if (strpos($file->file_name, "." . $file->file_extension) === false) {
-			$filename .= "." . $file->file_extension;
-		}
-		return str_replace(",", "", $filename);
-	}
+        foreach ($folderOptions as $folderName) {
+            if (strpos($file->file_path, $folderName . "/") !== false) {
+                return $file->file_path;
+            }
+        }
 
-	protected function determineFilePath($file, $folder)
-	{
-		if (strpos($file->file_path, $folder . "/") === false) {
-			return $folder . "/" . $file->file_path;
-		}
-		return $file->file_path;
-	}
+        return $folder . "/" . $file->file_path; // Default path if none matched
+    }
 
-	protected function downloadFromS3($filepath, $filename)
-	{
-		$url = Storage::temporaryUrl($filepath, now()->addMinutes(5), [
-			"ResponseContentDisposition" => "attachment; filename=" . $filename,
-		]);
+    protected function formatFileName($file)
+    {
+        $filename = str_replace([" ", "-"], "_", $file->file_name);
+        if (strpos($file->file_name, "." . $file->file_extension) === false) {
+            $filename .= "." . $file->file_extension;
+        }
+        return str_replace(",", "", $filename);
+    }
 
-		return redirect()->away($url);
-	}
+    protected function downloadFromS3($filepath, $filename)
+    {
+        $url = Storage::temporaryUrl($filepath, now()->addMinutes(5), [
+            "ResponseContentDisposition" => "attachment; filename=" . $filename,
+        ]);
 
-	protected function downloadFromFilesystem($filepath, $filename)
-	{
-		return Storage::download(
-			storage_path() . "/app/" . $filepath,
-			$filename
-		);
-	}
+        return redirect()->away($url);
+    }
 
-	public function show($id)
-	{
-		$file = File::find($id);
+    protected function downloadFromFilesystem($filepath, $filename)
+    {
+        return Storage::download(
+            storage_path() . "/app/" . $filepath,
+            $filename
+        );
+    }
 
-		return response()->json($file);
-	}
+    public function sort_update(Request $request)
+    {
+        $request->validate(["list" => "required"]);
 
-	public function update(Request $request, $id)
-	{
-		// Validate the request
-		$request->validate([
-			"file_name" => "required|string|max:255", // Add validation rules as needed
-		]);
+        foreach ($request->input("list") as $index => $item) {
+            File::where("id", $item["id"])->update(["sort_order" => $index]);
+        }
 
-		try {
-			// Retrieve the file and check if it exists
-			$file = File::findOrFail($id);
-			$file->file_name = $request->input("file_name");
-			$file->file_title = $request->input("file_title");
-			$file->file_description = $request->input("file_description");
-			$file->save();
+        return response()->json(["error" => ""]);
+    }
 
-			return response()->json([
-				"error" => "",
-			]);
-		} catch (\Exception $e) {
-			return response()->json(
-				[
-					"error" => $e->getMessage(),
-				],
-				500
-			);
-		}
-	}
+    public function show($id)
+    {
+        $file = File::find($id);
 
-	public function delete(Request $request)
-	{
-		// Validate the request
-		$validated = $request->validate([
-			"file_id" => "required|exists:files,id",
-		]);
+        return response()->json($file);
+    }
 
-		try {
-			// Retrieve the file from the database
-			$file = File::find($validated["file_id"]);
+    public function update(Request $request, $id)
+    {
+        // Validate the request
+        $request->validate([
+            "file_name" => "required|string|max:255", // Add validation rules as needed
+        ]);
 
-			if (!$file) {
-				return response()->json(
-					[
-						"error" => "File not found.",
-					],
-					404
-				);
-			}
+        try {
+            // Retrieve the file and check if it exists
+            $file = File::findOrFail($id);
+            $file->file_name = $request->input("file_name");
+            $file->file_title = $request->input("file_title");
+            $file->file_description = $request->input("file_description");
+            $file->save();
 
-			// Check if file exists in storage (S3 or local)
-			if (Storage::disk("s3")->exists($file->file_path)) {
-				// Delete file from storage
-				Storage::disk("s3")->delete($file->file_path);
-			}
+            return response()->json([
+                "error" => "",
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(
+                [
+                    "error" => $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
 
-			// Delete the file record from the database
-			$file->delete();
+    public function delete(Request $request)
+    {
+        // Validate the request
+        $validated = $request->validate([
+            "file_id" => "required|exists:files,id",
+        ]);
 
-			return response()->json([
-				"error" => "",
-			]);
-		} catch (\Exception $e) {
-			return response()->json(
-				[
-					"success" => false,
-					"error" => $e->getMessage(),
-				],
-				500
-			);
-		}
-	}
+        try {
+            // Retrieve the file from the database
+            $file = File::find($validated["file_id"]);
+
+            if (!$file) {
+                return response()->json(
+                    [
+                        "error" => "File not found.",
+                    ],
+                    404
+                );
+            }
+
+            // Check if file exists in storage (S3 or local)
+            if (Storage::disk("s3")->exists($file->file_path)) {
+                // Delete file from storage
+                Storage::disk("s3")->delete($file->file_path);
+            }
+
+            // Delete the file record from the database
+            $file->delete();
+
+            return response()->json([
+                "error" => "",
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(
+                [
+                    "success" => false,
+                    "error" => $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
 }
