@@ -155,14 +155,19 @@ class DynamicController extends \App\Http\Controllers\Controller
                                     (isset($value["end"]) ||
                                         isset($value["start"]))
                                 ) {
-                                    $value = [
-                                        Carbon::createFromTimestamp(
-                                            strtotime($value["end"])
-                                        ),
-                                        Carbon::createFromTimestamp(
-                                            strtotime($value["start"])
-                                        ),
-                                    ];
+                                    if (
+                                        isset($value["end"]) &&
+                                        isset($value["start"])
+                                    ) {
+                                        $value = [
+                                            Carbon::createFromTimestamp(
+                                                strtotime($value["end"])
+                                            ),
+                                            Carbon::createFromTimestamp(
+                                                strtotime($value["start"])
+                                            ),
+                                        ];
+                                    }
                                 } else {
                                     $value = Carbon::createFromTimestamp(
                                         strtotime($value)
@@ -175,14 +180,19 @@ class DynamicController extends \App\Http\Controllers\Controller
                                     (isset($value["end"]) ||
                                         isset($value["start"]))
                                 ) {
-                                    $value = [
-                                        Carbon::createFromTimestamp(
-                                            strtotime($value["end"])
-                                        ),
-                                        Carbon::createFromTimestamp(
-                                            strtotime($value["start"])
-                                        ),
-                                    ];
+                                    if (
+                                        isset($value["end"]) &&
+                                        isset($value["start"])
+                                    ) {
+                                        $value = [
+                                            Carbon::createFromTimestamp(
+                                                strtotime($value["end"])
+                                            ),
+                                            Carbon::createFromTimestamp(
+                                                strtotime($value["start"])
+                                            ),
+                                        ];
+                                    }
                                 } else {
                                     $value = Carbon::createFromTimestamp(
                                         strtotime($value)
@@ -200,14 +210,19 @@ class DynamicController extends \App\Http\Controllers\Controller
                                 is_array($value) &&
                                 (isset($value["end"]) || isset($value["start"]))
                             ) {
-                                $value = [
-                                    Carbon::createFromTimestamp(
-                                        strtotime($value["end"])
-                                    ),
-                                    Carbon::createFromTimestamp(
-                                        strtotime($value["start"])
-                                    ),
-                                ];
+                                if (
+                                    isset($value["end"]) &&
+                                    isset($value["start"])
+                                ) {
+                                    $value = [
+                                        Carbon::createFromTimestamp(
+                                            strtotime($value["end"])
+                                        ),
+                                        Carbon::createFromTimestamp(
+                                            strtotime($value["start"])
+                                        ),
+                                    ];
+                                }
                             } else {
                                 $value =
                                     $value == "now"
