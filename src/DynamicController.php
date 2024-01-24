@@ -150,13 +150,17 @@ class DynamicController extends \App\Http\Controllers\Controller
                     if (isset($casts[$condition["id"]])) {
                         switch ($casts[$condition["id"]]) {
                             case "datetime":
-                                if (is_array($value)) {
+                                if (
+                                    is_array($value) &&
+                                    isset($value["end"]) &&
+                                    isset($value["start"])
+                                ) {
                                     $value = [
                                         Carbon::createFromTimestamp(
-                                            strtotime($value[0])
+                                            strtotime($value['end'])
                                         ),
                                         Carbon::createFromTimestamp(
-                                            strtotime($value[1])
+                                            strtotime($value['start']])
                                         ),
                                     ];
                                 } else {
@@ -166,13 +170,17 @@ class DynamicController extends \App\Http\Controllers\Controller
                                 }
                                 break;
                             case "date":
-                                if (is_array($value)) {
+                                if (
+                                    is_array($value) &&
+                                    isset($value["end"]) &&
+                                    isset($value["start"])
+                                ) {
                                     $value = [
                                         Carbon::createFromTimestamp(
-                                            strtotime($value[0])
+                                            strtotime($value['end'])
                                         ),
                                         Carbon::createFromTimestamp(
-                                            strtotime($value[1])
+                                            strtotime($value['start']])
                                         ),
                                     ];
                                 } else {
@@ -188,13 +196,17 @@ class DynamicController extends \App\Http\Controllers\Controller
                 if (isset($condition["type"])) {
                     switch ($condition["type"]) {
                         case "date":
-                            if (is_array($value)) {
+                            if (
+                                is_array($value) &&
+                                isset($value["end"]) &&
+                                isset($value["start"])
+                            ) {
                                 $value = [
                                     Carbon::createFromTimestamp(
-                                        strtotime($value[0])
+                                        strtotime($value['end'])
                                     ),
                                     Carbon::createFromTimestamp(
-                                        strtotime($value[1])
+                                        strtotime($value['start']])
                                     ),
                                 ];
                             } else {
@@ -228,7 +240,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                             $query->whereIn($condition["id"], $value);
                             break;
                         case "inrange":
-                            $query->whereBetween($condition["id"], $value);
+                            $query->whereBetween($condition["id"], [$value['start'], $value['end']]);
                             break;
                         case "lt":
                             $query->where($condition["id"], "<", $value);
