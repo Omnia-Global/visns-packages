@@ -151,9 +151,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                         switch ($casts[$condition["id"]]) {
                             case "datetime":
                                 if (
-                                    is_array($value) &&
-                                    (isset($value["end"]) ||
-                                        isset($value["start"]))
+                                    isset($value["end"]) ||
+                                    isset($value["start"])
                                 ) {
                                     if (
                                         isset($value["end"]) &&
@@ -176,9 +175,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                                 break;
                             case "date":
                                 if (
-                                    is_array($value) &&
-                                    (isset($value["end"]) ||
-                                        isset($value["start"]))
+                                    isset($value["end"]) ||
+                                    isset($value["start"])
                                 ) {
                                     if (
                                         isset($value["end"]) &&
@@ -207,8 +205,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                     switch ($condition["type"]) {
                         case "date":
                             if (
-                                is_array($value) &&
-                                (isset($value["end"]) || isset($value["start"]))
+                                isset($value["end"]) ||
+                                isset($value["start"])
                             ) {
                                 if (
                                     isset($value["end"]) &&
