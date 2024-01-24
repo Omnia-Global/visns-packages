@@ -152,8 +152,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                             case "datetime":
                                 if (
                                     is_array($value) &&
-                                    isset($value["end"]) &&
-                                    isset($value["start"])
+                                    (isset($value["end"]) ||
+                                        isset($value["start"]))
                                 ) {
                                     $value = [
                                         Carbon::createFromTimestamp(
@@ -172,8 +172,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                             case "date":
                                 if (
                                     is_array($value) &&
-                                    isset($value["end"]) &&
-                                    isset($value["start"])
+                                    (isset($value["end"]) ||
+                                        isset($value["start"]))
                                 ) {
                                     $value = [
                                         Carbon::createFromTimestamp(
@@ -198,8 +198,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                         case "date":
                             if (
                                 is_array($value) &&
-                                isset($value["end"]) &&
-                                isset($value["start"])
+                                (isset($value["end"]) || isset($value["start"]))
                             ) {
                                 $value = [
                                     Carbon::createFromTimestamp(
@@ -240,10 +239,15 @@ class DynamicController extends \App\Http\Controllers\Controller
                             $query->whereIn($condition["id"], $value);
                             break;
                         case "inrange":
-                            $query->whereBetween($condition["id"], [
-                                $value["start"],
-                                $value["end"],
-                            ]);
+                            if (
+                                isset($value["start"]) &&
+                                isset($value["end"])
+                            ) {
+                                $query->whereBetween($condition["id"], [
+                                    $value["start"],
+                                    $value["end"],
+                                ]);
+                            }
                             break;
                         case "lt":
                             $query->where($condition["id"], "<", $value);
