@@ -157,10 +157,10 @@ class DynamicController extends \App\Http\Controllers\Controller
                                 ) {
                                     $value = [
                                         Carbon::createFromTimestamp(
-                                            strtotime($value['end'])
+                                            strtotime($value["end"])
                                         ),
                                         Carbon::createFromTimestamp(
-                                            strtotime($value['start']])
+                                            strtotime($value["start"])
                                         ),
                                     ];
                                 } else {
@@ -177,10 +177,10 @@ class DynamicController extends \App\Http\Controllers\Controller
                                 ) {
                                     $value = [
                                         Carbon::createFromTimestamp(
-                                            strtotime($value['end'])
+                                            strtotime($value["end"])
                                         ),
                                         Carbon::createFromTimestamp(
-                                            strtotime($value['start']])
+                                            strtotime($value["start"])
                                         ),
                                     ];
                                 } else {
@@ -203,10 +203,10 @@ class DynamicController extends \App\Http\Controllers\Controller
                             ) {
                                 $value = [
                                     Carbon::createFromTimestamp(
-                                        strtotime($value['end'])
+                                        strtotime($value["end"])
                                     ),
                                     Carbon::createFromTimestamp(
-                                        strtotime($value['start']])
+                                        strtotime($value["start"])
                                     ),
                                 ];
                             } else {
@@ -240,7 +240,10 @@ class DynamicController extends \App\Http\Controllers\Controller
                             $query->whereIn($condition["id"], $value);
                             break;
                         case "inrange":
-                            $query->whereBetween($condition["id"], [$value['start'], $value['end']]);
+                            $query->whereBetween($condition["id"], [
+                                $value["start"],
+                                $value["end"],
+                            ]);
                             break;
                         case "lt":
                             $query->where($condition["id"], "<", $value);
