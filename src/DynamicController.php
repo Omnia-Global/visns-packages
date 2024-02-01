@@ -413,11 +413,13 @@ class DynamicController extends \App\Http\Controllers\Controller
         // Find the resource
         $resource = $this->model::findOrFail($id);
 
+        // Add the $id to the request data
+        $requestData = $request->all() + ["id" => $id];
+
         // Validate the request based on the model's rules
         $validatedData = $request->validate(
-            $this->model->validationRules("update", $request->all())
+            $this->model->validationRules("update", $requestData)
         );
-
         // Merge validated data with the entire request data
         $allData = array_merge($request->all(), $validatedData);
 
