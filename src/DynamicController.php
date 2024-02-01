@@ -400,6 +400,11 @@ class DynamicController extends \App\Http\Controllers\Controller
             $resource->assignRole($request->input("role"));
         }
 
+        // Check if the model has defined loadable relations
+        if (method_exists($this->model, "loadableRelations")) {
+            $resource->load($this->model->loadableRelations());
+        }
+
         return response()->json(
             ["data" => $resource ?? "", "error" => $error ?? ""],
             $error == "" ? 200 : 400
@@ -511,6 +516,11 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         if ($this->folder == "users" && $request->has("role")) {
             $resource->syncRoles([$request->input("role")]);
+        }
+
+        // Check if the model has defined loadable relations
+        if (method_exists($this->model, "loadableRelations")) {
+            $resource->load($this->model->loadableRelations());
         }
 
         return response()->json(
