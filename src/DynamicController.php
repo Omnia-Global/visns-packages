@@ -166,9 +166,13 @@ class DynamicController extends \App\Http\Controllers\Controller
                                     ];
                                 } else {
                                     if (!is_array($value)) {
-                                        $value = Carbon::createFromTimestamp(
-                                            strtotime($value)
-                                        );
+                                        if ($value == "now") {
+                                            $value = Carbon::now();
+                                        } else {
+                                            $value = Carbon::createFromTimestamp(
+                                                strtotime($value)
+                                            );
+                                        }
                                     }
                                 }
                                 break;
@@ -189,9 +193,13 @@ class DynamicController extends \App\Http\Controllers\Controller
                                     ];
                                 } else {
                                     if (!is_array($value)) {
-                                        $value = Carbon::createFromTimestamp(
-                                            strtotime($value)
-                                        );
+                                        if ($value == "now") {
+                                            $value = Carbon::now();
+                                        } else {
+                                            $value = Carbon::createFromTimestamp(
+                                                strtotime($value)
+                                            );
+                                        }
                                     }
                                 }
                                 break;
