@@ -18,7 +18,24 @@ class FileController extends \App\Http\Controllers\Controller
             return response()->json(["error" => "File not found."], 404);
         }
 
-        $content = Storage::get($file->file_path);
+        // Initially check if the file exists in the storage
+        $filePathExists = Storage::exists($file->file_path);
+
+        // If the initial file path doesn't exist, try to determine the new file path
+        $newFilePath = $filePathExists
+            ? $file->file_path
+            : $file->file_full_path;
+
+        if (!$filePathExists && is_null($newFilePath)) {
+            // If neither the initial path nor the new determined path exist
+            return response()->json(
+                ["error" => "File does not exist on the server."],
+                404
+            );
+        }
+
+        // Use the existing or newly determined file path to get content
+        $content = Storage::get($newFilePath);
         $contentType = $this->getContentType($file->file_extension);
 
         return Response::make($content, 200, [
