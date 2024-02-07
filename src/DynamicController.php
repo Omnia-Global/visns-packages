@@ -396,6 +396,42 @@ class DynamicController extends \App\Http\Controllers\Controller
             $resource->$relationshipMethod()->save($file);
         }
 
+        // Handle file upload if $request->file is present
+
+        if ($request->files->count() > 0) {
+            foreach ($request->allFiles() as $fileKey => $file) {
+                // Ensure each file is valid before processing
+                if (
+                    $request->hasFile($fileKey) &&
+                    $request->file($fileKey)->isValid()
+                ) {
+                    $fileUpload = $request->file($fileKey);
+                    $extension = $covidFile->getClientOriginalExtension();
+                    $fileName = $covidFile->getClientOriginalName();
+                    $fileSize = $covidFile->getSize();
+                    $filePath = $fileName; // Custom path in your S3 bucket
+
+                    // Upload file to S3
+                    Storage::put(
+                        $this->folder . "/" . $filePath,
+                        file_get_contents($fileUpload)
+                    );
+
+                    // Create a record in the files table
+                    $file = new File([
+                        "file_path" => $filePath, // Assuming 'file_path' is the full path in the bucket
+                        "file_name" => $fileName,
+                        "file_extension" => $extension,
+                        "file_size" => $fileSize,
+                        "fileable_field" => "covid", // Assuming this field denotes the purpose or type of the file
+                    ]);
+
+                    $resource->$fileKey()->delete();
+                    $resource->$fileKey()->save($file);
+                }
+            }
+        }
+
         if ($this->folder == "users" && $request->has("role")) {
             $resource->assignRole($request->input("role"));
         }
@@ -512,6 +548,42 @@ class DynamicController extends \App\Http\Controllers\Controller
             // Dynamically attach the file to the resource
             $resource->$relationshipMethod()->delete();
             $resource->$relationshipMethod()->save($file);
+        }
+
+        // Handle file upload if $request->file is present
+
+        if ($request->files->count() > 0) {
+            foreach ($request->allFiles() as $fileKey => $file) {
+                // Ensure each file is valid before processing
+                if (
+                    $request->hasFile($fileKey) &&
+                    $request->file($fileKey)->isValid()
+                ) {
+                    $fileUpload = $request->file($fileKey);
+                    $extension = $covidFile->getClientOriginalExtension();
+                    $fileName = $covidFile->getClientOriginalName();
+                    $fileSize = $covidFile->getSize();
+                    $filePath = $fileName; // Custom path in your S3 bucket
+
+                    // Upload file to S3
+                    Storage::put(
+                        $this->folder . "/" . $filePath,
+                        file_get_contents($fileUpload)
+                    );
+
+                    // Create a record in the files table
+                    $file = new File([
+                        "file_path" => $filePath, // Assuming 'file_path' is the full path in the bucket
+                        "file_name" => $fileName,
+                        "file_extension" => $extension,
+                        "file_size" => $fileSize,
+                        "fileable_field" => "covid", // Assuming this field denotes the purpose or type of the file
+                    ]);
+
+                    $resource->$fileKey()->delete();
+                    $resource->$fileKey()->save($file);
+                }
+            }
         }
 
         if ($this->folder == "users" && $request->has("role")) {
