@@ -406,9 +406,9 @@ class DynamicController extends \App\Http\Controllers\Controller
                     $request->file($fileKey)->isValid()
                 ) {
                     $fileUpload = $request->file($fileKey);
-                    $extension = $covidFile->getClientOriginalExtension();
-                    $fileName = $covidFile->getClientOriginalName();
-                    $fileSize = $covidFile->getSize();
+                    $extension = $fileUpload->getClientOriginalExtension();
+                    $fileName = $fileUpload->getClientOriginalName();
+                    $fileSize = $fileUpload->getSize();
                     $filePath = $fileName; // Custom path in your S3 bucket
 
                     // Upload file to S3
@@ -423,10 +423,9 @@ class DynamicController extends \App\Http\Controllers\Controller
                         "file_name" => $fileName,
                         "file_extension" => $extension,
                         "file_size" => $fileSize,
-                        "fileable_field" => "covid", // Assuming this field denotes the purpose or type of the file
+                        "fileable_field" => $fileKey, // Assuming this field denotes the purpose or type of the file
                     ]);
 
-                    $resource->$fileKey()->delete();
                     $resource->$fileKey()->save($file);
                 }
             }
@@ -560,9 +559,9 @@ class DynamicController extends \App\Http\Controllers\Controller
                     $request->file($fileKey)->isValid()
                 ) {
                     $fileUpload = $request->file($fileKey);
-                    $extension = $covidFile->getClientOriginalExtension();
-                    $fileName = $covidFile->getClientOriginalName();
-                    $fileSize = $covidFile->getSize();
+                    $extension = $fileUpload->getClientOriginalExtension();
+                    $fileName = $fileUpload->getClientOriginalName();
+                    $fileSize = $fileUpload->getSize();
                     $filePath = $fileName; // Custom path in your S3 bucket
 
                     // Upload file to S3
@@ -577,7 +576,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                         "file_name" => $fileName,
                         "file_extension" => $extension,
                         "file_size" => $fileSize,
-                        "fileable_field" => "covid", // Assuming this field denotes the purpose or type of the file
+                        "fileable_field" => $fileKey, // Assuming this field denotes the purpose or type of the file
                     ]);
 
                     $resource->$fileKey()->delete();
