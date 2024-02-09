@@ -350,20 +350,22 @@ class DynamicController extends \App\Http\Controllers\Controller
             if ($request->filled($relationship)) {
                 $input = $request->input($relationship);
 
-                // Check if input is an array of objects and extract IDs
-                if (
-                    is_array($input) &&
-                    isset($input[0]) &&
-                    is_array($input[0])
-                ) {
-                    $ids = array_map(function ($item) {
-                        return $item["id"] ?? $item["value"]; // Assuming each item has either 'id' or 'value' key
-                    }, $input);
-                } else {
-                    $ids = $input; // Assuming direct array of IDs
-                }
+                if (!is_null($input)) {
+                    // Check if input is an array of objects and extract IDs
+                    if (
+                        is_array($input) &&
+                        isset($input[0]) &&
+                        is_array($input[0])
+                    ) {
+                        $ids = array_map(function ($item) {
+                            return $item["id"] ?? $item["value"]; // Assuming each item has either 'id' or 'value' key
+                        }, $input);
+                    } else {
+                        $ids = $input; // Assuming direct array of IDs
+                    }
 
-                $resource->$relationship()->sync($ids);
+                    $resource->$relationship()->sync($ids);
+                }
             }
         }
 
