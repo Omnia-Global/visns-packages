@@ -120,17 +120,29 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     public function table(Request $request)
     {
-        // Get array of casts on the model
-        $casts = $this->model->getCasts();
+        $query = $this->initializeQuery();
 
-        // Assuming the model has defined relationships and custom methods
-        $query = $this->model::query();
+        $this->applyRelationships($query);
+        $this->applyCustomOrderAndSearch($query, $request);
+        $this->applyFilters($query, $request);
 
+        return $this->paginateAndRespond($query, $request->input("take", 10));
+    }
+
+    protected function initializeQuery()
+    {
+        return $this->model::query();
+    }
+
+    protected function applyRelationships($query)
+    {
         if (method_exists($this->model, "loadableRelations")) {
             $query->with($this->model->loadableRelations());
         }
+    }
 
-        // Custom ordering and searching methods
+    protected function applyCustomOrderAndSearch($query, Request $request)
+    {
         if (method_exists($this->model, "scopeCustomOrder")) {
             $query->customOrder(
                 $request->input("sortBy"),
@@ -140,162 +152,112 @@ class DynamicController extends \App\Http\Controllers\Controller
         if (method_exists($this->model, "scopeCustomSearch")) {
             $query->customSearch($request->input("search"));
         }
+    }
 
-        // Filtering
+    protected function applyFilters($query, Request $request)
+    {
         if ($request->has("where") && $request->filled("where")) {
             foreach ($request->input("where") as $condition) {
-                $value = isset($condition["value"]) ? $condition["value"] : "";
-
-                if (isset($condition["id"])) {
-                    if (isset($casts[$condition["id"]])) {
-                        switch ($casts[$condition["id"]]) {
-                            case "datetime":
-                                if (
-                                    isset($value["end"]) &&
-                                    isset($value["start"])
-                                ) {
-                                    $value = [
-                                        Carbon::createFromFormat(
-                                            "d-m-Y",
-                                            $value["start"]
-                                        ),
-                                        Carbon::createFromFormat(
-                                            "d-m-Y",
-                                            $value["end"]
-                                        ),
-                                    ];
-                                } else {
-                                    if (!is_array($value)) {
-                                        if ($value == "now") {
-                                            $value = Carbon::now();
-                                        } else {
-                                            $value = Carbon::createFromTimestamp(
-                                                strtotime($value)
-                                            );
-                                        }
-                                    }
-                                }
-                                break;
-                            case "date":
-                                if (
-                                    isset($value["end"]) &&
-                                    isset($value["start"])
-                                ) {
-                                    $value = [
-                                        Carbon::createFromFormat(
-                                            "d-m-Y",
-                                            $value["start"]
-                                        ),
-                                        Carbon::createFromFormat(
-                                            "d-m-Y",
-                                            $value["end"]
-                                        ),
-                                    ];
-                                } else {
-                                    if (!is_array($value)) {
-                                        if ($value == "now") {
-                                            $value = Carbon::now();
-                                        } else {
-                                            $value = Carbon::createFromTimestamp(
-                                                strtotime($value)
-                                            );
-                                        }
-                                    }
-                                }
-                                break;
-                        }
-                    }
-                }
-
-                if (isset($condition["type"])) {
-                    switch ($condition["type"]) {
-                        case "date":
-                            if (
-                                isset($value["end"]) &&
-                                isset($value["start"])
-                            ) {
-                                $value = [
-                                    Carbon::createFromFormat(
-                                        "d-m-Y",
-                                        $value["start"]
-                                    ),
-                                    Carbon::createFromFormat(
-                                        "d-m-Y",
-                                        $value["end"]
-                                    ),
-                                ];
-                            } else {
-                                if (!is_array($value)) {
-                                    $value =
-                                        $value == "now"
-                                            ? Carbon::now()
-                                            : Carbon::createFromTimestamp(
-                                                strtotime($value)
-                                            );
-                                }
-                            }
-                            break;
-                    }
-                }
-
-                if (isset($condition["operator"])) {
-                    switch ($condition["operator"]) {
-                        case "contains":
-                            $query->where(
-                                $condition["id"],
-                                "like",
-                                "%" . $value . "%"
-                            );
-                            break;
-                        case "gt":
-                            $query->where($condition["id"], ">", $value);
-                            break;
-                        case "gte":
-                            $query->where($condition["id"], ">=", $value);
-                            break;
-                        case "inlist":
-                            $query->whereIn($condition["id"], $value);
-                            break;
-                        case "inrange":
-                            if (isset($value[0]) && isset($value[1])) {
-                                $query->whereBetween($condition["id"], $value);
-                            }
-                            break;
-                        case "lt":
-                            $query->where($condition["id"], "<", $value);
-                            break;
-                        case "lte":
-                            $query->where($condition["id"], "<=", $value);
-                            break;
-                        default:
-                            $query->where($condition["id"], $value);
-                            break;
-                    }
-                } else {
-                    if (
-                        isset($condition["whereHas"]) &&
-                        $condition["whereHas"] != ""
-                    ) {
-                        if (!isset($condition["id"])) {
-                            $query->whereHas($condition["whereHas"]);
-                        } else {
-                            $query->whereHas($condition["whereHas"], function (
-                                $q
-                            ) use ($condition, $value) {
-                                $q->where($condition["id"], $value);
-                            });
-                        }
-                    } else {
-                        $query->where($condition["id"], $value);
-                    }
-                }
+                $this->applyFilterCondition($query, $condition);
             }
         }
+    }
 
-        // Pagination
-        $perPage = $request->input("take", 10);
+    protected function applyFilterCondition($query, $condition)
+    {
+        $value = $condition["value"] ?? null;
+        $casts = $this->model->getCasts();
+
+        if (isset($condition["id"]) && isset($casts[$condition["id"]])) {
+            $value = $this->castValue($value, $casts[$condition["id"]]);
+        }
+
+        if (isset($condition["whereHas"])) {
+            $query->whereHas($condition["whereHas"], function ($q) use (
+                $condition,
+                $value
+            ) {
+                // Reuse the applyConditionBasedOnOperator method inside whereHas
+                $this->applyConditionBasedOnOperator($q, $condition, $value);
+            });
+        } else {
+            $this->applyConditionBasedOnOperator($query, $condition, $value);
+        }
+    }
+
+    protected function castValue($value, $type)
+    {
+        switch ($type) {
+            case "datetime":
+            case "date":
+                return $this->handleDateValue($value);
+            default:
+                return $value;
+        }
+    }
+
+    protected function handleDateValue($value)
+    {
+        if (
+            is_array($value) &&
+            isset($value["start"]) &&
+            isset($value["end"])
+        ) {
+            return [
+                Carbon::createFromFormat("d-m-Y", $value["start"]),
+                Carbon::createFromFormat("d-m-Y", $value["end"]),
+            ];
+        }
+
+        if ($value === "now") {
+            return Carbon::now();
+        }
+
+        return Carbon::createFromTimestamp(strtotime($value));
+    }
+
+    protected function applyConditionBasedOnOperator($query, $condition, $value)
+    {
+        $operator = $condition["operator"] ?? "=";
+        $id = $condition["id"] ?? null;
+
+        if (!$id) {
+            return;
+        }
+
+        switch ($operator) {
+            case "contains":
+                $query->where($id, "like", "%" . $value . "%");
+                break;
+            case "gt":
+                $query->where($id, ">", $value);
+                break;
+            case "gte":
+                $query->where($id, ">=", $value);
+                break;
+            case "inlist":
+                $query->whereIn($id, $value);
+                break;
+            case "inrange":
+                if (is_array($value) && count($value) === 2) {
+                    $query->whereBetween($id, $value);
+                }
+                break;
+            case "lt":
+                $query->where($id, "<", $value);
+                break;
+            case "lte":
+                $query->where($id, "<=", $value);
+                break;
+            default:
+                $query->where($id, $operator, $value);
+                break;
+        }
+    }
+
+    protected function paginateAndRespond($query, $perPage)
+    {
         $data = $query->paginate($perPage);
-
         return response()->json($data, 200);
     }
 
