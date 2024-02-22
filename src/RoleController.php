@@ -8,116 +8,116 @@ use Illuminate\Http\Request;
 
 class RoleController extends \App\Http\Controllers\Controller
 {
-	public function dropdown(Request $request)
-	{
-		$data = [];
+    public function dropdown(Request $request)
+    {
+        $data = [];
 
-		$query = Role::orderBy("name", "asc");
+        $query = Role::orderBy("name", "asc");
 
-		if ($request->input("id")) {
-			$query->where($request->input("filter"), $request->input("id"));
-		}
+        if ($request->input("id")) {
+            $query->where($request->input("filter"), $request->input("id"));
+        }
 
-		foreach ($query->get(["id", "name"]) as $item) {
-			array_push($data, [
-				"id" => $item->name,
-				"label" => $item->name,
-			]);
-		}
+        foreach ($query->get(["id", "name"]) as $item) {
+            array_push($data, [
+                "id" => $item->name,
+                "label" => $item->name,
+            ]);
+        }
 
-		$results = [
-			"data" => $data,
-		];
+        $results = [
+            "data" => $data,
+        ];
 
-		return response()->json($results);
-	}
+        return response()->json($results);
+    }
 
-	public function get(Role $role)
-	{
-		return response()->json($role->load("permissions"));
-	}
+    public function show(Role $role)
+    {
+        return response()->json($role->load("permissions"));
+    }
 
-	public function table(Request $request)
-	{
-		$data = Role::orderBy(
-			$request->input("sortBy"),
-			$request->input("sort")
-		)->where("name", "like", "%" . $request->input("search") . "%");
+    public function table(Request $request)
+    {
+        $data = Role::orderBy(
+            $request->input("sortBy"),
+            $request->input("sort")
+        )->where("name", "like", "%" . $request->input("search") . "%");
 
-		if ($request->has("where") && $request->filled("where")) {
-			foreach ($request->input("where") as $a => $b) {
-				$data->where($b["id"], $b["value"]);
-			}
-		}
+        if ($request->has("where") && $request->filled("where")) {
+            foreach ($request->input("where") as $a => $b) {
+                $data->where($b["id"], $b["value"]);
+            }
+        }
 
-		$data = $data->fastPaginate(
-			$request->input("take") ? $request->input("take") : 10
-		);
+        $data = $data->fastPaginate(
+            $request->input("take") ? $request->input("take") : 10
+        );
 
-		return response()->json($data);
-	}
+        return response()->json($data);
+    }
 
-	public function store(Request $request)
-	{
-		$error = "";
+    public function store(Request $request)
+    {
+        $error = "";
 
-		$request->validate([
-			"name" => "required",
-		]);
+        $request->validate([
+            "name" => "required",
+        ]);
 
-		$role = new Role();
+        $role = new Role();
 
-		if ($request->has("name")) {
-			$role->name = $request->input("name");
-		}
+        if ($request->has("name")) {
+            $role->name = $request->input("name");
+        }
 
-		$role->save();
+        $role->save();
 
-		return response()->json([
-			"error" => $error,
-		]);
-	}
+        return response()->json([
+            "error" => $error,
+        ]);
+    }
 
-	public function update(Request $request, Role $role)
-	{
-		$error = "";
+    public function update(Request $request, Role $role)
+    {
+        $error = "";
 
-		$request->validate([
-			"name" => "required",
-		]);
+        $request->validate([
+            "name" => "required",
+        ]);
 
-		if ($request->has("name")) {
-			$role->name = $request->input("name");
-		}
+        if ($request->has("name")) {
+            $role->name = $request->input("name");
+        }
 
-		$role->save();
+        $role->save();
 
-		if ($request->has("permissions")) {
-			foreach ($request->input("permissions") as $a => $b) {
-				$permission = Permission::find(
-					str_replace("permission-", "", $a)
-				);
-				if ($b === true) {
-					$role->givePermissionTo($permission);
-				} else {
-					$role->revokePermissionTo($permission);
-				}
-			}
-		}
+        if ($request->has("permissions")) {
+            foreach ($request->input("permissions") as $a => $b) {
+                $permission = Permission::find(
+                    str_replace("permission-", "", $a)
+                );
+                if ($b === true) {
+                    $role->givePermissionTo($permission);
+                } else {
+                    $role->revokePermissionTo($permission);
+                }
+            }
+        }
 
-		return response()->json([
-			"error" => $error,
-		]);
-	}
+        return response()->json([
+            "error" => $error,
+        ]);
+    }
 
-	public function destroy(Role $role)
-	{
-		$error = "";
+    public function destroy(Role $role)
+    {
+        $error = "";
 
-		$role->delete();
+        $role->delete();
 
-		return response()->json([
-			"error" => $error,
-		]);
-	}
+        return response()->json([
+            "error" => $error,
+        ]);
+    }
 }
