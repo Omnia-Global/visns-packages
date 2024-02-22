@@ -32,8 +32,10 @@ class RoleController extends \App\Http\Controllers\Controller
         return response()->json($results);
     }
 
-    public function show(Role $role)
+    public function show($id)
     {
+        $role = Role::find($id);
+
         return response()->json($role->load("permissions"));
     }
 
