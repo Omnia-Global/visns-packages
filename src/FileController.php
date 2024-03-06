@@ -151,38 +151,55 @@ class FileController extends \App\Http\Controllers\Controller
         $folderArray = [];
 
         if ($folder == "null") {
-            $f = str_replace("App\\Models\\", "", $file->fileable_type);
+            $modelName = class_basename($file->fileable_type);
         } else {
-            $f = $folder;
+            $modelName = $folder;
         }
 
-        if ($this->isPlural($f)) {
-            $folderArray[] = strtolower($f);
-            $folderArray[] = ucfirst(strtolower($f));
-            $folderArray[] = strtolower(Str::singular($f));
-            $folderArray[] = ucfirst(strtolower(Str::singular($f)));
-        } else {
-            $folderArray[] = strtolower($f);
-            $folderArray[] = ucfirst(strtolower($f));
-            $folderArray[] = strtolower(Str::plural($f));
-            $folderArray[] = ucfirst(strtolower(Str::plural($f)));
+        // Generate permutations for any model name
+        $baseNameVariants = $this->generateNameVariants($modelName);
+
+        foreach ($baseNameVariants as $variant) {
+            $folderArray[] = strtolower($variant);
+            $folderArray[] = ucfirst($variant);
         }
 
         foreach ($folderArray as $item) {
-            if (strpos($file->file_path, $item . "/") === false) {
-                if (
-                    Storage::disk("s3")->exists($item . "/" . $file->file_path)
-                ) {
-                    return $item . "/" . $file->file_path;
-                }
-            } else {
-                if (Storage::disk("s3")->exists($file->file_path)) {
-                    return $item . "/" . $file->file_path;
-                }
+            $targetPath =
+                strpos($file->file_path, $item . "/") === false
+                    ? $item . "/" . $file->file_path
+                    : $file->file_path;
+
+            if (Storage::disk("s3")->exists($targetPath)) {
+                return $targetPath;
             }
         }
 
         return null;
+    }
+
+    protected function generateNameVariants($name)
+    {
+        return [
+            // Original
+            $name,
+            // Plural
+            Str::plural($name),
+            // Singular
+            Str::singular($name),
+            // Snake case
+            Str::snake($name),
+            // Snake plural
+            Str::snake(Str::plural($name)),
+            // Camel case
+            Str::camel($name),
+            // Camel plural
+            Str::camel(Str::plural($name)),
+            // Studly case
+            Str::studly($name),
+            // Studly plural
+            Str::studly(Str::plural($name)),
+        ];
     }
 
     protected function downloadFromS3($filepath, $filename)
