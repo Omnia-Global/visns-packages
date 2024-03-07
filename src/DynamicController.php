@@ -301,17 +301,30 @@ class DynamicController extends \App\Http\Controllers\Controller
         // Create a new resource
         $resource = $this->model::create($allData);
 
-        $belongsToManyRelations = [];
+        // Initialize an array to hold many-to-many relationships
+        $manyToManyRelations = [];
 
-        // Update any many to many relationships
+        // Load necessary relations to avoid N+1 problems
+        $this->model->loadMissing($this->model->loadableRelations());
+
         foreach ($this->model->loadableRelations() as $relation) {
-            $belongsToManyRelations[] = $relation;
+            // Check if the relationship type is many-to-many by using instanceof with BelongsToMany
+            if (
+                $this->model->$relation() instanceof
+                \Illuminate\Database\Eloquent\Relations\BelongsToMany
+            ) {
+                $manyToManyRelations[] = $relation;
+            }
         }
 
-        foreach ($belongsToManyRelations as $relationship) {
+        foreach ($manyToManyRelations as $relationship) {
             if ($request->filled($relationship)) {
                 $input = $request->input($relationship);
 
+                // Initialize $ids as an empty array to handle the case where $input is not an array of objects or IDs
+                $ids = [];
+
+                // Check if input is valid and not null
                 if (!is_null($input)) {
                     // Check if input is an array of objects and extract IDs
                     if (
@@ -320,13 +333,16 @@ class DynamicController extends \App\Http\Controllers\Controller
                         is_array($input[0])
                     ) {
                         $ids = array_map(function ($item) {
-                            return $item["id"] ?? $item["value"]; // Assuming each item has either 'id' or 'value' key
+                            // Assuming each item has either 'id' or 'value' key
+                            return $item["id"] ?? $item["value"];
                         }, $input);
-                    } else {
-                        $ids = $input; // Assuming direct array of IDs
+                    } elseif (is_array($input)) {
+                        // Assuming direct array of IDs
+                        $ids = $input;
                     }
 
-                    $resource->$relationship()->sync($ids);
+                    // Use sync method to update the many-to-many relationship
+                    $this->model->$relationship()->sync($ids);
                 }
             }
         }
@@ -455,17 +471,30 @@ class DynamicController extends \App\Http\Controllers\Controller
         // Update the resource
         $resource->update($allData);
 
-        $belongsToManyRelations = [];
+        // Initialize an array to hold many-to-many relationships
+        $manyToManyRelations = [];
 
-        // Update any many to many relationships
+        // Load necessary relations to avoid N+1 problems
+        $this->model->loadMissing($this->model->loadableRelations());
+
         foreach ($this->model->loadableRelations() as $relation) {
-            $belongsToManyRelations[] = $relation;
+            // Check if the relationship type is many-to-many by using instanceof with BelongsToMany
+            if (
+                $this->model->$relation() instanceof
+                \Illuminate\Database\Eloquent\Relations\BelongsToMany
+            ) {
+                $manyToManyRelations[] = $relation;
+            }
         }
 
-        foreach ($belongsToManyRelations as $relationship) {
+        foreach ($manyToManyRelations as $relationship) {
             if ($request->filled($relationship)) {
                 $input = $request->input($relationship);
 
+                // Initialize $ids as an empty array to handle the case where $input is not an array of objects or IDs
+                $ids = [];
+
+                // Check if input is valid and not null
                 if (!is_null($input)) {
                     // Check if input is an array of objects and extract IDs
                     if (
@@ -474,13 +503,16 @@ class DynamicController extends \App\Http\Controllers\Controller
                         is_array($input[0])
                     ) {
                         $ids = array_map(function ($item) {
-                            return $item["id"] ?? $item["value"]; // Assuming each item has either 'id' or 'value' key
+                            // Assuming each item has either 'id' or 'value' key
+                            return $item["id"] ?? $item["value"];
                         }, $input);
-                    } else {
-                        $ids = $input; // Assuming direct array of IDs
+                    } elseif (is_array($input)) {
+                        // Assuming direct array of IDs
+                        $ids = $input;
                     }
 
-                    $resource->$relationship()->sync($ids);
+                    // Use sync method to update the many-to-many relationship
+                    $this->model->$relationship()->sync($ids);
                 }
             }
         }
