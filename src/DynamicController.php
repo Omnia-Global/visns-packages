@@ -308,6 +308,11 @@ class DynamicController extends \App\Http\Controllers\Controller
         $this->model->loadMissing($this->model->loadableRelations());
 
         foreach ($this->model->loadableRelations() as $relation) {
+            // Skip the relation if it contains a dot ('.')
+            if (strpos($relation, ".") !== false) {
+                continue;
+            }
+
             // Check if the relationship type is many-to-many by using instanceof with BelongsToMany
             if (
                 $this->model->$relation() instanceof
@@ -478,6 +483,11 @@ class DynamicController extends \App\Http\Controllers\Controller
         $this->model->loadMissing($this->model->loadableRelations());
 
         foreach ($this->model->loadableRelations() as $relation) {
+            // Skip the relation if it contains a dot ('.')
+            if (strpos($relation, ".") !== false) {
+                continue;
+            }
+
             // Check if the relationship type is many-to-many by using instanceof with BelongsToMany
             if (
                 $this->model->$relation() instanceof
