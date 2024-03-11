@@ -344,6 +344,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                     } elseif (is_array($input)) {
                         // Assuming direct array of IDs
                         $ids = $input;
+                    } else {
+                        $ids = [$input];
                     }
 
                     // Use sync method to update the many-to-many relationship
@@ -519,6 +521,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                     } elseif (is_array($input)) {
                         // Assuming direct array of IDs
                         $ids = $input;
+                    } else {
+                        $ids = [$input];
                     }
 
                     // Use sync method to update the many-to-many relationship
