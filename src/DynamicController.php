@@ -522,7 +522,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                     }
 
                     // Use sync method to update the many-to-many relationship
-                    $this->model->$relationship()->sync($ids);
+                    $resource->$relationship()->sync($ids);
                 }
             }
         }
