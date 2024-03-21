@@ -49,6 +49,25 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
     }
 
+    public function templateSort(Request $request, $id)
+    {
+        $validated = $request->validate([
+            "detail" => ["required"],
+        ]);
+
+        $resource = $this->model::findOrFail($id);
+
+        if ($request->has("detail")) {
+            $resource->detail = $request->input("detail");
+        }
+
+        $resource->save();
+
+        return response()->json([
+            "error" => "",
+        ]);
+    }
+
     public function dropdown(Request $request)
     {
         $data = [];
