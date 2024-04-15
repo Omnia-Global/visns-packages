@@ -1,5 +1,6 @@
 <?php
-namespace App\Http\Controllers;
+
+namespace Visnsstudio\VisnsPackages;
 
 use Laravel\Socialite\Facades\Socialite;
 use Illuminate\Support\Facades\Auth;
@@ -7,7 +8,7 @@ use Illuminate\Support\Facades\Hash;
 use App\Models\Role;
 use App\Models\User;
 
-class SocialiteController extends Controller
+class SocialiteController extends \App\Http\Controllers\Controller
 {
     public function redirectToProvider($provider)
     {
