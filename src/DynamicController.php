@@ -437,7 +437,7 @@ class DynamicController extends \App\Http\Controllers\Controller
             }
         }
 
-        if ($this->folder == "user" && $request->has("role")) {
+        if ($this->folder == "User" && $request->has("role")) {
             $resource->assignRole([$request->input("role")]);
         }
 
@@ -616,7 +616,7 @@ class DynamicController extends \App\Http\Controllers\Controller
             }
         }
 
-        if ($this->folder == "user" && $request->has("role")) {
+        if ($this->folder == "User" && $request->has("role")) {
             $resource->syncRoles([$request->input("role")]);
         }
 
