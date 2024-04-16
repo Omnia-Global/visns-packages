@@ -454,181 +454,102 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     public function update(Request $request, $id)
     {
-        $error = "";
-
-        // Find the resource
+        // Find the resource or fail with a 404
         $resource = $this->model::findOrFail($id);
 
-        // Add the $id to the request data
+        // Add the $id to the request data for validation purposes
         $requestData = $request->all() + ["id" => $id];
 
         // Validate the request based on the model's rules
         $validatedData = $request->validate(
             $this->model->validationRules("update", $requestData)
         );
-        // Merge validated data with the entire request data
-        $allData = array_merge($request->all(), $validatedData);
 
-        // Process array fields like 'integration_detail'
+        // Update nested JSON or array fields correctly
         foreach ($this->model->getCasts() as $field => $type) {
-            if ($type === "array") {
-                foreach ($allData as $key => $value) {
-                    // Check if the key starts with the field name followed by a dot
-                    if (strpos($key, $field . ".") === 0) {
-                        // Extract the sub-key and set the value in the array
-                        $subKey = substr($key, strlen($field) + 1);
-                        $allData[$field][$subKey] = $value;
-
-                        // Remove the original key-value pair from $allData
-                        unset($allData[$key]);
-                    }
+            if ($type === "array" || $type === "json") {
+                if (
+                    isset($requestData[$field]) &&
+                    is_array($requestData[$field])
+                ) {
+                    $resource->$field = array_merge(
+                        $resource->$field ?? [],
+                        $requestData[$field]
+                    );
                 }
-            } elseif (
-                ($type === "datetime" || $type === "date") &&
-                isset($allData[$field])
-            ) {
-                // Convert the field using Carbon
-                $allData[$field] = Carbon::createFromTimestamp(
-                    strtotime($allData[$field])
-                );
+            } elseif ($type === "datetime" || $type === "date") {
+                if (isset($requestData[$field])) {
+                    $resource->$field = Carbon::createFromTimestamp(
+                        strtotime($requestData[$field])
+                    );
+                }
+            } else {
+                if (isset($requestData[$field])) {
+                    $resource->$field = $requestData[$field];
+                }
             }
         }
 
-        // Update the resource
-        $resource->update($allData);
+        $resource->save();
 
-        // Initialize an array to hold many-to-many relationships
-        $manyToManyRelations = [];
+        // Handle many-to-many relationships if any
+        $this->updateManyToManyRelations($resource, $request);
 
-        // Load necessary relations to avoid N+1 problems
-        $this->model->loadMissing($this->model->loadableRelations());
+        // Handle file uploads
+        $this->handleFileUploads($resource, $request);
 
-        foreach ($this->model->loadableRelations() as $relation) {
-            // Skip the relation if it contains a dot ('.')
-            if (strpos($relation, ".") !== false) {
-                continue;
-            }
-
-            // Check if the relationship type is many-to-many by using instanceof with BelongsToMany
-            if (
-                $this->model->$relation() instanceof
-                \Illuminate\Database\Eloquent\Relations\BelongsToMany
-            ) {
-                $manyToManyRelations[] = $relation;
-            }
+        // Sync roles if this is a User model and roles are provided
+        if ($this->folder == "User" && $request->has("role")) {
+            $resource->syncRoles([$request->input("role")]);
         }
+
+        // Load defined relations to avoid N+1 problems
+        if (method_exists($this->model, "loadableRelations")) {
+            $resource->load($this->model->loadableRelations());
+        }
+
+        return response()->json(["data" => $resource, "error" => ""], 200);
+    }
+
+    protected function updateManyToManyRelations($resource, Request $request)
+    {
+        $manyToManyRelations = collect(
+            $this->model->loadableRelations()
+        )->filter(function ($relation) {
+            return !$this->model->$relation() instanceof
+                \Illuminate\Database\Eloquent\Relations\BelongsToMany;
+        });
 
         foreach ($manyToManyRelations as $relationship) {
             if ($request->filled($relationship)) {
-                $input = $request->input($relationship);
-
-                // Initialize $ids as an empty array to handle the case where $input is not an array of objects or IDs
-                $ids = [];
-
-                // Check if input is valid and not null
-                if (!is_null($input)) {
-                    // Check if input is an array of objects and extract IDs
-                    if (
-                        is_array($input) &&
-                        isset($input[0]) &&
-                        is_array($input[0])
-                    ) {
-                        $ids = array_map(function ($item) {
-                            // Assuming each item has either 'id' or 'value' key
-                            return $item["id"] ?? $item["value"];
-                        }, $input);
-                    } elseif (is_array($input)) {
-                        // Assuming direct array of IDs
-                        $ids = $input;
-                    } else {
-                        $ids = [$input];
-                    }
-
-                    // Use sync method to update the many-to-many relationship
-                    $resource->$relationship()->sync($ids);
-                }
+                $ids = (array) $request->input($relationship);
+                $resource->$relationship()->sync($ids);
             }
         }
+    }
 
-        // Handle file upload if 'key' is present in the request
-        if ($request->has("key") && $request->has("file_relationship")) {
-            $relationshipMethod = $request->input("file_relationship");
-            $unique_name =
-                $request->input("uuid") . "." . $request->input("extension");
-            $path = $this->folder . "/" . $unique_name;
-
-            Storage::copy(
-                $request->input("key"),
-                str_replace(
-                    "tmp/",
-                    $this->folder . "/",
-                    $request->input("key")
-                ) .
-                    "." .
-                    $request->input("extension")
-            );
-
-            $file = new File([
-                "file_path" => $path,
-                "file_name" => $request->input("filename"),
-                "file_extension" => $request->input("extension"),
-                "file_size" => $request->input("filesize"),
-            ]);
-
-            // Dynamically attach the file to the resource
-            $resource->$relationshipMethod()->delete();
-            $resource->$relationshipMethod()->save($file);
-        }
-
-        // Handle file upload if $request->file is present
-
+    protected function handleFileUploads($resource, Request $request)
+    {
         if ($request->files->count() > 0) {
             foreach ($request->allFiles() as $fileKey => $file) {
-                // Ensure each file is valid before processing
                 if (
                     $request->hasFile($fileKey) &&
                     $request->file($fileKey)->isValid()
                 ) {
                     $fileUpload = $request->file($fileKey);
-                    $extension = $fileUpload->getClientOriginalExtension();
-                    $fileName = $fileUpload->getClientOriginalName();
-                    $fileSize = $fileUpload->getSize();
-                    $filePath = $fileName; // Custom path in your S3 bucket
-
-                    // Upload file to S3
-                    Storage::put(
-                        $this->folder . "/" . $filePath,
-                        file_get_contents($fileUpload)
-                    );
-
-                    // Create a record in the files table
-                    $file = new File([
-                        "file_path" => $filePath, // Assuming 'file_path' is the full path in the bucket
-                        "file_name" => $fileName,
-                        "file_extension" => $extension,
-                        "file_size" => $fileSize,
-                        "fileable_field" => $fileKey, // Assuming this field denotes the purpose or type of the file
+                    $filePath = $fileUpload->store($this->folder); // Store file and get path
+                    $fileRecord = new File([
+                        "file_path" => $filePath,
+                        "file_name" => $fileUpload->getClientOriginalName(),
+                        "file_extension" => $fileUpload->getClientOriginalExtension(),
+                        "file_size" => $fileUpload->getSize(),
                     ]);
 
-                    $resource->$fileKey()->delete();
-                    $resource->$fileKey()->save($file);
+                    $resource->$fileKey()->delete(); // Remove old file
+                    $resource->$fileKey()->save($fileRecord); // Save new file
                 }
             }
         }
-
-        if ($this->folder == "User" && $request->has("role")) {
-            $resource->syncRoles([$request->input("role")]);
-        }
-
-        // Check if the model has defined loadable relations
-        if (method_exists($this->model, "loadableRelations")) {
-            $resource->load($this->model->loadableRelations());
-        }
-
-        return response()->json(
-            ["data" => $resource ?? "", "error" => $error ?? ""],
-            $error == "" ? 200 : 400
-        );
     }
 
     public function updateGallery(Request $request, $id)
