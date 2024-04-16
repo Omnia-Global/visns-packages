@@ -14,8 +14,10 @@ class RoleController extends \App\Http\Controllers\Controller
 
         $query = Role::orderBy("name", "asc");
 
-        if ($request->input("id")) {
-            $query->where($request->input("filter"), $request->input("id"));
+        if ($request->has("where") && $request->filled("where")) {
+            foreach ($request->input("where") as $condition) {
+                $query->where($condition["id"], $condition["value"]);
+            }
         }
 
         foreach ($query->get(["id", "name"]) as $item) {
