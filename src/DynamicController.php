@@ -437,8 +437,8 @@ class DynamicController extends \App\Http\Controllers\Controller
             }
         }
 
-        if ($this->folder == "users" && $request->has("role")) {
-            $resource->assignRole($request->input("role"));
+        if ($this->folder == "user" && $request->has("role")) {
+            $resource->assignRole([$request->input("role")]);
         }
 
         // Check if the model has defined loadable relations
@@ -616,7 +616,7 @@ class DynamicController extends \App\Http\Controllers\Controller
             }
         }
 
-        if ($this->folder == "users" && $request->has("role")) {
+        if ($this->folder == "user" && $request->has("role")) {
             $resource->syncRoles([$request->input("role")]);
         }
 
