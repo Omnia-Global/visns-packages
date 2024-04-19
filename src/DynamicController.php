@@ -578,7 +578,13 @@ class DynamicController extends \App\Http\Controllers\Controller
             ]);
 
             // Dynamically attach the file to the resource
-            $resource->$relationshipMethod()->delete();
+
+            if (
+                $resource->$relationshipMethod() instanceof
+                \Illuminate\Database\Eloquent\Relations\MorphOne
+            ) {
+                $resource->$relationshipMethod()->delete();
+            }
             $resource->$relationshipMethod()->save($file);
         }
 
@@ -612,7 +618,12 @@ class DynamicController extends \App\Http\Controllers\Controller
                         "fileable_field" => $fileKey, // Assuming this field denotes the purpose or type of the file
                     ]);
 
-                    $resource->$fileKey()->delete();
+                    if (
+                        $resource->$fileKey() instanceof
+                        \Illuminate\Database\Eloquent\Relations\MorphOne
+                    ) {
+                        $resource->$fileKey()->delete();
+                    }
                     $resource->$fileKey()->save($file);
                 }
             }
