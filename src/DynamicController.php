@@ -98,7 +98,9 @@ class DynamicController extends \App\Http\Controllers\Controller
             foreach ($request->input("where") as $condition) {
                 switch ($condition["id"]) {
                     case "role":
-                        $query->role($condition["value"]);
+                        if ($this->folder == "User") {
+                            $query->role($condition["value"]);
+                        }
                         break;
                     default:
                         $query->where($condition["id"], $condition["value"]);
