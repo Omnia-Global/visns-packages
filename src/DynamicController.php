@@ -96,7 +96,14 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         if ($request->has("where") && $request->filled("where")) {
             foreach ($request->input("where") as $condition) {
-                $query->where($condition["id"], $condition["value"]);
+                switch ($condition["id"]) {
+                    case "role":
+                        $query->role($condition["value"]);
+                        break;
+                    default:
+                        $query->where($condition["id"], $condition["value"]);
+                        break;
+                }
             }
         }
 
