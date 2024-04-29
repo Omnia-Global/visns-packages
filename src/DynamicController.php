@@ -6,6 +6,7 @@ use App\Models\File;
 
 use Illuminate\Http\Request;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Storage;
 
@@ -301,6 +302,11 @@ class DynamicController extends \App\Http\Controllers\Controller
         // Merge validated data with the entire request data
         $allData = $this->deepMerge($request->all(), $validatedData);
 
+        // Check if the model is 'User' and the password needs hashing
+        if ($this->folder == "User" && $request->has("password")) {
+            $allData["password"] = Hash::make($request->input("password"));
+        }
+
         // Process array fields like 'integration_detail'
         foreach ($this->model->getCasts() as $field => $type) {
             if ($type === "array") {
@@ -477,6 +483,11 @@ class DynamicController extends \App\Http\Controllers\Controller
         );
         // Deep merge validated data with the entire request data to preserve nested unvalidated data
         $allData = $this->deepMerge($request->all(), $validatedData);
+
+        // Check if the model is 'User' and the password needs hashing
+        if ($this->folder == "User" && $request->has("password")) {
+            $allData["password"] = Hash::make($request->input("password"));
+        }
 
         // Process array fields like 'integration_detail'
         foreach ($this->model->getCasts() as $field => $type) {
