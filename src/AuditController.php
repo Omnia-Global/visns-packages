@@ -19,7 +19,7 @@ class AuditController extends \App\Http\Controllers\Controller
 
     public function table(Request $request)
     {
-        $data = DB::table("audits")->orderBy("created_at", "desc");
+        $data = DB::table("audits")->with("user")->orderBy("created_at", "desc");
 
         if ($request->has("where") && $request->filled("where")) {
             foreach ($request->input("where") as $a => $b) {
