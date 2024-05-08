@@ -27,7 +27,7 @@ class AuditController extends \App\Http\Controllers\Controller
             }
         }
 
-        $data = $data->fastPaginate(
+        $data = $data->paginate(
             $request->input("take") ? $request->input("take") : 10
         );
 

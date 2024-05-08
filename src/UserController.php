@@ -22,7 +22,7 @@ class UserController extends \App\Http\Controllers\Controller
 		$data = auth()
 			->user()
 			->notifications()
-			->fastPaginate(10);
+			->paginate(10);
 
 		return response()->json($data);
 	}
