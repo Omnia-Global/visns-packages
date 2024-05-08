@@ -5,21 +5,20 @@ namespace Visnsstudio\VisnsPackages;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
+use App\Models\Audit;
+
 class AuditController extends \App\Http\Controllers\Controller
 {
     public function show($id)
     {
-        $data = DB::table("audits")
-            ->with("user")
-            ->where("id", $id)
-            ->first();
+        $data = Audit::with("user")->find($id);
 
         return response()->json($data);
     }
 
     public function table(Request $request)
     {
-        $data = DB::table("audits")->with("user")->orderBy("created_at", "desc");
+        $data = Audit::with("user")->orderBy("created_at", "desc");
 
         if ($request->has("where") && $request->filled("where")) {
             foreach ($request->input("where") as $a => $b) {
