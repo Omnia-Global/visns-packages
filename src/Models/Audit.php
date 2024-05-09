@@ -28,6 +28,36 @@ class Audit extends Model
         return $this->formatValues($this->new_values);
     }
 
+    // Accessor for human-friendly event
+    public function getFormattedEventAttribute()
+    {
+        $formattedEvent = "";
+
+        if (
+            $this->event === "updated" &&
+            str_contains($this->url, "authenticate")
+        ) {
+            $formattedEvent = "Authenticating";
+        } else {
+            switch ($this->event) {
+                case "created":
+                    $formattedEvent = "Creating";
+                    break;
+                case "updated":
+                    $formattedEvent = "Updating";
+                    break;
+                case "deleted":
+                    $formattedEvent = "Deleting";
+                    break;
+                default:
+                    $formattedEvent = ucfirst($this->event);
+                    break;
+            }
+        }
+
+        return $formattedEvent;
+    }
+
     private function formatValues($values)
     {
         if (is_array($values)) {
