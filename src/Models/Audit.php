@@ -14,7 +14,11 @@ class Audit extends Model
         "new_values" => "array",
     ];
 
-    protected $appends = ["formatted_old_values", "formatted_new_values"];
+    protected $appends = [
+        "formatted_event",
+        "formatted_old_values",
+        "formatted_new_values",
+    ];
 
     // Accessor for human-friendly old values
     public function getFormattedOldValuesAttribute()
