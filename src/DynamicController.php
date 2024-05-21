@@ -311,10 +311,15 @@ class DynamicController extends \App\Http\Controllers\Controller
         foreach ($this->model->getCasts() as $field => $type) {
             if ($type === "array") {
                 foreach ($allData as $key => $value) {
-                    // Check if the key starts with the field name followed by a dot
                     if (strpos($key, $field . ".") === 0) {
                         // Extract the sub-key and set the value in the array
                         $subKey = substr($key, strlen($field) + 1);
+                        if (
+                            !isset($allData[$field]) ||
+                            !is_array($allData[$field])
+                        ) {
+                            $allData[$field] = [];
+                        }
                         $allData[$field][$subKey] = $value;
 
                         // Remove the original key-value pair from $allData
@@ -493,16 +498,19 @@ class DynamicController extends \App\Http\Controllers\Controller
         foreach ($this->model->getCasts() as $field => $type) {
             if ($type === "array") {
                 foreach ($allData as $key => $value) {
-                    if ($key == $field) {
-                        // Check if the key starts with the field name followed by a dot
-                        if (strpos($key, $field . ".") === 0) {
-                            // Extract the sub-key and set the value in the array
-                            $subKey = substr($key, strlen($field) + 1);
-                            $allData[$field][$subKey] = $value;
-
-                            // Remove the original key-value pair from $allData
-                            unset($allData[$key]);
+                    if (strpos($key, $field . ".") === 0) {
+                        // Extract the sub-key and set the value in the array
+                        $subKey = substr($key, strlen($field) + 1);
+                        if (
+                            !isset($allData[$field]) ||
+                            !is_array($allData[$field])
+                        ) {
+                            $allData[$field] = [];
                         }
+                        $allData[$field][$subKey] = $value;
+
+                        // Remove the original key-value pair from $allData
+                        unset($allData[$key]);
                     }
                 }
             } elseif (
