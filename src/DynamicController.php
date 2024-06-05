@@ -158,6 +158,17 @@ class DynamicController extends \App\Http\Controllers\Controller
         return $this->paginateAndRespond($query, $request->input("take", 10));
     }
 
+    public function list(Request $request)
+    {
+        $query = $this->initializeQuery();
+
+        $this->applyRelationships($query);
+        $this->applyCustomOrderAndSearch($query, $request);
+        $this->applyFilters($query, $request);
+
+        return $this->respondWithAll($query);
+    }
+
     protected function initializeQuery()
     {
         return $this->model::query();
@@ -287,6 +298,12 @@ class DynamicController extends \App\Http\Controllers\Controller
     protected function paginateAndRespond($query, $perPage)
     {
         $data = $query->paginate($perPage);
+        return response()->json($data, 200);
+    }
+
+    protected function respondWithAll($query)
+    {
+        $data = $query->get();
         return response()->json($data, 200);
     }
 
