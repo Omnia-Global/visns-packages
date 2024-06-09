@@ -17,166 +17,173 @@ use Carbon\Carbon;
 
 class AuthController extends \App\Http\Controllers\Controller
 {
-	public function forgot(Request $request)
-	{
-		$error = "";
+    public function forgot(Request $request)
+    {
+        $error = "";
 
-		$request->validate(["email" => "required|email"]);
+        $request->validate(["email" => "required|email"]);
 
-		$checkUser = User::where("email", $request->only("email"))->count();
+        $checkUser = User::where("email", $request->only("email"))->count();
 
-		if ($checkUser > 0) {
-			$token = Str::random(60);
+        if ($checkUser > 0) {
+            $token = Str::random(60);
 
-			DB::table("password_resets")->insert([
-				"email" => $request->email,
-				"token" => $token,
-				"created_at" => Carbon::now(),
-			]);
+            DB::table("password_resets")->insert([
+                "email" => $request->email,
+                "token" => $token,
+                "created_at" => Carbon::now(),
+            ]);
 
-			if (env("APP_ENV") == "production") {
-				$to = $request->only("email");
-			} else {
-				$to = env("MAIL_TO_DEV");
-			}
+            if (env("APP_ENV") == "production") {
+                $to = $request->only("email");
+            } else {
+                $to = env("MAIL_TO_DEV");
+            }
 
-			if ($to != "") {
-				$content =
-					'<p>Click on the following <a href="' .
-					env("APP_URL") .
-					"/verify/" .
-					$token .
-					'">link</a> to reset your password.</p>';
+            if (
+                $request->has("frontend") &&
+                $request->input("frontend") == "true"
+            ) {
+                $url = env("FRONT_END_URL") . "/verify/" . $token;
+            } else {
+                $url = env("APP_URL") . "/verify/" . $token;
+            }
 
-				$content .=
-					"<p>If you have not requested for a password reset, please ignore this email.</p>";
+            if ($to != "") {
+                $content =
+                    '<p>Click on the following <a href="' .
+                    $url .
+                    '">link</a> to reset your password.</p>';
 
-				Mail::to($to)->send(
-					new GenericMail(
-						$content,
-						env("MAIL_FROM_ADDRESS"),
-						env("APP_NAME") . " - Password Reset Request"
-					)
-				);
-			}
-		} else {
-			$error = "The email address is not found, please try again.";
-		}
+                $content .=
+                    "<p>If you have not requested for a password reset, please ignore this email.</p>";
 
-		return response()->json([
-			"error" => $error,
-		]);
-	}
+                Mail::to($to)->send(
+                    new GenericMail(
+                        $content,
+                        env("MAIL_FROM_ADDRESS"),
+                        env("APP_NAME") . " - Password Reset Request"
+                    )
+                );
+            }
+        } else {
+            $error = "The email address is not found, please try again.";
+        }
 
-	public function reset(Request $request)
-	{
-		$error = "";
+        return response()->json([
+            "error" => $error,
+        ]);
+    }
 
-		$request->validate([
-			"code" => "required",
-			"password" => "required|min:8|confirmed",
-		]);
+    public function reset(Request $request)
+    {
+        $error = "";
 
-		$checkToken = DB::table("password_resets")
-			->where("token", $request->input("code"))
-			->count();
+        $request->validate([
+            "code" => "required",
+            "password" => "required|min:8|confirmed",
+        ]);
 
-		if ($checkToken == 0) {
-			$error =
-				"The token is no longer valid, please start the password request process again.";
-		} else {
-			$token = DB::table("password_resets")
-				->where("token", $request->input("code"))
-				->first();
+        $checkToken = DB::table("password_resets")
+            ->where("token", $request->input("code"))
+            ->count();
 
-			$user = User::where("email", $token->email)->first();
-			$user->password = Hash::make($request->input("password"));
-			$user->save();
+        if ($checkToken == 0) {
+            $error =
+                "The token is no longer valid, please start the password request process again.";
+        } else {
+            $token = DB::table("password_resets")
+                ->where("token", $request->input("code"))
+                ->first();
 
-			DB::table("password_resets")
-				->where("email", $user->email)
-				->delete();
-		}
+            $user = User::where("email", $token->email)->first();
+            $user->password = Hash::make($request->input("password"));
+            $user->save();
 
-		return response()->json([
-			"error" => $error,
-		]);
-	}
+            DB::table("password_resets")
+                ->where("email", $user->email)
+                ->delete();
+        }
 
-	public function authenticate(Request $request)
-	{
-		$error = "";
+        return response()->json([
+            "error" => $error,
+        ]);
+    }
 
-		// Determine if the input is an email address or a username
-		$isEmail =
-			filter_var($request->input("email"), FILTER_VALIDATE_EMAIL) !==
-			false;
+    public function authenticate(Request $request)
+    {
+        $error = "";
 
-		// Prepare credentials based on the input type
-		$credentials = $isEmail
-			? [
-				"email" => $request->input("email"),
-				"password" => $request->input("password"),
-			]
-			: [
-				"username" => $request->input("email"),
-				"password" => $request->input("password"),
-			];
+        // Determine if the input is an email address or a username
+        $isEmail =
+            filter_var($request->input("email"), FILTER_VALIDATE_EMAIL) !==
+            false;
 
-		$user = "";
+        // Prepare credentials based on the input type
+        $credentials = $isEmail
+            ? [
+                "email" => $request->input("email"),
+                "password" => $request->input("password"),
+            ]
+            : [
+                "username" => $request->input("email"),
+                "password" => $request->input("password"),
+            ];
 
-		if (Auth::attempt($credentials)) {
-			Auth::logoutOtherDevices($request->input("password"));
-			$user = Auth::user()->load("roles.permissions");
-		} else {
-			$error = "Login unsuccessful, please try again.";
-			$request->session()->flash("errors");
-		}
+        $user = "";
 
-		return response()->json([
-			"error" => $error,
-			"previous" => $request->input("location"),
-			"user" => $user,
-		]);
-	}
+        if (Auth::attempt($credentials)) {
+            Auth::logoutOtherDevices($request->input("password"));
+            $user = Auth::user()->load("roles.permissions");
+        } else {
+            $error = "Login unsuccessful, please try again.";
+            $request->session()->flash("errors");
+        }
 
-	public function logout(Request $request)
-	{
-		Auth::logout();
+        return response()->json([
+            "error" => $error,
+            "previous" => $request->input("location"),
+            "user" => $user,
+        ]);
+    }
 
-		$request->session()->invalidate();
+    public function logout(Request $request)
+    {
+        Auth::logout();
 
-		$request->session()->regenerateToken();
+        $request->session()->invalidate();
 
-		return redirect("/login");
-	}
+        $request->session()->regenerateToken();
 
-	public function login_api(Request $request)
-	{
-		$isEmail =
-			filter_var($request->input("username"), FILTER_VALIDATE_EMAIL) !==
-			false;
+        return redirect("/login");
+    }
 
-		// Prepare credentials based on the input type
-		$credentials = $isEmail
-			? [
-				"email" => $request->input("username"),
-				"password" => $request->input("password"),
-			]
-			: [
-				"username" => $request->input("username"),
-				"password" => $request->input("password"),
-			];
+    public function login_api(Request $request)
+    {
+        $isEmail =
+            filter_var($request->input("username"), FILTER_VALIDATE_EMAIL) !==
+            false;
 
-		$username = $request->input("username");
-		$password = $request->input("password");
+        // Prepare credentials based on the input type
+        $credentials = $isEmail
+            ? [
+                "email" => $request->input("username"),
+                "password" => $request->input("password"),
+            ]
+            : [
+                "username" => $request->input("username"),
+                "password" => $request->input("password"),
+            ];
 
-		if (Auth::attempt($credentials)) {
-			$user = Auth::user();
-			$token = $user->createToken("authToken");
-			return response()->json(["id" => $token->plainTextToken], 200);
-		} else {
-			return response()->json(["error" => "Unauthenticated"], 401);
-		}
-	}
+        $username = $request->input("username");
+        $password = $request->input("password");
+
+        if (Auth::attempt($credentials)) {
+            $user = Auth::user();
+            $token = $user->createToken("authToken");
+            return response()->json(["id" => $token->plainTextToken], 200);
+        } else {
+            return response()->json(["error" => "Unauthenticated"], 401);
+        }
+    }
 }
