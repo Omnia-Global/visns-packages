@@ -103,6 +103,11 @@ class DynamicController extends \App\Http\Controllers\Controller
                             $query->role($condition["value"]);
                         }
                         break;
+                    case "async":
+                        if ( method_exists($this->model, "scopeCustomSearch") ) {
+                            $query->customSearch($condition["value"]);
+                        }
+                        break;
                     default:
                         $query->where($condition["id"], $condition["value"]);
                         break;
