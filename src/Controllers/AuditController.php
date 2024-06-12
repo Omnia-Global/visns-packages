@@ -5,7 +5,7 @@ namespace Visnsstudio\VisnsPackages\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
-use Visnsstudio\VisnsPackages\Models\Audit;
+use App\Models\Audit;
 
 class AuditController extends \App\Http\Controllers\Controller
 {

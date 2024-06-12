@@ -98,18 +98,34 @@ class FileController extends \App\Http\Controllers\Controller
 
     public function download($id, $folder)
     {
-        $file = $this->getFile($id, $folder);
-        $filename = $this->formatFileName($file);
-        $filepath = $this->determineFilePath($file, $folder);
+        try {
+            // Retrieve the file based on the provided id and folder
+            $file = $this->getFile($id, $folder);
 
-        if (!is_null($filepath)) {
-            if (config("filesystems.default") == "s3") {
-                return $this->downloadFromS3($filepath, $filename);
+            // Get the temporary URL directly from the file model
+            $temporaryUrl = $file->file_url;
+
+            if ($temporaryUrl) {
+                // Redirect to the temporary URL
+                return redirect()->away($temporaryUrl);
             }
 
-            return $this->downloadFromFilesystem($filepath, $filename);
-        } else {
-            return response()->json(["error" => "File not found."], 404);
+            // Fallback to traditional file retrieval if temporary URL is not available
+            $filename = $this->formatFileName($file);
+            $filepath = $this->determineFilePath($file, $folder);
+
+            if (!is_null($filepath)) {
+                if (config("filesystems.default") === "s3") {
+                    return $this->downloadFromS3($filepath, $filename);
+                }
+
+                return $this->downloadFromFilesystem($filepath, $filename);
+            } else {
+                return response()->json(["error" => "File not found."], 404);
+            }
+        } catch (\Exception $e) {
+            // Handle any exceptions that occur
+            return response()->json(["error" => $e->getMessage()], 500);
         }
     }
 
@@ -202,8 +218,12 @@ class FileController extends \App\Http\Controllers\Controller
 
     protected function downloadFromS3($filepath, $filename)
     {
+        // Sanitize and encode the filename for URLs
+        $encodedFilename = rawurlencode($filename);
+
+        // Generate temporary URL for the file with properly encoded filename
         $url = Storage::temporaryUrl($filepath, now()->addMinutes(5), [
-            "ResponseContentDisposition" => "attachment; filename=" . $filename,
+            "ResponseContentDisposition" => "attachment; filename=\"{$encodedFilename}\"",
         ]);
 
         return redirect()->away($url);
@@ -211,9 +231,12 @@ class FileController extends \App\Http\Controllers\Controller
 
     protected function downloadFromFilesystem($filepath, $filename)
     {
+        // Encode filename for local storage download
+        $encodedFilename = rawurlencode($filename);
+
         return Storage::download(
             storage_path() . "/app/" . $filepath,
-            $filename
+            $encodedFilename
         );
     }
 

@@ -40,12 +40,19 @@ class AuthController extends \App\Http\Controllers\Controller
                 $to = env("MAIL_TO_DEV");
             }
 
+            if (
+                $request->has("frontend") &&
+                $request->input("frontend") == "true"
+            ) {
+                $url = env("FRONT_END_URL") . "/verify/" . $token;
+            } else {
+                $url = env("APP_URL") . "/verify/" . $token;
+            }
+
             if ($to != "") {
                 $content =
                     '<p>Click on the following <a href="' .
-                    env("APP_URL") .
-                    "/verify/" .
-                    $token .
+                    $url .
                     '">link</a> to reset your password.</p>';
 
                 $content .=
@@ -106,43 +113,27 @@ class AuthController extends \App\Http\Controllers\Controller
     public function authenticate(Request $request)
     {
         $error = "";
-        $credentials = [];
 
-        // Validate the input for email or username
-        $input = $request->input("email");
-        $password = $request->input("password");
+        // Determine if the input is an email address or a username
+        $isEmail =
+            filter_var($request->input("email"), FILTER_VALIDATE_EMAIL) !==
+            false;
 
-        // Check if the input is a valid email address
-        if (filter_var($input, FILTER_VALIDATE_EMAIL)) {
-            // Input is a valid email address
-            $credentials = [
-                "email" => $input,
-                "password" => $password,
+        // Prepare credentials based on the input type
+        $credentials = $isEmail
+            ? [
+                "email" => $request->input("email"),
+                "password" => $request->input("password"),
+            ]
+            : [
+                "username" => $request->input("email"),
+                "password" => $request->input("password"),
             ];
-        } else {
-            // Check if the input matches the expected username format
-            if (preg_match('/^[a-zA-Z0-9_]+$/', $input)) {
-                // Input is a valid username
-                $credentials = [
-                    "username" => $input,
-                    "password" => $password,
-                ];
-            } else {
-                // Input is neither a valid email nor a valid username
-                $error =
-                    "Invalid input format. Please enter a valid email or username.";
-                return response()->json([
-                    "error" => $error,
-                    "previous" => $request->input("location"),
-                    "user" => null,
-                ]);
-            }
-        }
 
         $user = "";
 
         if (Auth::attempt($credentials)) {
-            Auth::logoutOtherDevices($password);
+            Auth::logoutOtherDevices($request->input("password"));
             $user = Auth::user()->load("roles.permissions");
         } else {
             $error = "Login unsuccessful, please try again.";

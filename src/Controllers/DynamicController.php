@@ -103,6 +103,11 @@ class DynamicController extends \App\Http\Controllers\Controller
                             $query->role($condition["value"]);
                         }
                         break;
+                    case "async":
+                        if (method_exists($this->model, "scopeCustomSearch")) {
+                            $query->customSearch($condition["value"]);
+                        }
+                        break;
                     default:
                         $query->where($condition["id"], $condition["value"]);
                         break;
@@ -156,6 +161,17 @@ class DynamicController extends \App\Http\Controllers\Controller
         $this->applyFilters($query, $request);
 
         return $this->paginateAndRespond($query, $request->input("take", 10));
+    }
+
+    public function list(Request $request)
+    {
+        $query = $this->initializeQuery();
+
+        $this->applyRelationships($query);
+        $this->applyCustomOrderAndSearch($query, $request);
+        $this->applyFilters($query, $request);
+
+        return $this->respondWithAll($query);
     }
 
     protected function initializeQuery()
@@ -290,6 +306,12 @@ class DynamicController extends \App\Http\Controllers\Controller
         return response()->json($data, 200);
     }
 
+    protected function respondWithAll($query)
+    {
+        $data = $query->get();
+        return response()->json($data, 200);
+    }
+
     public function store(Request $request)
     {
         $error = "";
@@ -311,10 +333,15 @@ class DynamicController extends \App\Http\Controllers\Controller
         foreach ($this->model->getCasts() as $field => $type) {
             if ($type === "array") {
                 foreach ($allData as $key => $value) {
-                    // Check if the key starts with the field name followed by a dot
                     if (strpos($key, $field . ".") === 0) {
                         // Extract the sub-key and set the value in the array
                         $subKey = substr($key, strlen($field) + 1);
+                        if (
+                            !isset($allData[$field]) ||
+                            !is_array($allData[$field])
+                        ) {
+                            $allData[$field] = [];
+                        }
                         $allData[$field][$subKey] = $value;
 
                         // Remove the original key-value pair from $allData
@@ -493,16 +520,19 @@ class DynamicController extends \App\Http\Controllers\Controller
         foreach ($this->model->getCasts() as $field => $type) {
             if ($type === "array") {
                 foreach ($allData as $key => $value) {
-                    if ($key == $field) {
-                        // Check if the key starts with the field name followed by a dot
-                        if (strpos($key, $field . ".") === 0) {
-                            // Extract the sub-key and set the value in the array
-                            $subKey = substr($key, strlen($field) + 1);
-                            $allData[$field][$subKey] = $value;
-
-                            // Remove the original key-value pair from $allData
-                            unset($allData[$key]);
+                    if (strpos($key, $field . ".") === 0) {
+                        // Extract the sub-key and set the value in the array
+                        $subKey = substr($key, strlen($field) + 1);
+                        if (
+                            !isset($allData[$field]) ||
+                            !is_array($allData[$field])
+                        ) {
+                            $allData[$field] = [];
                         }
+                        $allData[$field][$subKey] = $value;
+
+                        // Remove the original key-value pair from $allData
+                        unset($allData[$key]);
                     }
                 }
             } elseif (
