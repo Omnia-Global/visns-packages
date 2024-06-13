@@ -626,6 +626,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                 "file_name" => $request->input("filename"),
                 "file_extension" => $request->input("extension"),
                 "file_size" => $request->input("filesize"),
+                "fileable_field" => $request->input('key'),
             ]);
 
             // Dynamically attach the file to the resource
