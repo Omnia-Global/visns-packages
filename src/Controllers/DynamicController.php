@@ -23,10 +23,10 @@ class DynamicController extends \App\Http\Controllers\Controller
         $path = $request->path(); // e.g., "ajax/companies/something"
 
         // Split the path into segments
-        $segments = explode("/", $path);
+        $segments = explode('/', $path);
 
         // Find the index of 'ajax' segment to determine where the model name should be
-        $ajaxIndex = array_search("ajax", $segments);
+        $ajaxIndex = array_search('ajax', $segments);
 
         // Assuming the segment after 'ajax' is the model name
         $modelNameSegment = $segments[$ajaxIndex + 1] ?? null;
@@ -53,19 +53,19 @@ class DynamicController extends \App\Http\Controllers\Controller
     public function templateSort(Request $request, $id)
     {
         $validated = $request->validate([
-            "detail" => ["required"],
+            'detail' => ['required'],
         ]);
 
         $resource = $this->model::findOrFail($id);
 
-        if ($request->has("detail")) {
-            $resource->detail = $request->input("detail");
+        if ($request->has('detail')) {
+            $resource->detail = $request->input('detail');
         }
 
         $resource->save();
 
         return response()->json([
-            "error" => "",
+            'error' => '',
         ]);
     }
 
@@ -74,42 +74,42 @@ class DynamicController extends \App\Http\Controllers\Controller
         $data = [];
 
         // Determine the sorting field
-        $sortField = "label"; // default sorting field
-        $sort = "asc";
-        $fields = $request->input("fields", ["id", "label"]);
+        $sortField = 'label'; // default sorting field
+        $sort = 'asc';
+        $fields = $request->input('fields', ['id', 'label']);
 
-        if ($request->filled("order")) {
-            $sort = $request->input("order");
+        if ($request->filled('order')) {
+            $sort = $request->input('order');
         }
 
         if (count($fields) >= 2) {
-            if ($request->filled("orderBy")) {
-                $sortField = $request->input("orderBy");
+            if ($request->filled('orderBy')) {
+                $sortField = $request->input('orderBy');
             } else {
                 $sortField = $fields[1]; // use the second key if available
             }
         }
 
         // Assuming a default ordering method if customOrder is not available
-        $query = method_exists($this->model, "scopeCustomOrder")
+        $query = method_exists($this->model, 'scopeCustomOrder')
             ? $this->model::customOrder($sortField, $sort)
             : $this->model::orderBy($sortField, $sort);
 
-        if ($request->has("where") && $request->filled("where")) {
-            foreach ($request->input("where") as $condition) {
-                switch ($condition["id"]) {
-                    case "role":
-                        if ($this->folder == "User") {
-                            $query->role($condition["value"]);
+        if ($request->has('where') && $request->filled('where')) {
+            foreach ($request->input('where') as $condition) {
+                switch ($condition['id']) {
+                    case 'role':
+                        if ($this->folder == 'User') {
+                            $query->role($condition['value']);
                         }
                         break;
-                    case "async":
-                        if (method_exists($this->model, "scopeCustomSearch")) {
-                            $query->customSearch($condition["value"]);
+                    case 'async':
+                        if (method_exists($this->model, 'scopeCustomSearch')) {
+                            $query->customSearch($condition['value']);
                         }
                         break;
                     default:
-                        $query->where($condition["id"], $condition["value"]);
+                        $query->where($condition['id'], $condition['value']);
                         break;
                 }
             }
@@ -124,8 +124,8 @@ class DynamicController extends \App\Http\Controllers\Controller
             $itemData[$firstKey] = $item->{$firstKey};
 
             // Set 'label' to be the value of the second key in $fields
-            $secondKey = $fields[1] ?? "label"; // Default to 'label' if there is no second key
-            $itemData["label"] = $item->{$secondKey};
+            $secondKey = $fields[1] ?? 'label'; // Default to 'label' if there is no second key
+            $itemData['label'] = $item->{$secondKey};
 
             // Add remaining fields
             foreach ($fields as $key => $field) {
@@ -137,7 +137,7 @@ class DynamicController extends \App\Http\Controllers\Controller
             array_push($data, $itemData);
         }
 
-        return response()->json(["data" => $data], 200);
+        return response()->json(['data' => $data], 200);
     }
 
     public function show($id)
@@ -145,7 +145,7 @@ class DynamicController extends \App\Http\Controllers\Controller
         $resource = $this->model::findOrFail($id);
 
         // Check if the model has defined loadable relations
-        if (method_exists($this->model, "loadableRelations")) {
+        if (method_exists($this->model, 'loadableRelations')) {
             $resource->load($this->model->loadableRelations());
         }
 
@@ -160,7 +160,7 @@ class DynamicController extends \App\Http\Controllers\Controller
         $this->applyCustomOrderAndSearch($query, $request);
         $this->applyFilters($query, $request);
 
-        return $this->paginateAndRespond($query, $request->input("take", 10));
+        return $this->paginateAndRespond($query, $request->input('take', 10));
     }
 
     public function list(Request $request)
@@ -181,28 +181,28 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     protected function applyRelationships($query)
     {
-        if (method_exists($this->model, "loadableRelations")) {
+        if (method_exists($this->model, 'loadableRelations')) {
             $query->with($this->model->loadableRelations());
         }
     }
 
     protected function applyCustomOrderAndSearch($query, Request $request)
     {
-        if (method_exists($this->model, "scopeCustomOrder")) {
+        if (method_exists($this->model, 'scopeCustomOrder')) {
             $query->customOrder(
-                $request->input("sortBy"),
-                $request->input("sort")
+                $request->input('sortBy'),
+                $request->input('sort')
             );
         }
-        if (method_exists($this->model, "scopeCustomSearch")) {
-            $query->customSearch($request->input("search"));
+        if (method_exists($this->model, 'scopeCustomSearch')) {
+            $query->customSearch($request->input('search'));
         }
     }
 
     protected function applyFilters($query, Request $request)
     {
-        if ($request->has("where") && $request->filled("where")) {
-            foreach ($request->input("where") as $condition) {
+        if ($request->has('where') && $request->filled('where')) {
+            foreach ($request->input('where') as $condition) {
                 $this->applyFilterCondition($query, $condition);
             }
         }
@@ -210,15 +210,15 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     protected function applyFilterCondition($query, $condition)
     {
-        $value = $condition["value"] ?? null;
+        $value = $condition['value'] ?? null;
         $casts = $this->model->getCasts();
 
-        if (isset($condition["id"]) && isset($casts[$condition["id"]])) {
-            $value = $this->castValue($value, $casts[$condition["id"]]);
+        if (isset($condition['id']) && isset($casts[$condition['id']])) {
+            $value = $this->castValue($value, $casts[$condition['id']]);
         }
 
-        if (isset($condition["whereHas"])) {
-            $query->whereHas($condition["whereHas"], function ($q) use (
+        if (isset($condition['whereHas'])) {
+            $query->whereHas($condition['whereHas'], function ($q) use (
                 $condition,
                 $value
             ) {
@@ -233,8 +233,8 @@ class DynamicController extends \App\Http\Controllers\Controller
     protected function castValue($value, $type)
     {
         switch ($type) {
-            case "datetime":
-            case "date":
+            case 'datetime':
+            case 'date':
                 return $this->handleDateValue($value);
             default:
                 return $value;
@@ -245,16 +245,16 @@ class DynamicController extends \App\Http\Controllers\Controller
     {
         if (
             is_array($value) &&
-            isset($value["start"]) &&
-            isset($value["end"])
+            isset($value['start']) &&
+            isset($value['end'])
         ) {
             return [
-                Carbon::createFromFormat("d-m-Y", $value["start"]),
-                Carbon::createFromFormat("d-m-Y", $value["end"]),
+                Carbon::createFromFormat('d-m-Y', $value['start']),
+                Carbon::createFromFormat('d-m-Y', $value['end']),
             ];
         }
 
-        if ($value === "now") {
+        if ($value === 'now') {
             return Carbon::now();
         }
 
@@ -263,36 +263,36 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     protected function applyConditionBasedOnOperator($query, $condition, $value)
     {
-        $operator = $condition["operator"] ?? "=";
-        $id = $condition["id"] ?? null;
+        $operator = $condition['operator'] ?? '=';
+        $id = $condition['id'] ?? null;
 
         if (!$id) {
             return;
         }
 
         switch ($operator) {
-            case "contains":
-                $query->where($id, "like", "%" . $value . "%");
+            case 'contains':
+                $query->where($id, 'like', '%' . $value . '%');
                 break;
-            case "gt":
-                $query->where($id, ">", $value);
+            case 'gt':
+                $query->where($id, '>', $value);
                 break;
-            case "gte":
-                $query->where($id, ">=", $value);
+            case 'gte':
+                $query->where($id, '>=', $value);
                 break;
-            case "inlist":
+            case 'inlist':
                 $query->whereIn($id, $value);
                 break;
-            case "inrange":
+            case 'inrange':
                 if (is_array($value) && count($value) === 2) {
                     $query->whereBetween($id, $value);
                 }
                 break;
-            case "lt":
-                $query->where($id, "<", $value);
+            case 'lt':
+                $query->where($id, '<', $value);
                 break;
-            case "lte":
-                $query->where($id, "<=", $value);
+            case 'lte':
+                $query->where($id, '<=', $value);
                 break;
             default:
                 $query->where($id, $operator, $value);
@@ -314,26 +314,26 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     public function store(Request $request)
     {
-        $error = "";
+        $error = '';
 
         // Validate the request based on the model's rules
         $validatedData = $request->validate(
-            $this->model->validationRules("store", $request->all())
+            $this->model->validationRules('store', $request->all())
         );
 
         // Merge validated data with the entire request data
         $allData = $this->deepMerge($request->all(), $validatedData);
 
         // Check if the model is 'User' and the password needs hashing
-        if ($this->folder == "User" && $request->has("password")) {
-            $allData["password"] = Hash::make($request->input("password"));
+        if ($this->folder == 'User' && $request->has('password')) {
+            $allData['password'] = Hash::make($request->input('password'));
         }
 
         // Process array fields like 'integration_detail'
         foreach ($this->model->getCasts() as $field => $type) {
-            if ($type === "array") {
+            if ($type === 'array') {
                 foreach ($allData as $key => $value) {
-                    if (strpos($key, $field . ".") === 0) {
+                    if (strpos($key, $field . '.') === 0) {
                         // Extract the sub-key and set the value in the array
                         $subKey = substr($key, strlen($field) + 1);
                         if (
@@ -349,7 +349,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                     }
                 }
             } elseif (
-                ($type === "datetime" || $type === "date") &&
+                ($type === 'datetime' || $type === 'date') &&
                 isset($allData[$field])
             ) {
                 // Convert the field using Carbon
@@ -370,7 +370,7 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         foreach ($this->model->loadableRelations() as $relation) {
             // Skip the relation if it contains a dot ('.')
-            if (strpos($relation, ".") !== false) {
+            if (strpos($relation, '.') !== false) {
                 continue;
             }
 
@@ -400,7 +400,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                     ) {
                         $ids = array_map(function ($item) {
                             // Assuming each item has either 'id' or 'value' key
-                            return $item["id"] ?? $item["value"];
+                            return $item['id'] ?? $item['value'];
                         }, $input);
                     } elseif (is_array($input)) {
                         // Assuming direct array of IDs
@@ -416,29 +416,29 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
 
         // Handle file upload if 'key' is present in the request
-        if ($request->has("key") && $request->has("file_relationship")) {
-            $relationshipMethod = $request->input("file_relationship");
+        if ($request->has('key') && $request->has('file_relationship')) {
+            $relationshipMethod = $request->input('file_relationship');
             $unique_name =
-                $request->input("uuid") . "." . $request->input("extension");
-            $path = $this->folder . "/" . $unique_name;
+                $request->input('uuid') . '.' . $request->input('extension');
+            $path = $this->folder . '/' . $unique_name;
 
             Storage::copy(
-                $request->input("key"),
+                $request->input('key'),
                 str_replace(
-                    "tmp/",
-                    $this->folder . "/",
-                    $request->input("key")
+                    'tmp/',
+                    $this->folder . '/',
+                    $request->input('key')
                 ) .
-                    "." .
-                    $request->input("extension")
+                    '.' .
+                    $request->input('extension')
             );
 
             $file = new File([
-                "file_path" => $path,
-                "file_name" => $request->input("filename"),
-                "file_extension" => $request->input("extension"),
-                "file_size" => $request->input("filesize"),
-                "fileable_field" => $request->input('file_relationship'),
+                'file_path' => $path,
+                'file_name' => $request->input('filename'),
+                'file_extension' => $request->input('extension'),
+                'file_size' => $request->input('filesize'),
+                'fileable_field' => $request->input('file_relationship'),
             ]);
 
             // Dynamically attach the file to the resource
@@ -458,21 +458,22 @@ class DynamicController extends \App\Http\Controllers\Controller
                     $extension = $fileUpload->getClientOriginalExtension();
                     $fileName = $fileUpload->getClientOriginalName();
                     $fileSize = $fileUpload->getSize();
-                    $filePath = $fileName; // Custom path in your S3 bucket
+                    $uniqueName = Str::uuid() . '.' . $extension; // You can also use \Str::random(40) for a random string
+                    $filePath = $this->folder . '/' . $uniqueName;
 
                     // Upload file to S3
                     Storage::put(
-                        $this->folder . "/" . $filePath,
+                        $this->folder . '/' . $uniqueName,
                         file_get_contents($fileUpload)
                     );
 
                     // Create a record in the files table
                     $file = new File([
-                        "file_path" => $filePath, // Assuming 'file_path' is the full path in the bucket
-                        "file_name" => $fileName,
-                        "file_extension" => $extension,
-                        "file_size" => $fileSize,
-                        "fileable_field" => $fileKey, // Assuming this field denotes the purpose or type of the file
+                        'file_path' => $filePath, // Assuming 'file_path' is the full path in the bucket
+                        'file_name' => $fileName,
+                        'file_extension' => $extension,
+                        'file_size' => $fileSize,
+                        'fileable_field' => $fileKey, // Assuming this field denotes the purpose or type of the file
                     ]);
 
                     $resource->$fileKey()->save($file);
@@ -480,48 +481,48 @@ class DynamicController extends \App\Http\Controllers\Controller
             }
         }
 
-        if ($this->folder == "User" && $request->has("role")) {
-            $resource->assignRole([$request->input("role")]);
+        if ($this->folder == 'User' && $request->has('role')) {
+            $resource->assignRole([$request->input('role')]);
         }
 
         // Check if the model has defined loadable relations
-        if (method_exists($this->model, "loadableRelations")) {
+        if (method_exists($this->model, 'loadableRelations')) {
             $resource->load($this->model->loadableRelations());
         }
 
         return response()->json(
-            ["data" => $resource ?? "", "error" => $error ?? ""],
-            $error == "" ? 200 : 400
+            ['data' => $resource ?? '', 'error' => $error ?? ''],
+            $error == '' ? 200 : 400
         );
     }
 
     public function update(Request $request, $id)
     {
-        $error = "";
+        $error = '';
 
         // Find the resource
         $resource = $this->model::findOrFail($id);
 
         // Add the $id to the request data
-        $requestData = $request->all() + ["id" => $id];
+        $requestData = $request->all() + ['id' => $id];
 
         // Validate the request based on the model's rules
         $validatedData = $request->validate(
-            $this->model->validationRules("update", $requestData)
+            $this->model->validationRules('update', $requestData)
         );
         // Deep merge validated data with the entire request data to preserve nested unvalidated data
         $allData = $this->deepMerge($request->all(), $validatedData);
 
         // Check if the model is 'User' and the password needs hashing
-        if ($this->folder == "User" && $request->has("password")) {
-            $allData["password"] = Hash::make($request->input("password"));
+        if ($this->folder == 'User' && $request->has('password')) {
+            $allData['password'] = Hash::make($request->input('password'));
         }
 
         // Process array fields like 'integration_detail'
         foreach ($this->model->getCasts() as $field => $type) {
-            if ($type === "array") {
+            if ($type === 'array') {
                 foreach ($allData as $key => $value) {
-                    if (strpos($key, $field . ".") === 0) {
+                    if (strpos($key, $field . '.') === 0) {
                         // Extract the sub-key and set the value in the array
                         $subKey = substr($key, strlen($field) + 1);
                         if (
@@ -537,7 +538,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                     }
                 }
             } elseif (
-                ($type === "datetime" || $type === "date") &&
+                ($type === 'datetime' || $type === 'date') &&
                 isset($allData[$field])
             ) {
                 // Convert the field using Carbon
@@ -558,7 +559,7 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         foreach ($this->model->loadableRelations() as $relation) {
             // Skip the relation if it contains a dot ('.')
-            if (strpos($relation, ".") !== false) {
+            if (strpos($relation, '.') !== false) {
                 continue;
             }
 
@@ -588,7 +589,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                     ) {
                         $ids = array_map(function ($item) {
                             // Assuming each item has either 'id' or 'value' key
-                            return $item["id"] ?? $item["value"];
+                            return $item['id'] ?? $item['value'];
                         }, $input);
                     } elseif (is_array($input)) {
                         // Assuming direct array of IDs
@@ -604,29 +605,29 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
 
         // Handle file upload if 'key' is present in the request
-        if ($request->has("key") && $request->has("file_relationship")) {
-            $relationshipMethod = $request->input("file_relationship");
+        if ($request->has('key') && $request->has('file_relationship')) {
+            $relationshipMethod = $request->input('file_relationship');
             $unique_name =
-                $request->input("uuid") . "." . $request->input("extension");
-            $path = $this->folder . "/" . $unique_name;
+                $request->input('uuid') . '.' . $request->input('extension');
+            $path = $this->folder . '/' . $unique_name;
 
             Storage::copy(
-                $request->input("key"),
+                $request->input('key'),
                 str_replace(
-                    "tmp/",
-                    $this->folder . "/",
-                    $request->input("key")
+                    'tmp/',
+                    $this->folder . '/',
+                    $request->input('key')
                 ) .
-                    "." .
-                    $request->input("extension")
+                    '.' .
+                    $request->input('extension')
             );
 
             $file = new File([
-                "file_path" => $path,
-                "file_name" => $request->input("filename"),
-                "file_extension" => $request->input("extension"),
-                "file_size" => $request->input("filesize"),
-                "fileable_field" => $request->input('file_relationship'),
+                'file_path' => $path,
+                'file_name' => $request->input('filename'),
+                'file_extension' => $request->input('extension'),
+                'file_size' => $request->input('filesize'),
+                'fileable_field' => $request->input('file_relationship'),
             ]);
 
             // Dynamically attach the file to the resource
@@ -653,21 +654,22 @@ class DynamicController extends \App\Http\Controllers\Controller
                     $extension = $fileUpload->getClientOriginalExtension();
                     $fileName = $fileUpload->getClientOriginalName();
                     $fileSize = $fileUpload->getSize();
-                    $filePath = $fileName; // Custom path in your S3 bucket
+                    $uniqueName = Str::uuid() . '.' . $extension; // You can also use \Str::random(40) for a random string
+                    $filePath = $this->folder . '/' . $uniqueName;
 
                     // Upload file to S3
                     Storage::put(
-                        $this->folder . "/" . $filePath,
+                        $this->folder . '/' . $uniqueName,
                         file_get_contents($fileUpload)
                     );
 
                     // Create a record in the files table
                     $file = new File([
-                        "file_path" => $filePath, // Assuming 'file_path' is the full path in the bucket
-                        "file_name" => $fileName,
-                        "file_extension" => $extension,
-                        "file_size" => $fileSize,
-                        "fileable_field" => $fileKey, // Assuming this field denotes the purpose or type of the file
+                        'file_path' => $filePath, // Assuming 'file_path' is the full path in the bucket
+                        'file_name' => $fileName,
+                        'file_extension' => $extension,
+                        'file_size' => $fileSize,
+                        'fileable_field' => $fileKey, // Assuming this field denotes the purpose or type of the file
                     ]);
 
                     if (
@@ -681,18 +683,18 @@ class DynamicController extends \App\Http\Controllers\Controller
             }
         }
 
-        if ($this->folder == "User" && $request->has("role")) {
-            $resource->syncRoles([$request->input("role")]);
+        if ($this->folder == 'User' && $request->has('role')) {
+            $resource->syncRoles([$request->input('role')]);
         }
 
         // Check if the model has defined loadable relations
-        if (method_exists($this->model, "loadableRelations")) {
+        if (method_exists($this->model, 'loadableRelations')) {
             $resource->load($this->model->loadableRelations());
         }
 
         return response()->json(
-            ["data" => $resource ?? "", "error" => $error ?? ""],
-            $error == "" ? 200 : 400
+            ['data' => $resource ?? '', 'error' => $error ?? ''],
+            $error == '' ? 200 : 400
         );
     }
 
@@ -722,54 +724,54 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     public function updateGallery(Request $request, $id)
     {
-        $error = "";
+        $error = '';
 
         // Find the resource
         $resource = $this->model::findOrFail($id);
 
         $validated = $request->validate([
-            "key" => ["required"],
-            "uuid" => ["required"],
-            "extension" => ["required"],
-            "filename" => ["required"],
-            "fileable_field" => ["required"],
-            "fileable_type" => ["required"],
+            'key' => ['required'],
+            'uuid' => ['required'],
+            'extension' => ['required'],
+            'filename' => ['required'],
+            'fileable_field' => ['required'],
+            'fileable_type' => ['required'],
         ]);
 
-        if ($request->filled("key")) {
+        if ($request->filled('key')) {
             $filePath =
-                str_replace("tmp/", "", $request->input("key")) .
-                "." .
-                $request->input("extension");
+                str_replace('tmp/', '', $request->input('key')) .
+                '.' .
+                $request->input('extension');
             $destinationPath =
                 $this->original .
-                "/" .
-                $request->input("uuid") .
-                "." .
-                $request->input("extension");
+                '/' .
+                $request->input('uuid') .
+                '.' .
+                $request->input('extension');
 
-            Storage::copy($request->input("key"), $destinationPath);
+            Storage::copy($request->input('key'), $destinationPath);
 
-            $nextOrder = File::where("fileable_id", $resource->id)
-                ->where("fileable_field", $request->input("fileable_field"))
-                ->where("fileable_type", $request->input("fileable_type"))
-                ->max("sort_order");
+            $nextOrder = File::where('fileable_id', $resource->id)
+                ->where('fileable_field', $request->input('fileable_field'))
+                ->where('fileable_type', $request->input('fileable_type'))
+                ->max('sort_order');
 
             $file = new File([
-                "fileable_field" => $request->input("fileable_field"),
-                "file_path" => $filePath,
-                "file_name" => $request->input("filename"),
-                "file_extension" => $request->input("extension"),
-                "file_size" => $request->input("filename"),
-                "sort_order" => $nextOrder + 1,
+                'fileable_field' => $request->input('fileable_field'),
+                'file_path' => $filePath,
+                'file_name' => $request->input('filename'),
+                'file_extension' => $request->input('extension'),
+                'file_size' => $request->input('filename'),
+                'sort_order' => $nextOrder + 1,
             ]);
 
-            $resource->{$request->input("fileable_field")}()->save($file);
+            $resource->{$request->input('fileable_field')}()->save($file);
         }
 
         return response()->json(
-            ["data" => $resource ?? "", "error" => $error ?? ""],
-            $error == "" ? 200 : 400
+            ['data' => $resource ?? '', 'error' => $error ?? ''],
+            $error == '' ? 200 : 400
         );
     }
 
@@ -778,6 +780,6 @@ class DynamicController extends \App\Http\Controllers\Controller
         $item = $this->model::findOrFail($id);
         $item->delete();
 
-        return response()->json(["error" => ""], 200);
+        return response()->json(['error' => ''], 200);
     }
 }
