@@ -705,8 +705,13 @@ class DynamicController extends \App\Http\Controllers\Controller
                 isset($original[$key]) &&
                 is_array($original[$key])
             ) {
+                // Recursively merge arrays
                 $original[$key] = $this->deepMerge($original[$key], $value);
+            } elseif (is_null($value)) {
+                // Handle null values specifically if needed
+                unset($original[$key]);
             } else {
+                // Override original value
                 $original[$key] = $value;
             }
         }
