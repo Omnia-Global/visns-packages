@@ -234,6 +234,16 @@ class DynamicController extends \App\Http\Controllers\Controller
             }
         }
 
+        // Filter out parents with empty labels
+        $groupedData = array_filter($groupedData, function ($group) {
+            return !empty($group["label"]);
+        });
+
+        // Sort parent groups alphabetically by label
+        uasort($groupedData, function ($a, $b) {
+            return strcasecmp($a["label"], $b["label"]);
+        });
+
         // Flatten grouped data for the response and filter out empty labels
         $flattenedData = [];
         foreach ($groupedData as $parentKey => $group) {
