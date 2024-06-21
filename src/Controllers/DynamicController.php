@@ -224,7 +224,7 @@ class DynamicController extends \App\Http\Controllers\Controller
             }
         }
 
-        // Assign labels for parent groups
+        // Assign labels for parent groups and filter out parents with empty labels
         foreach ($groupedData as $parentId => &$group) {
             if (isset($group["options"]) && count($group["options"]) > 0) {
                 $parentItem = $items->firstWhere($fields[0], $parentId);
@@ -234,16 +234,16 @@ class DynamicController extends \App\Http\Controllers\Controller
             }
         }
 
-        // Flatten grouped data for the response
+        // Flatten grouped data for the response and filter out empty labels
         $flattenedData = [];
         foreach ($groupedData as $parentKey => $group) {
-            if (!empty($group["options"])) {
+            if (!empty($group["options"]) && !empty($group["label"])) {
                 $flattenedData[] = [
                     "id" => $parentKey,
                     "label" => $group["label"],
                     "options" => $group["options"],
                 ];
-            } else {
+            } elseif (!isset($group["options"]) && !empty($group["label"])) {
                 $flattenedData[] = [
                     "id" => $group[$firstKey],
                     "label" => $group["label"],
