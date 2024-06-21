@@ -209,7 +209,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                 }
             }
 
-            if (isset($item->parent_id) && $item->parent_id !== null) {
+            if (isset($item->parent_id) && $item->parent_id > 0) {
                 // If item has a parent, add it under its parent group
                 if (!isset($groupedData[$item->parent_id])) {
                     $groupedData[$item->parent_id] = [
@@ -220,10 +220,13 @@ class DynamicController extends \App\Http\Controllers\Controller
                 $groupedData[$item->parent_id]["options"][] = $itemData;
             } else {
                 // If item has no parent, check for duplicate parent labels
-                if (!in_array($item->{$secondKey}, $parentLabels)) {
-                    $groupedData[$item->{$firstKey}] = $itemData;
-                    $groupedData[$item->{$firstKey}]["options"] = [];
-                    $parentLabels[] = $item->{$secondKey}; // Add to parent labels set
+                if (!isset($groupedData[$item->{$firstKey}])) {
+                    $groupedData[$item->{$firstKey}] = [
+                        "id" => $item->{$firstKey},
+                        "label" => $item->{$secondKey},
+                        "options" => [],
+                    ];
+                    $parentLabels[$item->{$firstKey}] = $item->{$secondKey}; // Add to parent labels set with unique ID
                 }
             }
         }
@@ -251,16 +254,17 @@ class DynamicController extends \App\Http\Controllers\Controller
         // Flatten grouped data for the response and filter out empty labels
         $flattenedData = [];
         foreach ($groupedData as $parentKey => $group) {
-            if (!empty($group["options"]) && !empty($group["label"])) {
+            if (!empty($group["options"])) {
                 $flattenedData[] = [
                     "id" => $parentKey,
                     "label" => $group["label"],
                     "options" => $group["options"],
                 ];
-            } elseif (!isset($group["options"]) && !empty($group["label"])) {
+            } elseif (isset($group["id"])) {
                 $flattenedData[] = [
-                    "id" => $group[$firstKey],
+                    "id" => $group["id"],
                     "label" => $group["label"],
+                    "options" => $group["options"], // Ensure options is set, even if empty
                 ];
             }
         }
