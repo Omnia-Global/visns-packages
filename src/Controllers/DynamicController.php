@@ -189,6 +189,7 @@ class DynamicController extends \App\Http\Controllers\Controller
         // Fetch and group data by parent_id
         $items = $query->get();
         $groupedData = [];
+        $parentLabels = []; // Track parent labels to avoid duplicates
 
         foreach ($items as $item) {
             $itemData = [];
@@ -218,9 +219,12 @@ class DynamicController extends \App\Http\Controllers\Controller
                 }
                 $groupedData[$item->parent_id]["options"][] = $itemData;
             } else {
-                // If item has no parent, add it as a standalone item
-                $groupedData[$item->{$firstKey}] = $itemData;
-                $groupedData[$item->{$firstKey}]["options"] = [];
+                // If item has no parent, check for duplicate parent labels
+                if (!in_array($item->{$secondKey}, $parentLabels)) {
+                    $groupedData[$item->{$firstKey}] = $itemData;
+                    $groupedData[$item->{$firstKey}]["options"] = [];
+                    $parentLabels[] = $item->{$secondKey}; // Add to parent labels set
+                }
             }
         }
 
