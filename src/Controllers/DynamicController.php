@@ -109,7 +109,11 @@ class DynamicController extends \App\Http\Controllers\Controller
                         }
                         break;
                     default:
-                        $query->where($condition["id"], $condition["value"]);
+                        $this->applyConditionBasedOnOperator(
+                            $query,
+                            $condition,
+                            $condition["value"]
+                        );
                         break;
                 }
             }
@@ -180,7 +184,11 @@ class DynamicController extends \App\Http\Controllers\Controller
                         }
                         break;
                     default:
-                        $query->where($condition["id"], $condition["value"]);
+                        $this->applyConditionBasedOnOperator(
+                            $query,
+                            $condition,
+                            $condition["value"]
+                        );
                         break;
                 }
             }
