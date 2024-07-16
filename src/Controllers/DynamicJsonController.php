@@ -73,22 +73,25 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
     {
         $request->validate([
             "where" => "required|array",
-            "dataKey" => "required|string",
         ]);
 
         $dataKey = $request->input("dataKey");
         $data = [];
         $id = 0;
+        $dataKey = "";
 
         foreach ($request->input("where") as $filter) {
             switch ($filter["id"]) {
                 case "id":
                     $id = $filter["value"];
                     break;
+                case "dataKey":
+                    $dataKey = $filter["dataKey"];
+                    break;
             }
         }
 
-        if ($id > 0) {
+        if ($id > 0 && $dataKey != "") {
             $item = $this->model->find($id);
 
             if ($item && !is_null($item->{$dataKey})) {
