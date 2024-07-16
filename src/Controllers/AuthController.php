@@ -142,7 +142,11 @@ class AuthController extends \App\Http\Controllers\Controller
 
         return response()->json([
             "error" => $error,
-            "previous" => $request->input("location"),
+            "previous" =>
+                $request->input("location") == "/" ||
+                $request->input("location") == "/login"
+                    ? ""
+                    : $request->input("location"),
             "user" => $user,
         ]);
     }
