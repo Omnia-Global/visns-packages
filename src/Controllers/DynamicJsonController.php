@@ -86,7 +86,7 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
                     $id = $filter["value"];
                     break;
                 case "dataKey":
-                    $dataKey = $filter["dataKey"];
+                    $dataKey = $filter["value"];
                     break;
             }
         }
