@@ -108,6 +108,9 @@ class DynamicController extends \App\Http\Controllers\Controller
                             $query->customSearch($condition["value"]);
                         }
                         break;
+                    case "whereHas":
+                        $query->whereHas($condition["value"]);
+                        break;
                     default:
                         $this->applyConditionBasedOnOperator(
                             $query,
@@ -182,6 +185,9 @@ class DynamicController extends \App\Http\Controllers\Controller
                         if (method_exists($this->model, "scopeCustomSearch")) {
                             $query->customSearch($condition["value"]);
                         }
+                        break;
+                    case "whereHas":
+                        $query->whereHas($condition["value"]);
                         break;
                     default:
                         $this->applyConditionBasedOnOperator(
