@@ -50,6 +50,10 @@ class UserController extends \App\Http\Controllers\Controller
             $user->load($model->loadableRelations());
         }
 
-        return response()->json($user);
+        // Convert the user object to an array
+        $userArray = $user->toArray();
+
+        // Return JSON response
+        return response()->json($userArray);
     }
 }
