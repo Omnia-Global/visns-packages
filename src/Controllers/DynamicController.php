@@ -441,7 +441,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                 $query->where($id, "<=", $value);
                 break;
             default:
-                $query->where($id, $operator, $value);
+                $query->where($id, $value);
                 break;
         }
     }
