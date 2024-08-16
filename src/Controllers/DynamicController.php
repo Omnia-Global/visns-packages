@@ -502,6 +502,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                 $allData[$field] = Carbon::createFromTimestamp(
                     strtotime($allData[$field])
                 );
+            } elseif ($type === "boolean") {
+                $allData[$field] = $allData[$field] === true ? 1 : 0;
             }
         }
 
@@ -691,6 +693,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                 $allData[$field] = Carbon::createFromTimestamp(
                     strtotime($allData[$field])
                 );
+            } elseif ($type === "boolean") {
+                $allData[$field] = $allData[$field] === true ? 1 : 0;
             }
         }
 
