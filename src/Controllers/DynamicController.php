@@ -472,6 +472,9 @@ class DynamicController extends \App\Http\Controllers\Controller
             case "inlist":
                 $query->whereIn($id, $value);
                 break;
+            case "notinlist":
+                $query->whereNotIn($id, $value);
+                break;
             case "inrange":
                 if (is_array($value) && count($value) === 2) {
                     $query->whereBetween($id, $value);
