@@ -55,9 +55,21 @@ class DynamicController extends \App\Http\Controllers\Controller
         $data = [];
 
         foreach ($this->model::orderBy("sort_order")->get() as $item) {
+            $label = "";
+
+            if (isset($item->name)) {
+                $label = $item->name;
+            } elseif (isset($item->label)) {
+                $label = $item->label;
+            } elseif (isset($item->firstname) && isset($item->surname)) {
+                $label = $item->firstname . " " . $item->surname;
+            } elseif (isset($item->company)) {
+                $label = $item->company;
+            }
+
             array_push($data, [
                 "id" => $item->id,
-                "label" => $item->label,
+                "label" => $label,
             ]);
         }
 
