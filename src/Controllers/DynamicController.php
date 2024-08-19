@@ -50,6 +50,37 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
     }
 
+    public function sort_list()
+    {
+        $data = [];
+
+        foreach ($this->model::orderBy("sort_order")->get() as $item) {
+            array_push($data, [
+                "id" => $item->id,
+                "label" => $item->label,
+            ]);
+        }
+
+        return response()->json($data);
+    }
+
+    public function sort_update(Request $request)
+    {
+        $error = "";
+
+        $validated = $request->validate([
+            "list" => ["required"],
+        ]);
+
+        foreach ($request->input("list") as $key => $item) {
+            $object = $this->model::find($item["id"]);
+            $object->sort_order = $key;
+            $object->save();
+        }
+
+        return response()->json(["error" => $error]);
+    }
+
     public function templateSort(Request $request, $id)
     {
         $validated = $request->validate([
