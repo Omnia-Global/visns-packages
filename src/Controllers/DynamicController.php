@@ -165,7 +165,6 @@ class DynamicController extends \App\Http\Controllers\Controller
             }
         }
 
-        // Fields to be retrieved, defaulting to ['id', 'label']
         foreach ($query->get() as $item) {
             $itemData = [];
 
@@ -173,13 +172,33 @@ class DynamicController extends \App\Http\Controllers\Controller
             $firstKey = $fields[0];
             $itemData[$firstKey] = $item->{$firstKey};
 
-            // Set 'label' to be the value of the second key in $fields
-            $secondKey = $fields[1] ?? "label"; // Default to 'label' if there is no second key
-            $itemData["label"] = $item->{$secondKey};
+            // Check if fields include 'firstname' and 'surname' to combine them
+            if (
+                in_array("firstname", $fields) &&
+                in_array("surname", $fields)
+            ) {
+                $firstname = $item->firstname ?? "";
+                $surname = $item->surname ?? "";
+                $itemData["label"] = trim($firstname . " " . $surname);
+            } elseif (in_array("label", $fields)) {
+                // Use 'label' field if it exists
+                $itemData["label"] = $item->label;
+            } elseif (in_array("name", $fields)) {
+                // Use 'name' field as 'label' if 'label' is not present
+                $itemData["label"] = $item->name;
+            } else {
+                // Default behavior if no 'label' or 'name' field exists
+                $secondKey = $fields[1] ?? "label"; // Default to 'label' if there is no second key
+                $itemData["label"] = $item->{$secondKey};
+            }
 
             // Add remaining fields
             foreach ($fields as $key => $field) {
-                if ($key > 1) {
+                if (
+                    $key > 1 &&
+                    $field !== "firstname" &&
+                    $field !== "surname"
+                ) {
                     $itemData[$field] = $item->{$field};
                 }
             }
