@@ -568,7 +568,11 @@ class DynamicController extends \App\Http\Controllers\Controller
                     strtotime($allData[$field])
                 );
             } elseif ($type === "boolean") {
-                $allData[$field] = $allData[$field] === true ? 1 : 0;
+                if (isset($allData[$field])) {
+                    $allData[$field] = $allData[$field] === true ? 1 : 0;
+                } else {
+                    $allData[$field] = 0;
+                }
             }
         }
 
