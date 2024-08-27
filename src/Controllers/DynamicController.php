@@ -535,6 +535,13 @@ class DynamicController extends \App\Http\Controllers\Controller
         // Merge validated data with the entire request data
         $allData = $this->deepMerge($request->all(), $validatedData);
 
+        // Overwrite fields with their "value" if exists
+        foreach ($allData as $field => $value) {
+            if (isset($value["value"])) {
+                $allData[$field] = $value["value"];
+            }
+        }
+
         // Check if the model is 'User' and the password needs hashing
         if ($this->folder == "User" && $request->has("password")) {
             $allData["password"] = Hash::make($request->input("password"));
@@ -729,6 +736,13 @@ class DynamicController extends \App\Http\Controllers\Controller
         );
         // Deep merge validated data with the entire request data to preserve nested unvalidated data
         $allData = $this->deepMerge($request->all(), $validatedData);
+
+        // Overwrite fields with their "value" if exists
+        foreach ($allData as $field => $value) {
+            if (isset($value["value"])) {
+                $allData[$field] = $value["value"];
+            }
+        }
 
         // Check if the model is 'User' and the password needs hashing
         if ($this->folder == "User" && $request->has("password")) {
