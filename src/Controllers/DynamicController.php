@@ -537,7 +537,15 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         // Overwrite fields with their "value" if exists
         foreach ($allData as $field => $value) {
-            if (isset($value["value"])) {
+            // Check if the value is an instance of UploadedFile
+            if ($value instanceof \Illuminate\Http\UploadedFile) {
+                // Handle file upload separately or skip this processing
+                // You might want to process file uploads differently here
+                continue;
+            }
+
+            // Check if value is an array and has "value" key
+            if (is_array($value) && isset($value["value"])) {
                 $allData[$field] = $value["value"];
             }
         }
@@ -739,7 +747,15 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         // Overwrite fields with their "value" if exists
         foreach ($allData as $field => $value) {
-            if (isset($value["value"])) {
+            // Check if the value is an instance of UploadedFile
+            if ($value instanceof \Illuminate\Http\UploadedFile) {
+                // Handle file upload separately or skip this processing
+                // You might want to process file uploads differently here
+                continue;
+            }
+
+            // Check if value is an array and has "value" key
+            if (is_array($value) && isset($value["value"])) {
                 $allData[$field] = $value["value"];
             }
         }
