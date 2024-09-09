@@ -478,35 +478,41 @@ class DynamicController extends \App\Http\Controllers\Controller
             return;
         }
 
+        // Handle JSON field syntax
+        $field = Str::contains($id, ".") ? str_replace(".", "->", $id) : $id;
+
         switch ($operator) {
+            case "contain_json":
+                $query->whereJsonContains($field, $value);
+                break;
             case "contains":
-                $query->where($id, "like", "%" . $value . "%");
+                $query->where($field, "like", "%" . $value . "%");
                 break;
             case "gt":
-                $query->where($id, ">", $value);
+                $query->where($field, ">", $value);
                 break;
             case "gte":
-                $query->where($id, ">=", $value);
+                $query->where($field, ">=", $value);
                 break;
             case "inlist":
-                $query->whereIn($id, $value);
+                $query->whereIn($field, $value);
                 break;
             case "notinlist":
-                $query->whereNotIn($id, $value);
+                $query->whereNotIn($field, $value);
                 break;
             case "inrange":
                 if (is_array($value) && count($value) === 2) {
-                    $query->whereBetween($id, $value);
+                    $query->whereBetween($field, $value);
                 }
                 break;
             case "lt":
-                $query->where($id, "<", $value);
+                $query->where($field, "<", $value);
                 break;
             case "lte":
-                $query->where($id, "<=", $value);
+                $query->where($field, "<=", $value);
                 break;
             default:
-                $query->where($id, $value);
+                $query->where($field, $value);
                 break;
         }
     }
