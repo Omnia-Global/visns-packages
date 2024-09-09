@@ -514,6 +514,9 @@ class DynamicController extends \App\Http\Controllers\Controller
                     $query->whereBetween($jsonField, $value);
                 }
                 break;
+            case "is_null":
+                $query->whereNull($jsonField);
+                break;
             case "lt":
                 $query->where($jsonField, "<", $value);
                 break;
