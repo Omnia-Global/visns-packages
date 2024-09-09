@@ -479,45 +479,49 @@ class DynamicController extends \App\Http\Controllers\Controller
             return;
         }
 
-        // Convert dot notation (e.g., event_coordinator.description) to JSON path (e.g., $.event_coordinator.description)
-        $jsonPath = '$.' . str_replace(".", ".", $id);
+        // Extract JSON field and key from $id (e.g., 'event_coordinator.company' becomes 'event_coordinator' and 'company')
+        $fieldParts = explode(".", $id);
+        $jsonField = array_shift($fieldParts); // The main JSON column (e.g., 'event_coordinator')
+        $jsonPath = '$.' . implode(".", $fieldParts); // The path inside the JSON (e.g., '$.company')
 
         switch ($operator) {
             case "contain_json":
                 $query->where(
-                    DB::raw("JSON_UNQUOTE(JSON_EXTRACT($id, '$jsonPath'))"),
+                    DB::raw(
+                        "JSON_UNQUOTE(JSON_EXTRACT($jsonField, '$jsonPath'))"
+                    ),
                     "like",
                     "%" . $value . "%"
                 );
                 break;
             case "contains":
-                $query->where($id, "like", "%" . $value . "%");
+                $query->where($jsonField, "like", "%" . $value . "%");
                 break;
             case "gt":
-                $query->where($id, ">", $value);
+                $query->where($jsonField, ">", $value);
                 break;
             case "gte":
-                $query->where($id, ">=", $value);
+                $query->where($jsonField, ">=", $value);
                 break;
             case "inlist":
-                $query->whereIn($id, $value);
+                $query->whereIn($jsonField, $value);
                 break;
             case "notinlist":
-                $query->whereNotIn($id, $value);
+                $query->whereNotIn($jsonField, $value);
                 break;
             case "inrange":
                 if (is_array($value) && count($value) === 2) {
-                    $query->whereBetween($id, $value);
+                    $query->whereBetween($jsonField, $value);
                 }
                 break;
             case "lt":
-                $query->where($id, "<", $value);
+                $query->where($jsonField, "<", $value);
                 break;
             case "lte":
-                $query->where($id, "<=", $value);
+                $query->where($jsonField, "<=", $value);
                 break;
             default:
-                $query->where($id, $value);
+                $query->where($jsonField, $value);
                 break;
         }
     }
