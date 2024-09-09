@@ -478,41 +478,45 @@ class DynamicController extends \App\Http\Controllers\Controller
             return;
         }
 
-        // Handle JSON field syntax
-        $field = Str::contains($id, ".") ? str_replace(".", "->", $id) : $id;
+        // Convert dot notation (e.g., event_coordinator.description) to JSON path (e.g., $.event_coordinator.description)
+        $jsonPath = '$.' . str_replace(".", ".", $id);
 
         switch ($operator) {
             case "contain_json":
-                $query->whereJsonContains($field, $value);
+                $query->where(
+                    DB::raw("JSON_UNQUOTE(JSON_EXTRACT($id, '$jsonPath'))"),
+                    "like",
+                    "%" . $value . "%"
+                );
                 break;
             case "contains":
-                $query->where($field, "like", "%" . $value . "%");
+                $query->where($id, "like", "%" . $value . "%");
                 break;
             case "gt":
-                $query->where($field, ">", $value);
+                $query->where($id, ">", $value);
                 break;
             case "gte":
-                $query->where($field, ">=", $value);
+                $query->where($id, ">=", $value);
                 break;
             case "inlist":
-                $query->whereIn($field, $value);
+                $query->whereIn($id, $value);
                 break;
             case "notinlist":
-                $query->whereNotIn($field, $value);
+                $query->whereNotIn($id, $value);
                 break;
             case "inrange":
                 if (is_array($value) && count($value) === 2) {
-                    $query->whereBetween($field, $value);
+                    $query->whereBetween($id, $value);
                 }
                 break;
             case "lt":
-                $query->where($field, "<", $value);
+                $query->where($id, "<", $value);
                 break;
             case "lte":
-                $query->where($field, "<=", $value);
+                $query->where($id, "<=", $value);
                 break;
             default:
-                $query->where($field, $value);
+                $query->where($id, $value);
                 break;
         }
     }
