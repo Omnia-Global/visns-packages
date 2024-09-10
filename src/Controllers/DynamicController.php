@@ -391,21 +391,7 @@ class DynamicController extends \App\Http\Controllers\Controller
     protected function applyRelationships($query)
     {
         if (method_exists($this->model, "loadableRelations")) {
-            $loadableRelations = $this->model->loadableRelations();
-
-            // Check if the method 'excludeRelationsTable' exists
-            if (method_exists($this->model, "excludeRelationsTable")) {
-                $excludeRelations = $this->model->excludeRelationsTable();
-
-                // Filter out the relations that are in 'excludeRelationsTable'
-                $loadableRelations = array_diff(
-                    $loadableRelations,
-                    $excludeRelations
-                );
-            }
-
-            // Apply the remaining loadable relations to the query
-            $query->with($loadableRelations);
+            $query->with($this->model->loadableRelations());
         }
     }
 
@@ -552,6 +538,24 @@ class DynamicController extends \App\Http\Controllers\Controller
     protected function respondWithAll($query)
     {
         $data = $query->get();
+
+        // Check if the model has excludedFields method
+        if (method_exists($this->model, "excludedFields")) {
+            $excludedFields = $this->model->excludedFields();
+
+            // Loop through the data and remove the excluded fields
+            $data = $data->map(function ($item) use ($excludedFields) {
+                $itemArray = $item->toArray();
+
+                // Remove the excluded fields
+                foreach ($excludedFields as $field) {
+                    unset($itemArray[$field]);
+                }
+
+                return $itemArray;
+            });
+        }
+
         return response()->json($data, 200);
     }
 
