@@ -391,7 +391,21 @@ class DynamicController extends \App\Http\Controllers\Controller
     protected function applyRelationships($query)
     {
         if (method_exists($this->model, "loadableRelations")) {
-            $query->with($this->model->loadableRelations());
+            $loadableRelations = $this->model->loadableRelations();
+
+            // Check if the method 'excludeRelationsTable' exists
+            if (method_exists($this->model, "excludeRelationsTable")) {
+                $excludeRelations = $this->model->excludeRelationsTable();
+
+                // Filter out the relations that are in 'excludeRelationsTable'
+                $loadableRelations = array_diff(
+                    $loadableRelations,
+                    $excludeRelations
+                );
+            }
+
+            // Apply the remaining loadable relations to the query
+            $query->with($loadableRelations);
         }
     }
 
