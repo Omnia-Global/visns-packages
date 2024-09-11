@@ -531,8 +531,13 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     protected function paginateAndRespond($query, $perPage)
     {
-        $data = $query->paginate($perPage);
+        // Perform pagination
+        $paginator = $query->paginate($perPage);
 
+        // Get the data from the paginator
+        $data = $paginator->getCollection();
+
+        // Check if the model has excludedFields method
         if (method_exists($this->model, "excludedFields")) {
             $excludedFields = $this->model->excludedFields();
 
@@ -549,7 +554,11 @@ class DynamicController extends \App\Http\Controllers\Controller
             });
         }
 
-        return response()->json($data, 200);
+        // Replace the data in the paginator
+        $paginator->setCollection($data);
+
+        // Return the paginated response as JSON
+        return response()->json($paginator, 200);
     }
 
     protected function respondWithAll($query)
