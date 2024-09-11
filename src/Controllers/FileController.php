@@ -2,7 +2,7 @@
 
 namespace Visnsstudio\VisnsPackages\Controllers;
 
-use Visnsstudio\VisnsPackages\Models\File;
+use App\Models\File;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Storage;
