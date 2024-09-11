@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Models;
+namespace Visnsstudio\VisnsPackages\Models;
 
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
