@@ -60,7 +60,17 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
             return response()->json(["error" => "Item not found"], 404);
         }
 
-        $data = collect($item->data)->firstWhere("id", $request->input("id"));
+        if ($request->has("key") && $request->filled("key")) {
+            $data = collect($item[$request->input("key")])->firstWhere(
+                "id",
+                $request->input("id")
+            );
+        } else {
+            $data = collect($item->data)->firstWhere(
+                "id",
+                $request->input("id")
+            );
+        }
 
         if (!$data) {
             return response()->json(["error" => "Data not found"], 404);
