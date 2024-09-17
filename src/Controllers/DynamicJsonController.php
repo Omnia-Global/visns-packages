@@ -309,7 +309,11 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
             return $dataItem;
         });
 
-        $item->data = $resetData->all();
+        if ($request->filled("key")) {
+            $item->{$request->input("key")} = $resetData->all();
+        } else {
+            $item->data = $resetData->all();
+        }
         $item->save();
 
         return response()->json(["error" => ""], 200);
