@@ -296,9 +296,11 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
             return response()->json(["error" => "Item not found"], 404);
         }
 
-        $filteredData = collect($item->data)->filter(function ($dataItem) use (
-            $request
-        ) {
+        $filteredData = collect(
+            $request->filled("key")
+                ? $item->{$request->input("key")}
+                : $item->data
+        )->filter(function ($dataItem) use ($request) {
             return $dataItem["id"] != $request->input("id");
         });
 
