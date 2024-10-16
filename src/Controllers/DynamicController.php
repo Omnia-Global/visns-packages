@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Schema;
 
 use Carbon\Carbon;
 
@@ -707,24 +708,23 @@ class DynamicController extends \App\Http\Controllers\Controller
                     $syncData = [];
                     $sortOrder = 1; // Start sort_order at 1
 
-                    foreach ($ids as $id) {
-                        $syncData[$id] = [];
+                    // Check if the pivot table has a 'sort_order' field
+                    $pivotTable = $resource->$relationship()->getTable(); // Get the pivot table name
+                    $hasSortOrder = Schema::hasColumn(
+                        $pivotTable,
+                        "sort_order"
+                    ); // Check if 'sort_order' column exists
 
-                        // Check if the related model has a 'sort_order' field in fillable
-                        if (
-                            in_array(
-                                "sort_order",
-                                $this->model
-                                    ->$relationship()
-                                    ->getRelated()
-                                    ->getFillable()
-                            )
-                        ) {
-                            $syncData[$id]["sort_order"] = $sortOrder++;
+                    foreach ($ids as $id) {
+                        // Only add 'sort_order' if the field exists
+                        if ($hasSortOrder) {
+                            $syncData[$id] = ["sort_order" => $sortOrder++];
+                        } else {
+                            $syncData[$id] = []; // Sync without 'sort_order' if it doesn't exist
                         }
                     }
 
-                    // Sync the relationships with additional pivot data like sort_order
+                    // Sync the relationships with or without pivot data (depending on the existence of sort_order)
                     $resource->$relationship()->sync($syncData);
                 }
             }
