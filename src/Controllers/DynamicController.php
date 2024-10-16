@@ -703,8 +703,29 @@ class DynamicController extends \App\Http\Controllers\Controller
                         $ids = [$input];
                     }
 
-                    // Use sync method to update the many-to-many relationship
-                    $resource->$relationship()->sync($ids);
+                    // Now we need to sync the relationships, but also check for sort_order
+                    $syncData = [];
+                    $sortOrder = 1; // Start sort_order at 1
+
+                    foreach ($ids as $id) {
+                        $syncData[$id] = [];
+
+                        // Check if the related model has a 'sort_order' field in fillable
+                        if (
+                            in_array(
+                                "sort_order",
+                                $this->model
+                                    ->$relationship()
+                                    ->getRelated()
+                                    ->getFillable()
+                            )
+                        ) {
+                            $syncData[$id]["sort_order"] = $sortOrder++;
+                        }
+                    }
+
+                    // Sync the relationships with additional pivot data like sort_order
+                    $resource->$relationship()->sync($syncData);
                 }
             }
         }
