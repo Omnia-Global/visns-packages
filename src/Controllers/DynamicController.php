@@ -586,6 +586,15 @@ class DynamicController extends \App\Http\Controllers\Controller
         return response()->json($data, 200);
     }
 
+    public function clone($id)
+    {
+        $resource = $this->model::findOrFail($id);
+        $newResource = $resource->replicate();
+        $newResource->save();
+
+        return response()->json($newResource, 200);
+    }
+
     public function store(Request $request)
     {
         $error = "";
