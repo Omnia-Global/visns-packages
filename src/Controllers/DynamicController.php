@@ -588,10 +588,23 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     public function clone($id)
     {
+        // Find the resource by ID or fail
         $resource = $this->model::findOrFail($id);
+
+        // Replicate the resource
         $newResource = $resource->replicate();
+
+        // Check if 'label' or 'title' key exists and append '(Clone)' to it
+        if (isset($newResource->label)) {
+            $newResource->label .= " (Clone)";
+        } elseif (isset($newResource->title)) {
+            $newResource->title .= " (Clone)";
+        }
+
+        // Save the cloned resource
         $newResource->save();
 
+        // Return the new resource as a JSON response
         return response()->json($newResource, 200);
     }
 
