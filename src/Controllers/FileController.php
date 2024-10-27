@@ -10,6 +10,26 @@ use Illuminate\Support\Str;
 
 class FileController extends \App\Http\Controllers\Controller
 {
+    public function downloadByPath(Request $request)
+    {
+        $validate = $request->validate([
+            "file_name" => "required|string",
+            "file_path" => "required|string",
+            "file_extension" => "required|string",
+        ]);
+
+        $content = Storage::get($validate["file_path"]);
+        $contentType = $this->getContentType(
+            pathinfo($validate["file_extension"], PATHINFO_EXTENSION)
+        );
+
+        return Response::make($content, 200, [
+            "Content-Type" => $contentType,
+            "Content-Disposition" =>
+                'inline; filename="' . $validate["file_name"] . '"',
+        ]);
+    }
+
     public function downloadContent($id)
     {
         $file = File::find($id);
