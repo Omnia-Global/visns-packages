@@ -514,12 +514,17 @@ class DynamicController extends \App\Http\Controllers\Controller
                 if (is_array($value)) {
                     // If the value has 'start' and 'end' keys, extract them
                     if (isset($value["start"]) && isset($value["end"])) {
-                        $query->whereBetween($jsonField, [
-                            $value["start"],
-                            $value["end"],
-                        ]);
+                        if ($value["start"] != "" && $value["end"] != "") {
+                            $query->whereBetween($jsonField, [
+                                $value["start"],
+                                $value["end"],
+                            ]);
+                        }
                     } elseif (isset($value[0]) && isset($value[1])) {
-                        $query->whereBetween($jsonField, $value);
+                        // If the value is an array with two elements, use them as the range
+                        if ($value[0] != "" && $value[1] != "") {
+                            $query->whereBetween($jsonField, $value);
+                        }
                     }
                 }
                 break;
