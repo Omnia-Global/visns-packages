@@ -456,18 +456,18 @@ class DynamicController extends \App\Http\Controllers\Controller
         if (
             is_array($value) &&
             isset($value["start"]) &&
-            isset($value["end"]) &&
-            $value["start"] != "" &&
-            $value["end"] != ""
+            isset($value["end"])
         ) {
-            return [
-                Carbon::createFromTimestamp(
-                    strtotime($value["start"])
-                )->startOfDay(),
-                Carbon::createFromTimestamp(
-                    strtotime($value["end"])
-                )->endOfDay(),
-            ];
+            if ($value["start"] != "" && $value["end"] != "") {
+                return [
+                    Carbon::createFromTimestamp(
+                        strtotime($value["start"])
+                    )->startOfDay(),
+                    Carbon::createFromTimestamp(
+                        strtotime($value["end"])
+                    )->endOfDay(),
+                ];
+            }
         }
 
         if ($value === "now") {
