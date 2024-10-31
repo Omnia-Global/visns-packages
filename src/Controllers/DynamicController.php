@@ -461,11 +461,12 @@ class DynamicController extends \App\Http\Controllers\Controller
             $value["end"] != ""
         ) {
             return [
-                Carbon::createFromFormat(
-                    "Y-m-d",
-                    $value["start"]
+                Carbon::createFromTimestamp(
+                    strtotime($value["start"])
                 )->startOfDay(),
-                Carbon::createFromFormat("Y-m-d", $value["end"])->endOfDay(),
+                Carbon::createFromTimestamp(
+                    strtotime($value["end"])
+                )->endOfDay(),
             ];
         }
 
