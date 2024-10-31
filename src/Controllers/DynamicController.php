@@ -511,8 +511,18 @@ class DynamicController extends \App\Http\Controllers\Controller
                 $query->whereNotIn($jsonField, $value);
                 break;
             case "inrange":
-                if (is_array($value) && count($value) === 2) {
-                    $query->whereBetween($jsonField, $value);
+                if (is_array($value)) {
+                    // If the value has exactly two elements, use it directly
+                    if (count($value) === 2) {
+                        $query->whereBetween($jsonField, $value);
+                    }
+                    // If the value has 'start' and 'end' keys, extract them
+                    elseif (isset($value["start"]) && isset($value["end"])) {
+                        $query->whereBetween($jsonField, [
+                            $value["start"],
+                            $value["end"],
+                        ]);
+                    }
                 }
                 break;
             case "is_null":
