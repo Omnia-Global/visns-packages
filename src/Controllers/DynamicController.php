@@ -456,11 +456,16 @@ class DynamicController extends \App\Http\Controllers\Controller
         if (
             is_array($value) &&
             isset($value["start"]) &&
-            isset($value["end"])
+            isset($value["end"]) &&
+            $value["start"] != "" &&
+            $value["end"] != ""
         ) {
             return [
-                Carbon::createFromFormat("d-m-Y", $value["start"]),
-                Carbon::createFromFormat("d-m-Y", $value["end"]),
+                Carbon::createFromFormat(
+                    "Y-m-d",
+                    $value["start"]
+                )->startOfDay(),
+                Carbon::createFromFormat("Y-m-d", $value["end"])->endOfDay(),
             ];
         }
 
@@ -512,19 +517,11 @@ class DynamicController extends \App\Http\Controllers\Controller
                 break;
             case "inrange":
                 if (is_array($value)) {
-                    // If the value has 'start' and 'end' keys, extract them
-                    if (isset($value["start"]) && isset($value["end"])) {
-                        if ($value["start"] != "" && $value["end"] != "") {
-                            $query->whereBetween($jsonField, [
-                                $value["start"],
-                                $value["end"],
-                            ]);
-                        }
-                    } elseif (isset($value[0]) && isset($value[1])) {
-                        // If the value is an array with two elements, use them as the range
-                        if ($value[0] != "" && $value[1] != "") {
-                            $query->whereBetween($jsonField, $value);
-                        }
+                    if (count($value) === 2) {
+                        $query->whereBetween($jsonField, $value);
+                    } elseif (isset($value["start"]) && isset($value["end"])) {
+                        $dateRange = $this->handleDateValue($value);
+                        $query->whereBetween($jsonField, $dateRange);
                     }
                 }
                 break;
