@@ -140,6 +140,10 @@ class DynamicController extends \App\Http\Controllers\Controller
             ? $this->model::customOrder($sortField, $sort)
             : $this->model::orderBy($sortField, $sort);
 
+        if (Schema::hasColumn($this->model->getTable(), "hide")) {
+            $query->where("hide", 0);
+        }
+
         if ($request->has("where") && $request->filled("where")) {
             foreach ($request->input("where") as $condition) {
                 switch ($condition["id"]) {
