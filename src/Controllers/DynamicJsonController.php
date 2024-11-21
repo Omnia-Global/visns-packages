@@ -43,8 +43,8 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
             $this->folder = $modelName;
             $this->original = $modelNameSegment;
         } else {
-            // Handle the case where the model does not exist or the segment is not provided
-            abort(404, "Model not found.");
+            // Skip initialization instead of aborting
+            $this->model = null;
         }
     }
 
