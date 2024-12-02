@@ -189,6 +189,15 @@ class DynamicController extends \App\Http\Controllers\Controller
             } elseif (in_array("label", $fields)) {
                 // Use 'label' field if it exists
                 $itemData["label"] = $item->label;
+
+                // Check if 'label' field is empty and use 'name' field as fallback
+                if (
+                    empty($itemData["label"]) &&
+                    isset($fields[2]) &&
+                    isset($item[$fields[2]])
+                ) {
+                    $itemData["label"] = $item[$fields[2]];
+                }
             } elseif (in_array("name", $fields)) {
                 // Use 'name' field as 'label' if 'label' is not present
                 $itemData["label"] = $item->name;
