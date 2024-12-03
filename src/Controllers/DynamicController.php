@@ -517,6 +517,9 @@ class DynamicController extends \App\Http\Controllers\Controller
             case "contains":
                 $query->where($jsonField, "like", "%" . $value . "%");
                 break;
+            case "not_contains":
+                $query->where($jsonField, "not like", "%" . $value . "%");
+                break;
             case "gt":
                 $query->where($jsonField, ">", $value);
                 break;
