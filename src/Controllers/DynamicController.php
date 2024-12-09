@@ -1116,7 +1116,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                     if (
                         !$existingFiles->contains(
                             "file_name",
-                            $uploadedFile["filename"]
+                            $uploadedFile["filename"] ??
+                                $uploadedFile["file_name"]
                         )
                     ) {
                         // Copy the file if it exists in the storage
@@ -1134,9 +1135,13 @@ class DynamicController extends \App\Http\Controllers\Controller
 
                             $file = new File([
                                 "file_path" => $path,
-                                "file_name" => $uploadedFile["filename"],
+                                "file_name" =>
+                                    $uploadedFile["filename"] ??
+                                    $uploadedFile["file_name"],
                                 "file_extension" => $uploadedFile["extension"],
-                                "file_size" => $uploadedFile["filesize"],
+                                "file_size" =>
+                                    $uploadedFile["filesize"] ??
+                                    $uploadedFile["file_size"],
                                 "fileable_field" =>
                                     $uploadedFile["fileable_field"] ??
                                     $uploadedFile["file_relationship"],
@@ -1146,6 +1151,27 @@ class DynamicController extends \App\Http\Controllers\Controller
                             $resource->$relationshipMethod()->save($file);
                         }
                     }
+                }
+            }
+        } else {
+            $uploadedFiles = $request->input("files");
+
+            // Get current files associated with the resource
+            $existingFiles = $resource->files()->get();
+
+            // Track filenames from the uploadedFiles request
+            $uploadedFilenames = array_map(function ($file) {
+                return $file["filename"] ?? ($file["file_name"] ?? null);
+            }, $uploadedFiles);
+
+            // Filter out null values in case neither key exists
+            $uploadedFilenames = array_filter($uploadedFilenames);
+
+            // Delete files not in uploadedFiles
+            foreach ($existingFiles as $file) {
+                if (!in_array($file->file_name, $uploadedFilenames)) {
+                    $file->delete(); // Remove the file record
+                    Storage::delete($file->file_path); // Remove the physical file
                 }
             }
         }
