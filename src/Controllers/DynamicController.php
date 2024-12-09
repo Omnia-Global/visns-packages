@@ -813,6 +813,48 @@ class DynamicController extends \App\Http\Controllers\Controller
             $resource->$relationshipMethod()->save($file);
         }
 
+        if ($request->has("uploadedFiles")) {
+            foreach ($request->input("uploadedFiles") as $uploadedFile) {
+                if (
+                    $uploadedFile["key"] &&
+                    $uploadedFile["file_relationship"]
+                ) {
+                    $relationshipMethod = $uploadedFile["file_relationship"];
+                    $unique_name =
+                        $uploadedFile["uuid"] .
+                        "." .
+                        $uploadedFile["extension"];
+                    $path = $this->folder . "/" . $unique_name;
+
+                    Storage::copy(
+                        $uploadedFile["key"],
+                        str_replace(
+                            "tmp/",
+                            $this->folder . "/",
+                            $uploadedFile["key"]
+                        ) .
+                            "." .
+                            $uploadedFile["extension"]
+                    );
+
+                    $file = new File([
+                        "file_path" => $path,
+                        "file_name" => $uploadedFile["filename"],
+                        "file_extension" => $uploadedFile["extension"],
+                        "file_size" => $uploadedFile["filesize"],
+                        "fileable_field" => isset(
+                            $uploadedFile["fileable_field"]
+                        )
+                            ? $uploadedFile["fileable_field"]
+                            : $uploadedFile["file_relationship"],
+                    ]);
+
+                    // Dynamically attach the file to the resource
+                    $resource->$relationshipMethod()->save($file);
+                }
+            }
+        }
+
         // Handle file upload if $request->file is present
 
         if ($request->files->count() > 0) {
@@ -1020,7 +1062,6 @@ class DynamicController extends \App\Http\Controllers\Controller
             ]);
 
             // Dynamically attach the file to the resource
-
             if (
                 $resource->$relationshipMethod() instanceof
                 \Illuminate\Database\Eloquent\Relations\MorphOne
@@ -1028,6 +1069,54 @@ class DynamicController extends \App\Http\Controllers\Controller
                 $resource->$relationshipMethod()->delete();
             }
             $resource->$relationshipMethod()->save($file);
+        }
+
+        if ($request->has("uploadedFiles")) {
+            foreach ($request->input("uploadedFiles") as $uploadedFile) {
+                if (
+                    $uploadedFile["key"] &&
+                    $uploadedFile["file_relationship"]
+                ) {
+                    $relationshipMethod = $uploadedFile["file_relationship"];
+                    $unique_name =
+                        $uploadedFile["uuid"] .
+                        "." .
+                        $uploadedFile["extension"];
+                    $path = $this->folder . "/" . $unique_name;
+
+                    Storage::copy(
+                        $uploadedFile["key"],
+                        str_replace(
+                            "tmp/",
+                            $this->folder . "/",
+                            $uploadedFile["key"]
+                        ) .
+                            "." .
+                            $uploadedFile["extension"]
+                    );
+
+                    $file = new File([
+                        "file_path" => $path,
+                        "file_name" => $uploadedFile["filename"],
+                        "file_extension" => $uploadedFile["extension"],
+                        "file_size" => $uploadedFile["filesize"],
+                        "fileable_field" => isset(
+                            $uploadedFile["fileable_field"]
+                        )
+                            ? $uploadedFile["fileable_field"]
+                            : $uploadedFile["file_relationship"],
+                    ]);
+
+                    // Dynamically attach the file to the resource
+                    if (
+                        $resource->$relationshipMethod() instanceof
+                        \Illuminate\Database\Eloquent\Relations\MorphOne
+                    ) {
+                        $resource->$relationshipMethod()->delete();
+                    }
+                    $resource->$relationshipMethod()->save($file);
+                }
+            }
         }
 
         // Handle file upload if $request->file is present
