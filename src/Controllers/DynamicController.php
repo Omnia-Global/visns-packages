@@ -826,31 +826,33 @@ class DynamicController extends \App\Http\Controllers\Controller
                         $uploadedFile["extension"];
                     $path = $this->folder . "/" . $unique_name;
 
-                    Storage::copy(
-                        $uploadedFile["key"],
-                        str_replace(
-                            "tmp/",
-                            $this->folder . "/",
-                            $uploadedFile["key"]
-                        ) .
-                            "." .
-                            $uploadedFile["extension"]
-                    );
+                    if (Storage::exists($uploadedFile["key"])) {
+                        Storage::copy(
+                            $uploadedFile["key"],
+                            str_replace(
+                                "tmp/",
+                                $this->folder . "/",
+                                $uploadedFile["key"]
+                            ) .
+                                "." .
+                                $uploadedFile["extension"]
+                        );
 
-                    $file = new File([
-                        "file_path" => $path,
-                        "file_name" => $uploadedFile["filename"],
-                        "file_extension" => $uploadedFile["extension"],
-                        "file_size" => $uploadedFile["filesize"],
-                        "fileable_field" => isset(
-                            $uploadedFile["fileable_field"]
-                        )
-                            ? $uploadedFile["fileable_field"]
-                            : $uploadedFile["file_relationship"],
-                    ]);
+                        $file = new File([
+                            "file_path" => $path,
+                            "file_name" => $uploadedFile["filename"],
+                            "file_extension" => $uploadedFile["extension"],
+                            "file_size" => $uploadedFile["filesize"],
+                            "fileable_field" => isset(
+                                $uploadedFile["fileable_field"]
+                            )
+                                ? $uploadedFile["fileable_field"]
+                                : $uploadedFile["file_relationship"],
+                        ]);
 
-                    // Dynamically attach the file to the resource
-                    $resource->$relationshipMethod()->save($file);
+                        // Dynamically attach the file to the resource
+                        $resource->$relationshipMethod()->save($file);
+                    }
                 }
             }
         }
@@ -1084,37 +1086,39 @@ class DynamicController extends \App\Http\Controllers\Controller
                         $uploadedFile["extension"];
                     $path = $this->folder . "/" . $unique_name;
 
-                    Storage::copy(
-                        $uploadedFile["key"],
-                        str_replace(
-                            "tmp/",
-                            $this->folder . "/",
-                            $uploadedFile["key"]
-                        ) .
-                            "." .
-                            $uploadedFile["extension"]
-                    );
+                    if (Storage::exists($uploadedFile["key"])) {
+                        Storage::copy(
+                            $uploadedFile["key"],
+                            str_replace(
+                                "tmp/",
+                                $this->folder . "/",
+                                $uploadedFile["key"]
+                            ) .
+                                "." .
+                                $uploadedFile["extension"]
+                        );
 
-                    $file = new File([
-                        "file_path" => $path,
-                        "file_name" => $uploadedFile["filename"],
-                        "file_extension" => $uploadedFile["extension"],
-                        "file_size" => $uploadedFile["filesize"],
-                        "fileable_field" => isset(
-                            $uploadedFile["fileable_field"]
-                        )
-                            ? $uploadedFile["fileable_field"]
-                            : $uploadedFile["file_relationship"],
-                    ]);
+                        $file = new File([
+                            "file_path" => $path,
+                            "file_name" => $uploadedFile["filename"],
+                            "file_extension" => $uploadedFile["extension"],
+                            "file_size" => $uploadedFile["filesize"],
+                            "fileable_field" => isset(
+                                $uploadedFile["fileable_field"]
+                            )
+                                ? $uploadedFile["fileable_field"]
+                                : $uploadedFile["file_relationship"],
+                        ]);
 
-                    // Dynamically attach the file to the resource
-                    if (
-                        $resource->$relationshipMethod() instanceof
-                        \Illuminate\Database\Eloquent\Relations\MorphOne
-                    ) {
-                        $resource->$relationshipMethod()->delete();
+                        // Dynamically attach the file to the resource
+                        if (
+                            $resource->$relationshipMethod() instanceof
+                            \Illuminate\Database\Eloquent\Relations\MorphOne
+                        ) {
+                            $resource->$relationshipMethod()->delete();
+                        }
+                        $resource->$relationshipMethod()->save($file);
                     }
-                    $resource->$relationshipMethod()->save($file);
                 }
             }
         }
