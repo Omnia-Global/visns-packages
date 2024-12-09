@@ -1074,8 +1074,31 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
 
         if ($request->has("uploadedFiles")) {
-            foreach ($request->input("uploadedFiles") as $uploadedFile) {
+            $uploadedFiles = $request->input("uploadedFiles");
+
+            // Get current files associated with the resource
+            $existingFiles = $resource->files()->get();
+
+            // Track filenames from the uploadedFiles request
+            $uploadedFilenames = array_map(function ($file) {
+                return $file["filename"];
+            }, $uploadedFiles);
+
+            // Delete files not in uploadedFiles
+            foreach ($existingFiles as $file) {
+                if (!in_array($file->file_name, $uploadedFilenames)) {
+                    $file->delete(); // Remove the file record
+                    Storage::delete($file->file_path); // Remove the physical file
+                }
+            }
+
+            // Process the uploaded files
+            foreach ($uploadedFiles as $uploadedFile) {
                 if (
+                    isset(
+                        $uploadedFile["key"],
+                        $uploadedFile["file_relationship"]
+                    ) &&
                     $uploadedFile["key"] &&
                     $uploadedFile["file_relationship"]
                 ) {
@@ -1086,38 +1109,39 @@ class DynamicController extends \App\Http\Controllers\Controller
                         $uploadedFile["extension"];
                     $path = $this->folder . "/" . $unique_name;
 
-                    if (Storage::exists($uploadedFile["key"])) {
-                        Storage::copy(
-                            $uploadedFile["key"],
-                            str_replace(
-                                "tmp/",
-                                $this->folder . "/",
-                                $uploadedFile["key"]
-                            ) .
-                                "." .
-                                $uploadedFile["extension"]
-                        );
+                    // Check if the file already exists in the resource
+                    if (
+                        !$existingFiles->contains(
+                            "file_name",
+                            $uploadedFile["filename"]
+                        )
+                    ) {
+                        // Copy the file if it exists in the storage
+                        if (Storage::exists($uploadedFile["key"])) {
+                            Storage::copy(
+                                $uploadedFile["key"],
+                                str_replace(
+                                    "tmp/",
+                                    $this->folder . "/",
+                                    $uploadedFile["key"]
+                                ) .
+                                    "." .
+                                    $uploadedFile["extension"]
+                            );
 
-                        $file = new File([
-                            "file_path" => $path,
-                            "file_name" => $uploadedFile["filename"],
-                            "file_extension" => $uploadedFile["extension"],
-                            "file_size" => $uploadedFile["filesize"],
-                            "fileable_field" => isset(
-                                $uploadedFile["fileable_field"]
-                            )
-                                ? $uploadedFile["fileable_field"]
-                                : $uploadedFile["file_relationship"],
-                        ]);
+                            $file = new File([
+                                "file_path" => $path,
+                                "file_name" => $uploadedFile["filename"],
+                                "file_extension" => $uploadedFile["extension"],
+                                "file_size" => $uploadedFile["filesize"],
+                                "fileable_field" =>
+                                    $uploadedFile["fileable_field"] ??
+                                    $uploadedFile["file_relationship"],
+                            ]);
 
-                        // Dynamically attach the file to the resource
-                        if (
-                            $resource->$relationshipMethod() instanceof
-                            \Illuminate\Database\Eloquent\Relations\MorphOne
-                        ) {
-                            $resource->$relationshipMethod()->delete();
+                            // Attach the file to the resource
+                            $resource->$relationshipMethod()->save($file);
                         }
-                        $resource->$relationshipMethod()->save($file);
                     }
                 }
             }
