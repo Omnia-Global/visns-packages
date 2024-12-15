@@ -125,14 +125,14 @@ class FileController extends \App\Http\Controllers\Controller
             // Get the temporary URL directly from the file model
             $temporaryUrl = $file->file_url;
 
-            if ($temporaryUrl) {
-                // Redirect to the temporary URL
+            if ($temporaryUrl && $this->testUrl($temporaryUrl)) {
+                // Redirect to the temporary URL if it works
                 return redirect()->away($temporaryUrl);
             }
 
-            // Fallback to traditional file retrieval if temporary URL is not available
+            // Fallback to traditional file retrieval if temporary URL is not available or invalid
             $filename = $this->formatFileName($file);
-            $filepath = $this->determineFilePath($file, $folder);
+            $filepath = $this->determineFilePath($file->file_path, $folder);
 
             if (!is_null($filepath)) {
                 if (config("filesystems.default") === "s3") {
@@ -146,6 +146,27 @@ class FileController extends \App\Http\Controllers\Controller
         } catch (\Exception $e) {
             // Handle any exceptions that occur
             return response()->json(["error" => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Test if a URL is valid and accessible.
+     *
+     * @param string $url
+     * @return bool
+     */
+    protected function testUrl($url)
+    {
+        try {
+            // Use GuzzleHttp to make a HEAD request to the URL
+            $client = new \GuzzleHttp\Client();
+            $response = $client->head($url, ["http_errors" => false]);
+
+            // Return true if the status code indicates success
+            return in_array($response->getStatusCode(), [200, 301, 302]);
+        } catch (\Exception $e) {
+            // Return false if any exception occurs
+            return false;
         }
     }
 
@@ -214,26 +235,20 @@ class FileController extends \App\Http\Controllers\Controller
 
     protected function generateNameVariants($name)
     {
-        return [
-            // Original
+        $variants = [
             $name,
-            // Plural
             Str::plural($name),
-            // Singular
             Str::singular($name),
-            // Snake case
             Str::snake($name),
-            // Snake plural
             Str::snake(Str::plural($name)),
-            // Camel case
             Str::camel($name),
-            // Camel plural
             Str::camel(Str::plural($name)),
-            // Studly case
             Str::studly($name),
-            // Studly plural
             Str::studly(Str::plural($name)),
         ];
+
+        Log::info("Generated folder variants: " . implode(", ", $variants));
+        return $variants;
     }
 
     protected function downloadFromS3($filepath, $filename)
