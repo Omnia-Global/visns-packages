@@ -6,6 +6,7 @@ use App\Models\File;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class FileController extends \App\Http\Controllers\Controller
@@ -119,32 +120,26 @@ class FileController extends \App\Http\Controllers\Controller
     public function download($id, $folder)
     {
         try {
-            // Retrieve the file based on the provided id and folder
+            // Retrieve the file
             $file = $this->getFile($id, $folder);
 
-            // Get the temporary URL directly from the file model
-            $temporaryUrl = $file->file_url;
-
-            if ($temporaryUrl && $this->testUrl($temporaryUrl)) {
-                // Redirect to the temporary URL if it works
-                return redirect()->away($temporaryUrl);
+            // Validate the file instance
+            if (!$file instanceof File) {
+                return response()->json(["error" => "Invalid file data."], 400);
             }
 
-            // Fallback to traditional file retrieval if temporary URL is not available or invalid
+            // Validate file path and name
             $filename = $this->formatFileName($file);
-            $filepath = $this->determineFilePath($file->file_path, $folder);
+            $filepath = $this->determineFilePath($file, $folder);
 
-            if (!is_null($filepath)) {
-                if (config("filesystems.default") === "s3") {
-                    return $this->downloadFromS3($filepath, $filename);
-                }
-
+            if ($filepath && Storage::disk("s3")->exists($filepath)) {
+                return $this->downloadFromS3($filepath, $filename);
+            } elseif ($filepath && Storage::exists($filepath)) {
                 return $this->downloadFromFilesystem($filepath, $filename);
-            } else {
-                return response()->json(["error" => "File not found."], 404);
             }
+
+            return response()->json(["error" => "File not found."], 404);
         } catch (\Exception $e) {
-            // Handle any exceptions that occur
             return response()->json(["error" => $e->getMessage()], 500);
         }
     }
@@ -172,15 +167,23 @@ class FileController extends \App\Http\Controllers\Controller
 
     protected function getFile($id, $folder)
     {
-        if ($folder == "null") {
-            return File::find($id);
+        if ($folder === "null") {
+            $file = File::find($id);
         } else {
             $type = "App\\Models\\" . $this->singularizeAndCapitalize($folder);
-
-            return File::where("fileable_id", $id)
+            $file = File::where("fileable_id", $id)
                 ->where("fileable_type", $type)
-                ->firstOrFail();
+                ->first();
         }
+
+        // Ensure $file is a valid instance
+        if (!$file) {
+            throw new \Exception(
+                "File not found or invalid folder: " . $folder
+            );
+        }
+
+        return $file;
     }
 
     protected function formatFileName($file)
@@ -211,7 +214,6 @@ class FileController extends \App\Http\Controllers\Controller
             $modelName = $folder;
         }
 
-        // Generate permutations for any model name
         $baseNameVariants = $this->generateNameVariants($modelName);
 
         foreach ($baseNameVariants as $variant) {
@@ -230,7 +232,7 @@ class FileController extends \App\Http\Controllers\Controller
             }
         }
 
-        return null;
+        return null; // Return null if no valid path is found
     }
 
     protected function generateNameVariants($name)
