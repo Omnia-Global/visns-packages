@@ -1154,24 +1154,26 @@ class DynamicController extends \App\Http\Controllers\Controller
                 }
             }
         } else {
-            $uploadedFiles = $request->input("files");
+            if (method_exists($resource, "files") && $request->has("files")) {
+                $uploadedFiles = $request->input("files");
 
-            // Get current files associated with the resource
-            $existingFiles = $resource->files()->get();
+                // Get current files associated with the resource
+                $existingFiles = $resource->files()->get();
 
-            // Track filenames from the uploadedFiles request
-            $uploadedFilenames = array_map(function ($file) {
-                return $file["filename"] ?? ($file["file_name"] ?? null);
-            }, $uploadedFiles);
+                // Track filenames from the uploadedFiles request
+                $uploadedFilenames = array_map(function ($file) {
+                    return $file["filename"] ?? ($file["file_name"] ?? null);
+                }, $uploadedFiles);
 
-            // Filter out null values in case neither key exists
-            $uploadedFilenames = array_filter($uploadedFilenames);
+                // Filter out null values in case neither key exists
+                $uploadedFilenames = array_filter($uploadedFilenames);
 
-            // Delete files not in uploadedFiles
-            foreach ($existingFiles as $file) {
-                if (!in_array($file->file_name, $uploadedFilenames)) {
-                    $file->delete(); // Remove the file record
-                    Storage::delete($file->file_path); // Remove the physical file
+                // Delete files not in uploadedFiles
+                foreach ($existingFiles as $file) {
+                    if (!in_array($file->file_name, $uploadedFilenames)) {
+                        $file->delete(); // Remove the file record
+                        Storage::delete($file->file_path); // Remove the physical file
+                    }
                 }
             }
         }
