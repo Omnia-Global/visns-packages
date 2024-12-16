@@ -719,6 +719,12 @@ class DynamicController extends \App\Http\Controllers\Controller
         $this->model->loadMissing($this->model->loadableRelations());
 
         foreach ($this->model->loadableRelations() as $relation) {
+            // Remove everything after ':' if it exists
+            $relation =
+                strpos($relation, ":") !== false
+                    ? explode(":", $relation)[0]
+                    : $relation;
+
             // Skip the relation if it contains a dot ('.')
             if (strpos($relation, ".") !== false) {
                 continue;
@@ -993,6 +999,12 @@ class DynamicController extends \App\Http\Controllers\Controller
         $this->model->loadMissing($this->model->loadableRelations());
 
         foreach ($this->model->loadableRelations() as $relation) {
+            // Remove everything after ':' if it exists
+            $relation =
+                strpos($relation, ":") !== false
+                    ? explode(":", $relation)[0]
+                    : $relation;
+
             // Skip the relation if it contains a dot ('.')
             if (strpos($relation, ".") !== false) {
                 continue;
