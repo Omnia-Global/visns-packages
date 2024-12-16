@@ -22,7 +22,7 @@ class DynamicController extends \App\Http\Controllers\Controller
     public function __construct(Request $request)
     {
         // Get the current path from the request
-        $path = $request->path(); // e.g., "ajax/companies/something"
+        $path = $request->path(); // e.g., "ajax/companies/client:id,firstname,surname"
 
         // Split the path into segments
         $segments = explode("/", $path);
@@ -32,6 +32,12 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         // Assuming the segment after 'ajax' is the model name
         $modelNameSegment = $segments[$ajaxIndex + 1] ?? null;
+
+        // Handle cases where the model name contains a colon (e.g., "client:id,firstname,surname")
+        if ($modelNameSegment && strpos($modelNameSegment, ":") !== false) {
+            // Extract only the part before the colon
+            $modelNameSegment = explode(":", $modelNameSegment)[0];
+        }
 
         // Convert the URL segment to StudlyCase as it's the convention for model names in Laravel
         $modelName = $modelNameSegment
