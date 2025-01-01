@@ -122,15 +122,12 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     private function getSortParams(Request $request, $fields)
     {
-        $sortField = $fields[1] ?? "label"; // Default to the second field
-        $sort = "asc";
+        $sortField = $request->input("orderBy") ?? $request->input("sortBy") ?? $fields[1] ?? null;
+        $sort = $request->input("order") ?? $request->input("sort") ?? "asc";
 
-        if ($request->filled("orderBy")) {
-            $sortField = $request->input("orderBy");
-        }
-
-        if ($request->filled("order")) {
-            $sort = $request->input("order");
+        // Default to "label" if no sortField is specified in the request or fields
+        if (is_null($sortField)) {
+            $sortField = "label";
         }
 
         return [$sortField, $sort];
