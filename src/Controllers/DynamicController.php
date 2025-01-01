@@ -120,6 +120,22 @@ class DynamicController extends \App\Http\Controllers\Controller
         ]);
     }
 
+    private function getSortParams(Request $request, $fields)
+    {
+        $sortField = $fields[1] ?? "label"; // Default to the second field
+        $sort = "asc";
+
+        if ($request->filled("orderBy")) {
+            $sortField = $request->input("orderBy");
+        }
+
+        if ($request->filled("order")) {
+            $sort = $request->input("order");
+        }
+
+        return [$sortField, $sort];
+    }
+
     public function dropdown(Request $request)
     {
         $data = [];
@@ -129,17 +145,8 @@ class DynamicController extends \App\Http\Controllers\Controller
         $sort = "asc";
         $fields = $request->input("fields", ["id", "label"]);
 
-        if ($request->filled("order")) {
-            $sort = $request->input("order");
-        }
-
-        if (count($fields) >= 2) {
-            if ($request->filled("orderBy")) {
-                $sortField = $request->input("orderBy");
-            } else {
-                $sortField = $fields[1]; // use the second key if available
-            }
-        }
+        // Get sorting parameters
+        [$sortField, $sort] = $this->getSortParams($request, $fields);
 
         // Assuming a default ordering method if customOrder is not available
         $query = method_exists($this->model, "scopeCustomOrder")
@@ -238,18 +245,9 @@ class DynamicController extends \App\Http\Controllers\Controller
         $sortField = "label"; // default sorting field
         $sort = "asc";
         $fields = $request->input("fields", ["id", "label"]);
-
-        if ($request->filled("order")) {
-            $sort = $request->input("order");
-        }
-
-        if (count($fields) >= 2) {
-            if ($request->filled("orderBy")) {
-                $sortField = $request->input("orderBy");
-            } else {
-                $sortField = $fields[1]; // use the second key if available
-            }
-        }
+        
+        // Get sorting parameters
+        [$sortField, $sort] = $this->getSortParams($request, $fields);
 
         // Assuming a default ordering method if customOrder is not available
         $query = method_exists($this->model, "scopeCustomOrder")
