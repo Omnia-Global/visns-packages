@@ -45,7 +45,7 @@ class UserController extends \App\Http\Controllers\Controller
         $user = Auth::user();
 
         if (!$user) {
-            return response()->json(['error' => 'User not authenticated'], 401);
+            return response()->json(['error' => 'User not authenticated'], 200);
         }
 
         $model = new User();
