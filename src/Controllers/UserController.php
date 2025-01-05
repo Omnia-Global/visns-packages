@@ -13,7 +13,7 @@ class UserController extends \App\Http\Controllers\Controller
     public function notifications(Request $request)
     {
         return response()->json([
-            "data" => auth()->user()->unreadNotifications,
+            'data' => auth()->user()->unreadNotifications,
         ]);
     }
 
@@ -30,13 +30,13 @@ class UserController extends \App\Http\Controllers\Controller
     public function markAsRead(Request $request)
     {
         foreach (auth()->user()->unreadNotifications as $item) {
-            if ($item->id == $request->input("id")) {
+            if ($item->id == $request->input('id')) {
                 $item->markAsRead();
             }
         }
 
         return response()->json([
-            "success" => true,
+            'success' => true,
         ]);
     }
 
@@ -44,9 +44,13 @@ class UserController extends \App\Http\Controllers\Controller
     {
         $user = Auth::user();
 
+        if (!$user) {
+            return response()->json(['error' => 'User not authenticated'], 401);
+        }
+
         $model = new User();
 
-        if (method_exists($model, "loadableRelations")) {
+        if (method_exists($model, 'loadableRelations')) {
             $user->load($model->loadableRelations());
         }
 
