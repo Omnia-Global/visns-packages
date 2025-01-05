@@ -45,19 +45,19 @@ class UserController extends \App\Http\Controllers\Controller
         $user = Auth::user();
 
         if (!$user) {
-            return response()->json(['error' => 'User not authenticated'], 200);
+            return response()->json(['error' => ''], 200);
+        } else {
+            $model = new User();
+
+            if (method_exists($model, 'loadableRelations')) {
+                $user->load($model->loadableRelations());
+            }
+
+            // Convert the user object to an array
+            $userArray = $user->toArray();
+
+            // Return JSON response
+            return response()->json($userArray);
         }
-
-        $model = new User();
-
-        if (method_exists($model, 'loadableRelations')) {
-            $user->load($model->loadableRelations());
-        }
-
-        // Convert the user object to an array
-        $userArray = $user->toArray();
-
-        // Return JSON response
-        return response()->json($userArray);
     }
 }
