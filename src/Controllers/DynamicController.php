@@ -1151,7 +1151,10 @@ class DynamicController extends \App\Http\Controllers\Controller
             $resource->$relationshipMethod()->save($file);
         }
 
-        if ($request->has('uploadedFiles')) {
+        if (
+            $request->has('uploadedFiles') &&
+            count($request->input('uploadedFiles')) > 0
+        ) {
             $uploadedFiles = $request->input('uploadedFiles');
 
             // Get current files associated with the resource
