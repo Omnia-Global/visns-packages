@@ -590,12 +590,46 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         // Apply conditions with whereHas if provided
         if (!empty($whereHas)) {
-            foreach ($whereHas as $relation) {
-                $query->whereHas($relation, function ($query) use (
+            $applyNestedWhereHas = function (
+                $query,
+                $relations,
+                $applyCondition
+            ) {
+                $relation = array_shift($relations); // Get the first relation
+                $query->whereHas($relation, function ($subQuery) use (
+                    $relations,
                     $applyCondition
                 ) {
-                    $applyCondition($query);
+                    if (empty($relations)) {
+                        // No more nested relations, apply the condition
+                        $applyCondition($subQuery);
+                    } else {
+                        // Recursively apply whereHas for nested relations
+                        $applyNestedWhereHas(
+                            $subQuery,
+                            $relations,
+                            $applyCondition
+                        );
+                    }
                 });
+            };
+
+            foreach ($whereHas as $nestedRelations) {
+                if (is_array($nestedRelations)) {
+                    // Handle nested relationships as arrays
+                    $applyNestedWhereHas(
+                        $query,
+                        $nestedRelations,
+                        $applyCondition
+                    );
+                } else {
+                    // Handle single-level relationships
+                    $query->whereHas($nestedRelations, function (
+                        $subQuery
+                    ) use ($applyCondition) {
+                        $applyCondition($subQuery);
+                    });
+                }
             }
         } else {
             // Apply condition directly if no whereHas
