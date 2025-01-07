@@ -590,21 +590,29 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         // Apply conditions with whereHas if provided
         if (!empty($whereHas)) {
+            // Process the single array of relationships
             $applyNestedWhereHas = function (
                 $query,
                 $relations,
                 $applyCondition
-            ) {
+            ) use (&$applyNestedWhereHas) {
                 $relation = array_shift($relations); // Get the first relation
+                if (!is_string($relation)) {
+                    throw new \InvalidArgumentException(
+                        'Relation must be a string.'
+                    );
+                }
+
                 $query->whereHas($relation, function ($subQuery) use (
                     $relations,
-                    $applyCondition
+                    $applyCondition,
+                    $applyNestedWhereHas
                 ) {
                     if (empty($relations)) {
                         // No more nested relations, apply the condition
                         $applyCondition($subQuery);
                     } else {
-                        // Recursively apply whereHas for nested relations
+                        // Recursively process the remaining relations
                         $applyNestedWhereHas(
                             $subQuery,
                             $relations,
@@ -614,25 +622,10 @@ class DynamicController extends \App\Http\Controllers\Controller
                 });
             };
 
-            foreach ($whereHas as $nestedRelations) {
-                if (is_array($nestedRelations)) {
-                    // Handle nested relationships as arrays
-                    $applyNestedWhereHas(
-                        $query,
-                        $nestedRelations,
-                        $applyCondition
-                    );
-                } else {
-                    // Handle single-level relationships
-                    $query->whereHas($nestedRelations, function (
-                        $subQuery
-                    ) use ($applyCondition) {
-                        $applyCondition($subQuery);
-                    });
-                }
-            }
+            // Apply the recursive function for the single array of relationships
+            $applyNestedWhereHas($query, $whereHas, $applyCondition);
         } else {
-            // Apply condition directly if no whereHas
+            // Apply the condition directly if no whereHas
             $applyCondition($query);
         }
     }
