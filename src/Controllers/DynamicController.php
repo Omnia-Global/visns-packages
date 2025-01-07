@@ -497,6 +497,7 @@ class DynamicController extends \App\Http\Controllers\Controller
     {
         $operator = $condition['operator'] ?? '=';
         $id = $condition['id'] ?? null;
+        $whereHas = $condition['whereHas'] ?? [];
 
         if (!$id) {
             return;
@@ -507,75 +508,98 @@ class DynamicController extends \App\Http\Controllers\Controller
         $jsonField = array_shift($fieldParts); // The main JSON column (e.g., 'event_coordinator')
         $jsonPath = '$.' . implode('.', $fieldParts); // The path inside the JSON (e.g., '$.company')
 
-        switch ($operator) {
-            case 'contain_json':
-                $query->where(
-                    DB::raw(
-                        "JSON_UNQUOTE(JSON_EXTRACT($jsonField, '$jsonPath'))"
-                    ),
-                    'like',
-                    '%' . $value . '%'
-                );
-                break;
-            case 'contains':
-                $query->where($jsonField, 'like', '%' . $value . '%');
-                break;
-            case 'not_contains':
-                $query->where($jsonField, 'not like', '%' . $value . '%');
-                break;
-            case 'gt':
-                $query->where($jsonField, '>', $value);
-                break;
-            case 'gte':
-                $query->where($jsonField, '>=', $value);
-                break;
-            case 'inlist':
-                $query->whereIn($jsonField, $value);
-                break;
-            case 'notinlist':
-                $query->whereNotIn($jsonField, $value);
-                break;
-            case 'inrange':
-                if (is_array($value)) {
-                    if (count($value) === 2) {
-                        $query->whereBetween($jsonField, $value);
-                    } elseif (isset($value['start']) && isset($value['end'])) {
-                        $dateRange = $this->handleDateValue($value);
-                        $query->whereBetween($jsonField, $dateRange);
+        $applyCondition = function ($query) use (
+            $operator,
+            $jsonField,
+            $jsonPath,
+            $value
+        ) {
+            switch ($operator) {
+                case 'contain_json':
+                    $query->where(
+                        DB::raw(
+                            "JSON_UNQUOTE(JSON_EXTRACT($jsonField, '$jsonPath'))"
+                        ),
+                        'like',
+                        '%' . $value . '%'
+                    );
+                    break;
+                case 'contains':
+                    $query->where($jsonField, 'like', '%' . $value . '%');
+                    break;
+                case 'not_contains':
+                    $query->where($jsonField, 'not like', '%' . $value . '%');
+                    break;
+                case 'gt':
+                    $query->where($jsonField, '>', $value);
+                    break;
+                case 'gte':
+                    $query->where($jsonField, '>=', $value);
+                    break;
+                case 'inlist':
+                    $query->whereIn($jsonField, $value);
+                    break;
+                case 'notinlist':
+                    $query->whereNotIn($jsonField, $value);
+                    break;
+                case 'inrange':
+                    if (is_array($value)) {
+                        if (count($value) === 2) {
+                            $query->whereBetween($jsonField, $value);
+                        } elseif (
+                            isset($value['start']) &&
+                            isset($value['end'])
+                        ) {
+                            $dateRange = $this->handleDateValue($value);
+                            $query->whereBetween($jsonField, $dateRange);
+                        }
                     }
-                }
-                break;
-            case 'is_null':
-                $query->whereNull($jsonField);
-                break;
-            case 'lt':
-                $query->where($jsonField, '<', $value);
-                break;
-            case 'lte':
-                $query->where($jsonField, '<=', $value);
-                break;
-            default:
-                // Check if value is a date and apply whereDate
-                $dateFormats = ['Y-m-d', 'd-m-Y'];
-                $date = null;
+                    break;
+                case 'is_null':
+                    $query->whereNull($jsonField);
+                    break;
+                case 'lt':
+                    $query->where($jsonField, '<', $value);
+                    break;
+                case 'lte':
+                    $query->where($jsonField, '<=', $value);
+                    break;
+                default:
+                    // Check if value is a date and apply whereDate
+                    $dateFormats = ['Y-m-d', 'd-m-Y'];
+                    $date = null;
 
-                foreach ($dateFormats as $format) {
-                    try {
-                        $date = Carbon::createFromFormat($format, $value);
-                        // If it's a valid date, break out of the loop
-                        break;
-                    } catch (\Exception $e) {
-                        // Continue to try other formats
+                    foreach ($dateFormats as $format) {
+                        try {
+                            $date = Carbon::createFromFormat($format, $value);
+                            break; // Valid date, exit loop
+                        } catch (\Exception $e) {
+                            // Continue to try other formats
+                        }
                     }
-                }
 
-                // If $date is not null, it's a valid date, use whereDate
-                if ($date) {
-                    $query->whereDate($jsonField, $date->format('Y-m-d')); // Store date in Y-m-d format
-                } else {
-                    $query->where($jsonField, $value); // Fallback to default where clause
-                }
-                break;
+                    // If $date is not null, it's a valid date, use whereDate
+                    if ($date) {
+                        $query->whereDate($jsonField, $date->format('Y-m-d')); // Store date in Y-m-d format
+                    } else {
+                        $query->where($jsonField, $value); // Fallback to default where clause
+                    }
+                    break;
+            }
+        };
+
+        // Apply conditions with whereHas if provided
+        if (!empty($whereHas)) {
+            foreach ($whereHas as $relation) {
+                $query->whereHas($relation, function ($query) use (
+                    $applyCondition
+                ) {
+                    $applyCondition($query);
+                });
+            }
+        } else {
+            // Apply condition directly if no whereHas
+            $applyCondition($query);
         }
     }
 
