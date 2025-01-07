@@ -443,17 +443,7 @@ class DynamicController extends \App\Http\Controllers\Controller
             $value = $this->castValue($value, $casts[$condition['id']]);
         }
 
-        if (isset($condition['whereHas'])) {
-            $query->whereHas($condition['whereHas'], function ($q) use (
-                $condition,
-                $value
-            ) {
-                // Reuse the applyConditionBasedOnOperator method inside whereHas
-                $this->applyConditionBasedOnOperator($q, $condition, $value);
-            });
-        } else {
-            $this->applyConditionBasedOnOperator($query, $condition, $value);
-        }
+        $this->applyConditionBasedOnOperator($query, $condition, $value);
     }
 
     protected function castValue($value, $type)
@@ -590,7 +580,10 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         // Apply conditions with whereHas if provided
         if (!empty($whereHas)) {
-            // Process the single array of relationships
+            // Ensure whereHas is treated as an array, even if it's a single string
+            $relations = is_string($whereHas) ? [$whereHas] : $whereHas;
+
+            // Recursive function to process relationships
             $applyNestedWhereHas = function (
                 $query,
                 $relations,
@@ -622,8 +615,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                 });
             };
 
-            // Apply the recursive function for the single array of relationships
-            $applyNestedWhereHas($query, $whereHas, $applyCondition);
+            // Apply the recursive function for the relationships
+            $applyNestedWhereHas($query, $relations, $applyCondition);
         } else {
             // Apply the condition directly if no whereHas
             $applyCondition($query);
