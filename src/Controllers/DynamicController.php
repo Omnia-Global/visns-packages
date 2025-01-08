@@ -886,7 +886,13 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
 
         if ($request->has('uploadedFiles')) {
-            foreach ($request->input('uploadedFiles') as $uploadedFile) {
+            $uploadedFiles = $request->input('uploadedFiles');
+
+            if (!isset($uploadedFiles[0])) {
+                $uploadedFiles = [$uploadedFiles];
+            }
+
+            foreach ($uploadedFiles as $uploadedFile) {
                 if (
                     $uploadedFile['key'] &&
                     $uploadedFile['file_relationship']
@@ -1157,9 +1163,11 @@ class DynamicController extends \App\Http\Controllers\Controller
         ) {
             $uploadedFiles = $request->input('uploadedFiles');
 
-            $relationshipMethod =
-                $uploadedFiles[0]['fileable_field'] ??
-                ($uploadedFiles['fileable_field'] ?? null);
+            if (!isset($uploadedFiles[0])) {
+                $uploadedFiles = [$uploadedFiles];
+            }
+
+            $relationshipMethod = $uploadedFiles[0]['fileable_field'] ?? null;
 
             if ($relationshipMethod) {
                 // Get current files associated with the resource
