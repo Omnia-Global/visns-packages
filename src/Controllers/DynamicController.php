@@ -1157,83 +1157,87 @@ class DynamicController extends \App\Http\Controllers\Controller
         ) {
             $uploadedFiles = $request->input('uploadedFiles');
 
-            $relationshipMethod = $uploadedFiles[0]['fileable_field']
-                ? $uploadedFiles[0]['fileable_field']
-                : $uploadedFiles['fileable_field'];
+            $relationshipMethod =
+                $uploadedFiles[0]['fileable_field'] ??
+                ($uploadedFiles['fileable_field'] ?? null);
 
-            // Get current files associated with the resource
-            $existingFiles = $resource->$relationshipMethod()->get();
+            if ($relationshipMethod) {
+                // Get current files associated with the resource
+                $existingFiles = $resource->$relationshipMethod()->get();
 
-            // Track filenames from the uploadedFiles request
-            $uploadedFilenames = array_map(function ($file) {
-                return $file['filename'] ?? ($file['file_name'] ?? null);
-            }, $uploadedFiles);
+                // Track filenames from the uploadedFiles request
+                $uploadedFilenames = array_map(function ($file) {
+                    return $file['filename'] ?? ($file['file_name'] ?? null);
+                }, $uploadedFiles);
 
-            // Filter out null values in case neither key exists
-            $uploadedFilenames = array_filter($uploadedFilenames);
+                // Filter out null values in case neither key exists
+                $uploadedFilenames = array_filter($uploadedFilenames);
 
-            // Delete files not in uploadedFiles
-            foreach ($existingFiles as $file) {
-                if (!in_array($file->file_name, $uploadedFilenames)) {
-                    $file->delete(); // Remove the file record
-                    Storage::delete($file->file_path); // Remove the physical file
+                // Delete files not in uploadedFiles
+                foreach ($existingFiles as $file) {
+                    if (!in_array($file->file_name, $uploadedFilenames)) {
+                        $file->delete(); // Remove the file record
+                        Storage::delete($file->file_path); // Remove the physical file
+                    }
                 }
-            }
 
-            // Process the uploaded files
-            foreach ($uploadedFiles as $uploadedFile) {
-                if (
-                    isset(
-                        $uploadedFile['key'],
-                        $uploadedFile['file_relationship']
-                    ) &&
-                    $uploadedFile['key'] &&
-                    $uploadedFile['file_relationship']
-                ) {
-                    $relationshipMethod = $uploadedFile['file_relationship'];
-                    $unique_name =
-                        $uploadedFile['uuid'] .
-                        '.' .
-                        $uploadedFile['extension'];
-                    $path = $this->folder . '/' . $unique_name;
-
-                    // Check if the file already exists in the resource
+                // Process the uploaded files
+                foreach ($uploadedFiles as $uploadedFile) {
                     if (
-                        !$existingFiles->contains(
-                            'file_name',
-                            $uploadedFile['filename'] ??
-                                $uploadedFile['file_name']
-                        )
+                        isset(
+                            $uploadedFile['key'],
+                            $uploadedFile['file_relationship']
+                        ) &&
+                        $uploadedFile['key'] &&
+                        $uploadedFile['file_relationship']
                     ) {
-                        // Copy the file if it exists in the storage
-                        if (Storage::exists($uploadedFile['key'])) {
-                            Storage::copy(
-                                $uploadedFile['key'],
-                                str_replace(
-                                    'tmp/',
-                                    $this->folder . '/',
-                                    $uploadedFile['key']
-                                ) .
-                                    '.' .
-                                    $uploadedFile['extension']
-                            );
+                        $relationshipMethod =
+                            $uploadedFile['file_relationship'];
+                        $unique_name =
+                            $uploadedFile['uuid'] .
+                            '.' .
+                            $uploadedFile['extension'];
+                        $path = $this->folder . '/' . $unique_name;
 
-                            $file = new File([
-                                'file_path' => $path,
-                                'file_name' =>
-                                    $uploadedFile['filename'] ??
-                                    $uploadedFile['file_name'],
-                                'file_extension' => $uploadedFile['extension'],
-                                'file_size' =>
-                                    $uploadedFile['filesize'] ??
-                                    $uploadedFile['file_size'],
-                                'fileable_field' =>
-                                    $uploadedFile['fileable_field'] ??
-                                    $uploadedFile['file_relationship'],
-                            ]);
+                        // Check if the file already exists in the resource
+                        if (
+                            !$existingFiles->contains(
+                                'file_name',
+                                $uploadedFile['filename'] ??
+                                    $uploadedFile['file_name']
+                            )
+                        ) {
+                            // Copy the file if it exists in the storage
+                            if (Storage::exists($uploadedFile['key'])) {
+                                Storage::copy(
+                                    $uploadedFile['key'],
+                                    str_replace(
+                                        'tmp/',
+                                        $this->folder . '/',
+                                        $uploadedFile['key']
+                                    ) .
+                                        '.' .
+                                        $uploadedFile['extension']
+                                );
 
-                            // Attach the file to the resource
-                            $resource->$relationshipMethod()->save($file);
+                                $file = new File([
+                                    'file_path' => $path,
+                                    'file_name' =>
+                                        $uploadedFile['filename'] ??
+                                        $uploadedFile['file_name'],
+                                    'file_extension' =>
+                                        $uploadedFile['extension'],
+                                    'file_size' =>
+                                        $uploadedFile['filesize'] ??
+                                        $uploadedFile['file_size'],
+                                    'fileable_field' =>
+                                        $uploadedFile['fileable_field'] ??
+                                        $uploadedFile['file_relationship'],
+                                ]);
+
+                                // Attach the file to the resource
+                                $resource->$relationshipMethod()->save($file);
+                            }
                         }
                     }
                 }
