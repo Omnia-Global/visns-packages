@@ -1157,7 +1157,9 @@ class DynamicController extends \App\Http\Controllers\Controller
         ) {
             $uploadedFiles = $request->input('uploadedFiles');
 
-            $relationshipMethod = $uploadedFiles[0]['fileable_field'];
+            $relationshipMethod = $uploadedFiles[0]['fileable_field']
+                ? $uploadedFiles[0]['fileable_field']
+                : $uploadedFiles['fileable_field'];
 
             // Get current files associated with the resource
             $existingFiles = $resource->$relationshipMethod()->get();
