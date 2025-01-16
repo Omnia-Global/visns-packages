@@ -206,9 +206,9 @@ class DynamicController extends \App\Http\Controllers\Controller
                 if (
                     empty($itemData['label']) &&
                     isset($fields[2]) &&
-                    isset($item[$fields[2]])
+                    isset($item->{$fields[2]})
                 ) {
-                    $itemData['label'] = $item[$fields[2]];
+                    $itemData['label'] = $item->{$fields[2]};
                 }
             } elseif (in_array('name', $fields)) {
                 // Use 'name' field as 'label' if 'label' is not present
