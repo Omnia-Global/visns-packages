@@ -12,23 +12,27 @@ class RoleController extends \App\Http\Controllers\Controller
     {
         $data = [];
 
-        $query = Role::orderBy("name", "asc");
+        $query = Role::orderBy('name', 'asc');
 
-        if ($request->has("where") && $request->filled("where")) {
-            foreach ($request->input("where") as $condition) {
-                $query->where($condition["id"], $condition["value"]);
+        if ($request->has('where') && $request->filled('where')) {
+            foreach ($request->input('where') as $condition) {
+                $query->where($condition['id'], $condition['value']);
             }
         }
 
-        foreach ($query->get(["id", "name"]) as $item) {
+        foreach ($query->get(['id', 'name']) as $item) {
             array_push($data, [
-                "id" => $item->name,
-                "label" => $item->name,
+                'id' =>
+                    $request->has('useIdField') &&
+                    $request->input('useIdField') == true
+                        ? $item->id
+                        : $item->name,
+                'label' => $item->name,
             ]);
         }
 
         $results = [
-            "data" => $data,
+            'data' => $data,
         ];
 
         return response()->json($results);
@@ -38,24 +42,24 @@ class RoleController extends \App\Http\Controllers\Controller
     {
         $role = Role::find($id);
 
-        return response()->json($role->load("permissions"));
+        return response()->json($role->load('permissions'));
     }
 
     public function table(Request $request)
     {
         $data = Role::orderBy(
-            $request->input("sortBy"),
-            $request->input("sort")
-        )->where("name", "like", "%" . $request->input("search") . "%");
+            $request->input('sortBy'),
+            $request->input('sort')
+        )->where('name', 'like', '%' . $request->input('search') . '%');
 
-        if ($request->has("where") && $request->filled("where")) {
-            foreach ($request->input("where") as $a => $b) {
-                $data->where($b["id"], $b["value"]);
+        if ($request->has('where') && $request->filled('where')) {
+            foreach ($request->input('where') as $a => $b) {
+                $data->where($b['id'], $b['value']);
             }
         }
 
         $data = $data->paginate(
-            $request->input("take") ? $request->input("take") : 10
+            $request->input('take') ? $request->input('take') : 10
         );
 
         return response()->json($data);
@@ -63,43 +67,43 @@ class RoleController extends \App\Http\Controllers\Controller
 
     public function store(Request $request)
     {
-        $error = "";
+        $error = '';
 
         $request->validate([
-            "name" => "required",
+            'name' => 'required',
         ]);
 
         $role = new Role();
 
-        if ($request->has("name")) {
-            $role->name = $request->input("name");
+        if ($request->has('name')) {
+            $role->name = $request->input('name');
         }
 
         $role->save();
 
         return response()->json([
-            "error" => $error,
+            'error' => $error,
         ]);
     }
 
     public function update(Request $request, Role $role)
     {
-        $error = "";
+        $error = '';
 
         $request->validate([
-            "name" => "required",
+            'name' => 'required',
         ]);
 
-        if ($request->has("name")) {
-            $role->name = $request->input("name");
+        if ($request->has('name')) {
+            $role->name = $request->input('name');
         }
 
         $role->save();
 
-        if ($request->has("permissions")) {
-            foreach ($request->input("permissions") as $a => $b) {
+        if ($request->has('permissions')) {
+            foreach ($request->input('permissions') as $a => $b) {
                 $permission = Permission::find(
-                    str_replace("permission-", "", $a)
+                    str_replace('permission-', '', $a)
                 );
                 if ($b === true) {
                     $role->givePermissionTo($permission);
@@ -110,18 +114,18 @@ class RoleController extends \App\Http\Controllers\Controller
         }
 
         return response()->json([
-            "error" => $error,
+            'error' => $error,
         ]);
     }
 
     public function destroy(Role $role)
     {
-        $error = "";
+        $error = '';
 
         $role->delete();
 
         return response()->json([
-            "error" => $error,
+            'error' => $error,
         ]);
     }
 }
