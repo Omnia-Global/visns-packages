@@ -459,28 +459,41 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     protected function handleDateValue($value)
     {
-        if (
-            is_array($value) &&
-            isset($value['start']) &&
-            isset($value['end'])
-        ) {
-            if ($value['start'] != '' && $value['end'] != '') {
-                return [
-                    Carbon::createFromTimestamp(
-                        strtotime($value['start'])
-                    )->startOfDay(),
-                    Carbon::createFromTimestamp(
-                        strtotime($value['end'])
-                    )->endOfDay(),
-                ];
+        // 1. If $value is an array with 'start' and 'end' keys
+        if (is_array($value) && isset($value['start'], $value['end'])) {
+            if ($value['start'] !== '' && $value['end'] !== '') {
+                $start = Carbon::parse($value['start'], config('app.timezone'))
+                    ->startOfDay()
+                    ->setTimezone('UTC');
+                $end = Carbon::parse($value['end'], config('app.timezone'))
+                    ->endOfDay()
+                    ->setTimezone('UTC');
+
+                return [$start, $end];
             }
         }
 
+        // 2. If the value is the string 'now'
         if ($value === 'now') {
-            return Carbon::now();
+            return Carbon::now('UTC');
         }
 
-        return Carbon::createFromTimestamp(strtotime($value));
+        // 3. If $value is a scalar (not an array or object)
+        if (!is_array($value) && !is_object($value)) {
+            return Carbon::parse($value, config('app.timezone'))->setTimezone(
+                'UTC'
+            );
+        }
+
+        // 4. If $value is an array or object (without 'start'/'end'), loop through each element
+        $result = [];
+        foreach ((array) $value as $key => $item) {
+            $result[$key] = Carbon::parse(
+                $item,
+                config('app.timezone')
+            )->setTimezone('UTC');
+        }
+        return $result;
     }
 
     protected function applyConditionBasedOnOperator($query, $condition, $value)
@@ -535,13 +548,15 @@ class DynamicController extends \App\Http\Controllers\Controller
                 case 'inrange':
                     if (is_array($value)) {
                         if (count($value) === 2) {
-                            $query->whereBetween($jsonField, $value);
-                        } elseif (
-                            isset($value['start']) &&
-                            isset($value['end'])
-                        ) {
-                            $dateRange = $this->handleDateValue($value);
-                            $query->whereBetween($jsonField, $dateRange);
+                            if (
+                                isset($value['start']) &&
+                                isset($value['end'])
+                            ) {
+                                $dateRange = $this->handleDateValue($value);
+                                $query->whereBetween($jsonField, $dateRange);
+                            } else {
+                                $query->whereBetween($jsonField, $value);
+                            }
                         }
                     }
                     break;
