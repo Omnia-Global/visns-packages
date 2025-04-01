@@ -502,6 +502,18 @@ class DynamicController extends \App\Http\Controllers\Controller
         $id = $condition['id'] ?? null;
         $whereHas = $condition['whereHas'] ?? [];
 
+        // Special case: if only whereHas is provided (no id/value needed)
+        if (empty($id) && !empty($whereHas)) {
+            if (is_string($whereHas)) {
+                $query->whereHas($whereHas);
+            } elseif (is_array($whereHas)) {
+                foreach ($whereHas as $relation) {
+                    $query->whereHas($relation);
+                }
+            }
+            return;
+        }
+
         if (!$id) {
             return;
         }
