@@ -501,6 +501,7 @@ class DynamicController extends \App\Http\Controllers\Controller
         $operator = $condition['operator'] ?? '=';
         $id = $condition['id'] ?? null;
         $whereHas = $condition['whereHas'] ?? [];
+        $type = $condition['type'] ?? null;
 
         // Special case: if only whereHas is provided (no id/value needed)
         if (empty($id) && !empty($whereHas)) {
@@ -518,16 +519,23 @@ class DynamicController extends \App\Http\Controllers\Controller
             return;
         }
 
-        // Extract JSON field and key from $id (e.g., 'event_coordinator.company' becomes 'event_coordinator' and 'company')
+        // Handle 'now' value for date type
+        if ($type === 'date' && $value === 'now') {
+            $value = Carbon::now()
+                ->setTimezone(config('app.timezone'))
+                ->format('Y-m-d');
+        }
+
         $fieldParts = explode('.', $id);
-        $jsonField = array_shift($fieldParts); // The main JSON column (e.g., 'event_coordinator')
-        $jsonPath = '$.' . implode('.', $fieldParts); // The path inside the JSON (e.g., '$.company')
+        $jsonField = array_shift($fieldParts);
+        $jsonPath = '$.' . implode('.', $fieldParts);
 
         $applyCondition = function ($query) use (
             $operator,
             $jsonField,
             $jsonPath,
-            $value
+            $value,
+            $type
         ) {
             switch ($operator) {
                 case 'contain_json':
@@ -546,10 +554,18 @@ class DynamicController extends \App\Http\Controllers\Controller
                     $query->where($jsonField, 'not like', '%' . $value . '%');
                     break;
                 case 'gt':
-                    $query->where($jsonField, '>', $value);
+                    if ($type === 'date') {
+                        $query->whereDate($jsonField, '>', $value);
+                    } else {
+                        $query->where($jsonField, '>', $value);
+                    }
                     break;
                 case 'gte':
-                    $query->where($jsonField, '>=', $value);
+                    if ($type === 'date') {
+                        $query->whereDate($jsonField, '>=', $value);
+                    } else {
+                        $query->where($jsonField, '>=', $value);
+                    }
                     break;
                 case 'inlist':
                     $query->whereIn($jsonField, $value);
@@ -576,30 +592,24 @@ class DynamicController extends \App\Http\Controllers\Controller
                     $query->whereNull($jsonField);
                     break;
                 case 'lt':
-                    $query->where($jsonField, '<', $value);
+                    if ($type === 'date') {
+                        $query->whereDate($jsonField, '<', $value);
+                    } else {
+                        $query->where($jsonField, '<', $value);
+                    }
                     break;
                 case 'lte':
-                    $query->where($jsonField, '<=', $value);
+                    if ($type === 'date') {
+                        $query->whereDate($jsonField, '<=', $value);
+                    } else {
+                        $query->where($jsonField, '<=', $value);
+                    }
                     break;
                 default:
-                    // Check if value is a date and apply whereDate
-                    $dateFormats = ['Y-m-d', 'd-m-Y'];
-                    $date = null;
-
-                    foreach ($dateFormats as $format) {
-                        try {
-                            $date = Carbon::createFromFormat($format, $value);
-                            break; // Valid date, exit loop
-                        } catch (\Exception $e) {
-                            // Continue to try other formats
-                        }
-                    }
-
-                    // If $date is not null, it's a valid date, use whereDate
-                    if ($date) {
-                        $query->whereDate($jsonField, $date->format('Y-m-d')); // Store date in Y-m-d format
+                    if ($type === 'date') {
+                        $query->whereDate($jsonField, $operator, $value);
                     } else {
-                        $query->where($jsonField, $value); // Fallback to default where clause
+                        $query->where($jsonField, $value);
                     }
                     break;
             }
