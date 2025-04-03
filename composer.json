@@ -1,23 +1,30 @@
 {
-	"name": "visnsstudio/visns-packages",
-	"description": "Laravel/PHP packages used for Visns Studio Projects",
-	"type": "library",
-	"license": "MIT",
-	"autoload": {
-		"psr-4": {
-			"Visnsstudio\\VisnsPackages\\": "src/"
-		}
-	},
-	"authors": [
-		{
-			"name": "Visns Studio",
-			"email": "team@visns.studio"
-		}
-	],
-	"minimum-stability": "dev",
-	"prefer-stable": true,
-	"require": {
-		"php": "^8.0",
-		"laravel/framework": ">=10.0"
-	}
+    "name": "visnsstudio/visns-packages",
+    "description": "Laravel/PHP packages used for Visns Studio Projects",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Visnsstudio\\VisnsPackages\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Visns Studio",
+            "email": "team@visns.studio"
+        }
+    ],
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "require": {
+        "php": "^8.0",
+        "laravel/framework": ">=10.0"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Visnsstudio\\VisnsPackages\\VisnsPackagesServiceProvider"
+            ]
+        }
+    }
 }

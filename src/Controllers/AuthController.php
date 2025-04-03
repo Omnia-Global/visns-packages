@@ -8,6 +8,8 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Session;
+use Illuminate\Validation\ValidationException;
 
 use App\Mail\GenericMail;
 
@@ -131,13 +133,30 @@ class AuthController extends \App\Http\Controllers\Controller
             ];
 
         $user = '';
+        $requiresTwoFactor = false;
 
         if (Auth::attempt($credentials)) {
-            if (!env('ALLOW_MULTIPLE_SESSIONS', false)) {
-                Auth::logoutOtherDevices($request->input('password'));
-            }
+            $user = Auth::user();
 
-            $user = Auth::user()->load('roles.permissions');
+            // Check if user has 2FA enabled
+            if (
+                method_exists($user, 'two_factor_secret') &&
+                $user->two_factor_secret
+            ) {
+                // Store user ID in session for the 2FA challenge
+                $request->session()->put('auth.two_factor.user_id', $user->id);
+                $requiresTwoFactor = true;
+
+                // Don't fully log in the user yet
+                Auth::logout();
+            } else {
+                // User doesn't have 2FA, proceed with normal login
+                if (!env('ALLOW_MULTIPLE_SESSIONS', false)) {
+                    Auth::logoutOtherDevices($request->input('password'));
+                }
+
+                $user = $user->load('roles.permissions');
+            }
         } else {
             $error = 'Login unsuccessful, please try again.';
             $request->session()->flash('errors');
@@ -151,6 +170,7 @@ class AuthController extends \App\Http\Controllers\Controller
                     ? ''
                     : $request->input('location'),
             'user' => $user,
+            'requires_two_factor' => $requiresTwoFactor,
         ]);
     }
 
@@ -187,10 +207,226 @@ class AuthController extends \App\Http\Controllers\Controller
 
         if (Auth::attempt($credentials)) {
             $user = Auth::user();
+
+            // Check if user has 2FA enabled
+            if (
+                method_exists($user, 'two_factor_secret') &&
+                $user->two_factor_secret
+            ) {
+                // For API, we'll return a special response indicating 2FA is required
+                return response()->json(
+                    [
+                        'two_factor_required' => true,
+                        'user_id' => $user->id,
+                    ],
+                    200
+                );
+            }
+
             $token = $user->createToken('authToken');
             return response()->json(['id' => $token->plainTextToken], 200);
         } else {
             return response()->json(['error' => 'Unauthenticated'], 401);
         }
+    }
+
+    /**
+     * Show the two-factor authentication challenge view.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\Response
+     */
+    public function twoFactorChallenge(Request $request)
+    {
+        if (!$request->session()->has('auth.two_factor.user_id')) {
+            return redirect()->route('login');
+        }
+
+        return response()->json([
+            'requires_two_factor' => true,
+        ]);
+    }
+
+    /**
+     * Attempt to authenticate a two-factor authentication request.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\Response
+     */
+    public function twoFactorAuthenticate(Request $request)
+    {
+        $request->validate([
+            'code' => 'required|string',
+        ]);
+
+        $userId = $request->session()->get('auth.two_factor.user_id');
+
+        if (!$userId) {
+            return response()->json(
+                [
+                    'error' => 'Invalid two-factor authentication session.',
+                ],
+                401
+            );
+        }
+
+        $user = User::find($userId);
+
+        if (!$user) {
+            $request->session()->forget('auth.two_factor.user_id');
+            return response()->json(
+                [
+                    'error' => 'User not found.',
+                ],
+                401
+            );
+        }
+
+        // Check if the provided code is a recovery code
+        if (str_contains($request->code, '-')) {
+            // Handle recovery code
+            if (
+                method_exists($user, 'recoveryCodes') &&
+                $this->attemptRecoveryCode($user, $request->code)
+            ) {
+                $this->completeLogin($request, $user);
+
+                return response()->json([
+                    'user' => $user->load('roles.permissions'),
+                ]);
+            }
+        } else {
+            // Handle regular 2FA code
+            if (
+                method_exists($user, 'validateTwoFactorCode') &&
+                $user->validateTwoFactorCode($request->code)
+            ) {
+                $this->completeLogin($request, $user);
+
+                return response()->json([
+                    'user' => $user->load('roles.permissions'),
+                ]);
+            }
+        }
+
+        // If we reach here, the code was invalid
+        return response()->json(
+            [
+                'error' =>
+                    'The provided two-factor authentication code was invalid.',
+            ],
+            401
+        );
+    }
+
+    /**
+     * Attempt to validate a recovery code.
+     *
+     * @param  \App\Models\User  $user
+     * @param  string  $recoveryCode
+     * @return bool
+     */
+    protected function attemptRecoveryCode($user, $recoveryCode)
+    {
+        if (!method_exists($user, 'recoveryCodes')) {
+            return false;
+        }
+
+        // Get the recovery codes from the user
+        $recoveryCodes = $user->recoveryCodes() ?? [];
+
+        // Find the matching recovery code
+        $key = array_search($recoveryCode, $recoveryCodes);
+
+        if ($key !== false) {
+            // Remove the used recovery code
+            unset($recoveryCodes[$key]);
+
+            // Update the user's recovery codes
+            $user->replaceRecoveryCodes($recoveryCodes);
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Complete the login process after successful 2FA.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  \App\Models\User  $user
+     * @return void
+     */
+    protected function completeLogin(Request $request, $user)
+    {
+        // Clear the 2FA session
+        $request->session()->forget('auth.two_factor.user_id');
+
+        // Log in the user
+        Auth::login($user);
+
+        // Handle multiple sessions if needed
+        if (!env('ALLOW_MULTIPLE_SESSIONS', false)) {
+            Auth::logoutOtherDevices($request->input('password'));
+        }
+
+        // Regenerate the session
+        $request->session()->regenerate();
+    }
+
+    /**
+     * Handle two-factor authentication for API requests.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\Response
+     */
+    public function twoFactorAuthenticateApi(Request $request)
+    {
+        $request->validate([
+            'user_id' => 'required|exists:users,id',
+            'code' => 'required|string',
+        ]);
+
+        $user = User::find($request->user_id);
+
+        if (!$user) {
+            return response()->json(
+                [
+                    'error' => 'User not found.',
+                ],
+                401
+            );
+        }
+
+        // Check if the provided code is a recovery code
+        if (str_contains($request->code, '-')) {
+            // Handle recovery code
+            if (
+                method_exists($user, 'recoveryCodes') &&
+                $this->attemptRecoveryCode($user, $request->code)
+            ) {
+                $token = $user->createToken('authToken');
+                return response()->json(['id' => $token->plainTextToken], 200);
+            }
+        } else {
+            // Handle regular 2FA code
+            if (
+                method_exists($user, 'validateTwoFactorCode') &&
+                $user->validateTwoFactorCode($request->code)
+            ) {
+                $token = $user->createToken('authToken');
+                return response()->json(['id' => $token->plainTextToken], 200);
+            }
+        }
+
+        // If we reach here, the code was invalid
+        return response()->json(
+            [
+                'error' =>
+                    'The provided two-factor authentication code was invalid.',
+            ],
+            401
+        );
     }
 }
