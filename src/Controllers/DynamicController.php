@@ -806,8 +806,79 @@ class DynamicController extends \App\Http\Controllers\Controller
             }
         }
 
+        // Extract nested objects that might be relationships
+        $nestedRelationships = [];
+        foreach ($allData as $key => $value) {
+            // Check if the value is an array (object) but not a Laravel collection or array of objects
+            if (
+                is_array($value) &&
+                !isset($value[0]) &&
+                !isset($value['value'])
+            ) {
+                // Check if this key corresponds to a relationship method in the model
+                if (method_exists($this->model, $key)) {
+                    // Get the relationship instance
+                    $relation = $this->model->$key();
+
+                    // Handle different relationship types
+                    if (
+                        $relation instanceof
+                            \Illuminate\Database\Eloquent\Relations\HasOne ||
+                        $relation instanceof
+                            \Illuminate\Database\Eloquent\Relations\BelongsTo
+                    ) {
+                        // Store the relationship data for processing after model creation
+                        $nestedRelationships[$key] = $value;
+
+                        // For BelongsTo, we need to create the related model first
+                        if (
+                            $relation instanceof
+                            \Illuminate\Database\Eloquent\Relations\BelongsTo
+                        ) {
+                            $relatedModel = $relation->getRelated();
+
+                            // Update the related model with the nested object data
+                            foreach ($value as $attr => $attrValue) {
+                                $relatedModel->$attr = $attrValue;
+                            }
+
+                            // Save the related model
+                            $relatedModel->save();
+
+                            // Update the foreign key in the main data
+                            $foreignKey = $relation->getForeignKeyName();
+                            $allData[$foreignKey] = $relatedModel->getKey();
+                        }
+
+                        // Remove the nested object from the data array to prevent errors
+                        unset($allData[$key]);
+                    }
+                }
+            }
+        }
+
         // Create a new resource
         $resource = $this->model::create($allData);
+
+        // Process HasOne relationships after the main model is created
+        foreach ($nestedRelationships as $key => $value) {
+            $relation = $resource->$key();
+
+            if (
+                $relation instanceof
+                \Illuminate\Database\Eloquent\Relations\HasOne
+            ) {
+                $relatedModel = $relation->getRelated();
+
+                // Update the related model with the nested object data
+                foreach ($value as $attr => $attrValue) {
+                    $relatedModel->$attr = $attrValue;
+                }
+
+                // Save the related model through the relationship
+                $resource->$key()->save($relatedModel);
+            }
+        }
 
         // Initialize an array to hold many-to-many relationships
         $manyToManyRelations = [];
@@ -1092,6 +1163,9 @@ class DynamicController extends \App\Http\Controllers\Controller
             }
         }
 
+        // Process nested objects that might be relationships
+        $this->processNestedRelationships($resource, $allData);
+
         // Update the resource
         $resource->update($allData);
 
@@ -1367,6 +1441,76 @@ class DynamicController extends \App\Http\Controllers\Controller
             ['data' => $resource ?? '', 'error' => $error ?? ''],
             $error == '' ? 200 : 400
         );
+    }
+
+    /**
+     * Process nested objects in the input data that might be relationships
+     *
+     * @param Model $resource The model instance being updated
+     * @param array &$allData The input data array (passed by reference to modify it)
+     * @return void
+     */
+    private function processNestedRelationships($resource, array &$allData)
+    {
+        foreach ($allData as $key => $value) {
+            // Check if the value is an array (object) but not a Laravel collection or array of objects
+            if (
+                is_array($value) &&
+                !isset($value[0]) &&
+                !isset($value['value'])
+            ) {
+                // Check if this key corresponds to a relationship method in the model
+                if (method_exists($resource, $key)) {
+                    // Get the relationship instance
+                    $relation = $resource->$key();
+
+                    // Handle different relationship types
+                    if (
+                        $relation instanceof
+                            \Illuminate\Database\Eloquent\Relations\HasOne ||
+                        $relation instanceof
+                            \Illuminate\Database\Eloquent\Relations\BelongsTo
+                    ) {
+                        // Get the related model (or create a new one if it doesn't exist)
+                        if (
+                            $relation instanceof
+                            \Illuminate\Database\Eloquent\Relations\BelongsTo
+                        ) {
+                            // For BelongsTo, we need to get the related model first
+                            $relatedModel = $resource->$key;
+                            if (!$relatedModel) {
+                                // Create a new instance of the related model
+                                $relatedModel = $relation->getRelated();
+                            }
+                        } else {
+                            // For HasOne, we can use the relation directly
+                            $relatedModel =
+                                $resource->$key ?? $relation->getRelated();
+                        }
+
+                        // Update the related model with the nested object data
+                        foreach ($value as $attr => $attrValue) {
+                            $relatedModel->$attr = $attrValue;
+                        }
+
+                        // Save the related model
+                        $relatedModel->save();
+
+                        // For BelongsTo, we need to update the foreign key on the parent model
+                        if (
+                            $relation instanceof
+                            \Illuminate\Database\Eloquent\Relations\BelongsTo
+                        ) {
+                            $foreignKey = $relation->getForeignKeyName();
+                            $allData[$foreignKey] = $relatedModel->getKey();
+                        }
+
+                        // Remove the nested object from the data array to prevent errors
+                        unset($allData[$key]);
+                    }
+                }
+            }
+        }
     }
 
     /**
