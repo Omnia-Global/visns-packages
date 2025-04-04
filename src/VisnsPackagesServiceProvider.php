@@ -10,6 +10,7 @@ use Visnsstudio\VisnsPackages\Controllers\UserController;
 use Visnsstudio\VisnsPackages\Controllers\FileController;
 use Visnsstudio\VisnsPackages\Controllers\PermissionController;
 use Visnsstudio\VisnsPackages\Controllers\RoleController;
+use Visnsstudio\VisnsPackages\Controllers\SocialiteController;
 
 class VisnsPackagesServiceProvider extends ServiceProvider
 {
@@ -176,6 +177,20 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                             Route::post('/table', 'table');
                             Route::post('/dropdown', 'dropdown');
                         });
+
+                    // Socialite routes
+                    Route::controller(SocialiteController::class)->group(
+                        function () {
+                            Route::get(
+                                '/auth/{provider}',
+                                'redirectToProvider'
+                            ); // Route to redirect the user to provider for authentication
+                            Route::get(
+                                '/auth/{provider}/callback',
+                                'handleProviderCallback'
+                            ); // Route to handle the callback from provider after authentication
+                        }
+                    );
                 });
         }
     }

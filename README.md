@@ -4,36 +4,38 @@ A comprehensive Laravel package that provides enhanced authentication, file mana
 
 ## Table of Contents
 
-- [Visns Packages](#visns-packages)
-  - [Table of Contents](#table-of-contents)
-  - [Installation](#installation)
-  - [Features](#features)
-  - [Database Migrations](#database-migrations)
-    - [User Table Migrations](#user-table-migrations)
-    - [File Table Migrations](#file-table-migrations)
-  - [Authentication System](#authentication-system)
-    - [Basic Authentication](#basic-authentication)
-    - [Two-Factor Authentication (2FA)](#two-factor-authentication-2fa)
-      - [Setup](#setup)
-      - [Authentication Flow with 2FA](#authentication-flow-with-2fa)
-      - [Remember Me for 2FA](#remember-me-for-2fa)
-      - [Managing 2FA](#managing-2fa)
-    - [API Authentication](#api-authentication)
-  - [File Management](#file-management)
-  - [User Management](#user-management)
-  - [Role \& Permission Management](#role--permission-management)
-    - [Permission Management](#permission-management)
-    - [Role Management](#role-management)
-  - [Configuration](#configuration)
-    - [Environment Variables](#environment-variables)
-    - [Package Configuration](#package-configuration)
-    - [Automatic Route Registration](#automatic-route-registration)
-      - [Authentication Routes](#authentication-routes)
-      - [User Routes](#user-routes)
-      - [File Management Routes](#file-management-routes)
-      - [Permission Management Routes](#permission-management-routes)
-      - [Role Management Routes](#role-management-routes)
-  - [License](#license)
+-   [Visns Packages](#visns-packages)
+    -   [Table of Contents](#table-of-contents)
+    -   [Installation](#installation)
+    -   [Features](#features)
+    -   [Database Migrations](#database-migrations)
+        -   [User Table Migrations](#user-table-migrations)
+        -   [File Table Migrations](#file-table-migrations)
+    -   [Authentication System](#authentication-system)
+        -   [Basic Authentication](#basic-authentication)
+        -   [Two-Factor Authentication (2FA)](#two-factor-authentication-2fa)
+            -   [Setup](#setup)
+            -   [Authentication Flow with 2FA](#authentication-flow-with-2fa)
+            -   [Remember Me for 2FA](#remember-me-for-2fa)
+            -   [Managing 2FA](#managing-2fa)
+        -   [Social Authentication](#social-authentication)
+        -   [API Authentication](#api-authentication)
+    -   [File Management](#file-management)
+    -   [User Management](#user-management)
+    -   [Role \& Permission Management](#role--permission-management)
+        -   [Permission Management](#permission-management)
+        -   [Role Management](#role-management)
+    -   [Configuration](#configuration)
+        -   [Environment Variables](#environment-variables)
+        -   [Package Configuration](#package-configuration)
+        -   [Automatic Route Registration](#automatic-route-registration)
+            -   [Authentication Routes](#authentication-routes)
+            -   [User Routes](#user-routes)
+            -   [File Management Routes](#file-management-routes)
+            -   [Permission Management Routes](#permission-management-routes)
+            -   [Role Management Routes](#role-management-routes)
+            -   [Social Authentication Routes](#social-authentication-routes)
+    -   [License](#license)
 
 ## Installation
 
@@ -73,7 +75,7 @@ php artisan migrate
 
     -   Username/email login support
     -   Password reset functionality
-    -   Social authentication integration
+    -   Social authentication integration with Laravel Socialite
     -   Two-factor authentication (2FA)
     -   API token authentication
 
@@ -275,6 +277,15 @@ Route::middleware(['auth'])->group(function () {
     ])->name('user.two-factor.status');
 });
 ```
+
+### Social Authentication
+
+The package integrates with Laravel Socialite to provide social authentication:
+
+-   `redirectToProvider` - Redirects the user to the OAuth provider (like Google, Facebook, Azure, etc.)
+-   `handleProviderCallback` - Handles the callback from the OAuth provider and logs the user in
+
+To use social authentication, you need to install Laravel Socialite and configure your OAuth providers in `config/services.php`. The package automatically registers the necessary routes.
 
 ### API Authentication
 
@@ -503,6 +514,20 @@ Route::put('/ajax/roles/{id}', [RoleController::class, 'update']);
 Route::delete('/ajax/roles/{id}', [RoleController::class, 'destroy']);
 Route::post('/ajax/roles/table', [RoleController::class, 'table']);
 Route::post('/ajax/roles/dropdown', [RoleController::class, 'dropdown']);
+```
+
+#### Social Authentication Routes
+
+```php
+// Socialite routes
+Route::get('/auth/{provider}', [
+    SocialiteController::class,
+    'redirectToProvider',
+]);
+Route::get('/auth/{provider}/callback', [
+    SocialiteController::class,
+    'handleProviderCallback',
+]);
 ```
 
 You can disable automatic route registration by setting `register_routes` to `false` in the configuration file, or customize the middleware and prefix applied to these routes.
