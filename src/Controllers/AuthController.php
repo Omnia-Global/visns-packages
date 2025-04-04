@@ -10,10 +10,12 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Session;
 use Illuminate\Validation\ValidationException;
+use Laravel\Fortify\Fortify;
 
 use App\Mail\GenericMail;
 
 use App\Models\User;
+use Visnsstudio\VisnsPackages\Models\TwoFactorRememberToken;
 
 use Carbon\Carbon;
 
@@ -135,22 +137,53 @@ class AuthController extends \App\Http\Controllers\Controller
         $user = '';
         $requiresTwoFactor = false;
 
-        if (Auth::attempt($credentials)) {
-            $user = Auth::user();
+        // First, find the user by email or username
+        if ($isEmail) {
+            $user = \App\Models\User::where(
+                'email',
+                $request->input('email')
+            )->first();
+        } else {
+            $user = \App\Models\User::where(
+                'username',
+                $request->input('email')
+            )->first();
+        }
 
-            // Check if user has 2FA enabled
-            if (
-                method_exists($user, 'two_factor_secret') &&
-                $user->two_factor_secret
-            ) {
-                // Store user ID in session for the 2FA challenge
-                $request->session()->put('auth.two_factor.user_id', $user->id);
-                $requiresTwoFactor = true;
+        // If user exists, check password
+        if (
+            $user &&
+            Hash::check($request->input('password'), $user->password)
+        ) {
+            // Check if user has 2FA enabled and confirmed
+            if ($user->two_factor_secret && $user->two_factor_confirmed_at) {
+                // Check if there's a valid remember token for this device
+                $deviceIdentifier = $this->getDeviceIdentifier($request);
+                $rememberToken = TwoFactorRememberToken::findValidTokenByDevice(
+                    $user,
+                    $deviceIdentifier
+                );
 
-                // Don't fully log in the user yet
-                Auth::logout();
+                if ($rememberToken) {
+                    // User has a valid remember token, skip 2FA
+                    Auth::login($user);
+
+                    if (!env('ALLOW_MULTIPLE_SESSIONS', false)) {
+                        Auth::logoutOtherDevices($request->input('password'));
+                    }
+
+                    $user = $user->load('roles.permissions');
+                } else {
+                    // No valid remember token, require 2FA
+                    $request
+                        ->session()
+                        ->put('auth.two_factor.user_id', $user->id);
+                    $requiresTwoFactor = true;
+                }
             } else {
                 // User doesn't have 2FA, proceed with normal login
+                Auth::login($user);
+
                 if (!env('ALLOW_MULTIPLE_SESSIONS', false)) {
                     Auth::logoutOtherDevices($request->input('password'));
                 }
@@ -160,6 +193,7 @@ class AuthController extends \App\Http\Controllers\Controller
         } else {
             $error = 'Login unsuccessful, please try again.';
             $request->session()->flash('errors');
+            $user = ''; // Reset user if authentication failed
         }
 
         return response()->json([
@@ -191,60 +225,63 @@ class AuthController extends \App\Http\Controllers\Controller
             filter_var($request->input('username'), FILTER_VALIDATE_EMAIL) !==
             false;
 
-        // Prepare credentials based on the input type
-        $credentials = $isEmail
-            ? [
-                'email' => $request->input('username'),
-                'password' => $request->input('password'),
-            ]
-            : [
-                'username' => $request->input('username'),
-                'password' => $request->input('password'),
-            ];
+        // First, find the user by email or username
+        if ($isEmail) {
+            $user = \App\Models\User::where(
+                'email',
+                $request->input('username')
+            )->first();
+        } else {
+            $user = \App\Models\User::where(
+                'username',
+                $request->input('username')
+            )->first();
+        }
 
-        $username = $request->input('username');
-        $password = $request->input('password');
-
-        if (Auth::attempt($credentials)) {
-            $user = Auth::user();
-
-            // Check if user has 2FA enabled
-            if (
-                method_exists($user, 'two_factor_secret') &&
-                $user->two_factor_secret
-            ) {
-                // For API, we'll return a special response indicating 2FA is required
-                return response()->json(
-                    [
-                        'two_factor_required' => true,
-                        'user_id' => $user->id,
-                    ],
-                    200
+        // If user exists, check password
+        if (
+            $user &&
+            Hash::check($request->input('password'), $user->password)
+        ) {
+            // Check if user has 2FA enabled and confirmed
+            if ($user->two_factor_secret && $user->two_factor_confirmed_at) {
+                // Check if there's a valid remember token for this device
+                $deviceIdentifier =
+                    $request->input('device_identifier') ?:
+                    $this->getDeviceIdentifier($request);
+                $rememberToken = TwoFactorRememberToken::findValidTokenByDevice(
+                    $user,
+                    $deviceIdentifier
                 );
+
+                if ($rememberToken) {
+                    // User has a valid remember token, skip 2FA
+                    Auth::login($user);
+                    $token = $user->createToken('authToken');
+                    return response()->json(
+                        ['id' => $token->plainTextToken],
+                        200
+                    );
+                } else {
+                    // For API, we'll return a special response indicating 2FA is required
+                    return response()->json(
+                        [
+                            'two_factor_required' => true,
+                            'user_id' => $user->id,
+                        ],
+                        200
+                    );
+                }
             }
 
+            // User doesn't have 2FA, proceed with normal login and token creation
+            Auth::login($user);
             $token = $user->createToken('authToken');
             return response()->json(['id' => $token->plainTextToken], 200);
-        } else {
-            return response()->json(['error' => 'Unauthenticated'], 401);
-        }
-    }
-
-    /**
-     * Show the two-factor authentication challenge view.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\Response
-     */
-    public function twoFactorChallenge(Request $request)
-    {
-        if (!$request->session()->has('auth.two_factor.user_id')) {
-            return redirect()->route('login');
         }
 
-        return response()->json([
-            'requires_two_factor' => true,
-        ]);
+        // Authentication failed
+        return response()->json(['error' => 'Unauthenticated'], 401);
     }
 
     /**
@@ -257,6 +294,7 @@ class AuthController extends \App\Http\Controllers\Controller
     {
         $request->validate([
             'code' => 'required|string',
+            'remember' => 'sometimes|boolean',
         ]);
 
         $userId = $request->session()->get('auth.two_factor.user_id');
@@ -266,7 +304,7 @@ class AuthController extends \App\Http\Controllers\Controller
                 [
                     'error' => 'Invalid two-factor authentication session.',
                 ],
-                401
+                200
             );
         }
 
@@ -278,35 +316,26 @@ class AuthController extends \App\Http\Controllers\Controller
                 [
                     'error' => 'User not found.',
                 ],
-                401
+                200
             );
         }
 
-        // Check if the provided code is a recovery code
-        if (str_contains($request->code, '-')) {
-            // Handle recovery code
-            if (
-                method_exists($user, 'recoveryCodes') &&
-                $this->attemptRecoveryCode($user, $request->code)
-            ) {
-                $this->completeLogin($request, $user);
+        // Use the UserController to validate the 2FA code
+        $userController = new \Visnsstudio\VisnsPackages\Controllers\UserController();
 
-                return response()->json([
-                    'user' => $user->load('roles.permissions'),
-                ]);
-            }
-        } else {
-            // Handle regular 2FA code
-            if (
-                method_exists($user, 'validateTwoFactorCode') &&
-                $user->validateTwoFactorCode($request->code)
-            ) {
-                $this->completeLogin($request, $user);
+        if ($userController->validateTwoFactorCode($user, $request->code)) {
+            // Complete the login process
+            $this->completeLogin($user);
 
-                return response()->json([
-                    'user' => $user->load('roles.permissions'),
-                ]);
+            // If remember is true, create a remember token for this device
+            if ($request->input('remember', false)) {
+                $deviceIdentifier = $this->getDeviceIdentifier($request);
+                TwoFactorRememberToken::createToken($user, $deviceIdentifier);
             }
+
+            return response()->json([
+                'user' => $user->load('roles.permissions'),
+            ]);
         }
 
         // If we reach here, the code was invalid
@@ -315,7 +344,7 @@ class AuthController extends \App\Http\Controllers\Controller
                 'error' =>
                     'The provided two-factor authentication code was invalid.',
             ],
-            401
+            200
         );
     }
 
@@ -354,25 +383,23 @@ class AuthController extends \App\Http\Controllers\Controller
     /**
      * Complete the login process after successful 2FA.
      *
-     * @param  \Illuminate\Http\Request  $request
      * @param  \App\Models\User  $user
      * @return void
      */
-    protected function completeLogin(Request $request, $user)
+    protected function completeLogin($user)
     {
         // Clear the 2FA session
-        $request->session()->forget('auth.two_factor.user_id');
+        session()->forget('auth.two_factor.user_id');
 
         // Log in the user
         Auth::login($user);
 
         // Handle multiple sessions if needed
-        if (!env('ALLOW_MULTIPLE_SESSIONS', false)) {
-            Auth::logoutOtherDevices($request->input('password'));
-        }
+        // Note: We can't logout other devices here because we don't have the password
+        // in the 2FA verification request. This is handled in the initial login step.
 
         // Regenerate the session
-        $request->session()->regenerate();
+        session()->regenerate();
     }
 
     /**
@@ -386,6 +413,8 @@ class AuthController extends \App\Http\Controllers\Controller
         $request->validate([
             'user_id' => 'required|exists:users,id',
             'code' => 'required|string',
+            'remember' => 'sometimes|boolean',
+            'device_identifier' => 'sometimes|string',
         ]);
 
         $user = User::find($request->user_id);
@@ -395,29 +424,25 @@ class AuthController extends \App\Http\Controllers\Controller
                 [
                     'error' => 'User not found.',
                 ],
-                401
+                200
             );
         }
 
-        // Check if the provided code is a recovery code
-        if (str_contains($request->code, '-')) {
-            // Handle recovery code
-            if (
-                method_exists($user, 'recoveryCodes') &&
-                $this->attemptRecoveryCode($user, $request->code)
-            ) {
-                $token = $user->createToken('authToken');
-                return response()->json(['id' => $token->plainTextToken], 200);
+        // Use the UserController to validate the 2FA code
+        $userController = new \Visnsstudio\VisnsPackages\Controllers\UserController();
+
+        if ($userController->validateTwoFactorCode($user, $request->code)) {
+            // If remember is true, create a remember token for this device
+            if ($request->input('remember', false)) {
+                $deviceIdentifier =
+                    $request->input('device_identifier') ?:
+                    $this->getDeviceIdentifier($request);
+                TwoFactorRememberToken::createToken($user, $deviceIdentifier);
             }
-        } else {
-            // Handle regular 2FA code
-            if (
-                method_exists($user, 'validateTwoFactorCode') &&
-                $user->validateTwoFactorCode($request->code)
-            ) {
-                $token = $user->createToken('authToken');
-                return response()->json(['id' => $token->plainTextToken], 200);
-            }
+
+            // Create a token for API access
+            $token = $user->createToken('authToken');
+            return response()->json(['id' => $token->plainTextToken], 200);
         }
 
         // If we reach here, the code was invalid
@@ -426,7 +451,23 @@ class AuthController extends \App\Http\Controllers\Controller
                 'error' =>
                     'The provided two-factor authentication code was invalid.',
             ],
-            401
+            200
         );
+    }
+
+    /**
+     * Get a unique identifier for the current device.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return string
+     */
+    protected function getDeviceIdentifier(Request $request)
+    {
+        // Create a unique identifier based on user agent and IP address
+        $userAgent = $request->header('User-Agent', 'unknown');
+        $ip = $request->ip();
+
+        // Create a hash of these values
+        return hash('sha256', $userAgent . $ip);
     }
 }

@@ -2,7 +2,7 @@
 
 namespace Visnsstudio\VisnsPackages\Controllers;
 
-use App\Models\File;
+use Visnsstudio\VisnsPackages\Models\File;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Storage;
@@ -14,20 +14,20 @@ class FileController extends \App\Http\Controllers\Controller
     public function downloadByPath(Request $request)
     {
         $validate = $request->validate([
-            "file_name" => "required|string",
-            "file_path" => "required|string",
-            "file_extension" => "required|string",
+            'file_name' => 'required|string',
+            'file_path' => 'required|string',
+            'file_extension' => 'required|string',
         ]);
 
-        $content = Storage::get($validate["file_path"]);
+        $content = Storage::get($validate['file_path']);
         $contentType = $this->getContentType(
-            pathinfo($validate["file_extension"], PATHINFO_EXTENSION)
+            pathinfo($validate['file_extension'], PATHINFO_EXTENSION)
         );
 
         return Response::make($content, 200, [
-            "Content-Type" => $contentType,
-            "Content-Disposition" =>
-                'inline; filename="' . $validate["file_name"] . '"',
+            'Content-Type' => $contentType,
+            'Content-Disposition' =>
+                'inline; filename="' . $validate['file_name'] . '"',
         ]);
     }
 
@@ -36,10 +36,10 @@ class FileController extends \App\Http\Controllers\Controller
         $file = File::find($id);
 
         if (!$file) {
-            return response()->json(["error" => "File not found."], 404);
+            return response()->json(['error' => 'File not found.'], 404);
         }
 
-        $baseClassName = str_replace("App\\Models\\", "", $file->fileable_type);
+        $baseClassName = str_replace('App\\Models\\', '', $file->fileable_type);
         $plural = Str::plural($baseClassName);
         $model = lcfirst($plural);
 
@@ -48,7 +48,7 @@ class FileController extends \App\Http\Controllers\Controller
         if (is_null($filepath)) {
             // If neither the initial path nor the new determined path exist
             return response()->json(
-                ["error" => "File does not exist on the server."],
+                ['error' => 'File does not exist on the server.'],
                 404
             );
         }
@@ -58,8 +58,8 @@ class FileController extends \App\Http\Controllers\Controller
         $contentType = $this->getContentType($file->file_extension);
 
         return Response::make($content, 200, [
-            "Content-Type" => $contentType,
-            "Content-Disposition" =>
+            'Content-Type' => $contentType,
+            'Content-Disposition' =>
                 'inline; filename="' . $file->file_name . '"',
         ]);
     }
@@ -67,40 +67,40 @@ class FileController extends \App\Http\Controllers\Controller
     private function getContentType($extension)
     {
         $types = [
-            "css" => "text/css",
-            "csv" => "text/csv",
-            "doc" => "application/msword",
-            "docx" =>
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "flac" => "audio/flac",
-            "gif" => "image/gif",
-            "html" => "text/html",
-            "jpeg" => "image/jpeg",
-            "jpg" => "image/jpeg",
-            "js" => "application/javascript",
-            "json" => "application/json",
-            "mp3" => "audio/mpeg",
-            "mp4" => "video/mp4",
-            "ogg" => "audio/ogg",
-            "pdf" => "application/pdf",
-            "png" => "image/png",
-            "ppt" => "application/vnd.ms-powerpoint",
-            "pptx" =>
-                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            "rar" => "application/x-rar-compressed",
-            "svg" => "image/svg+xml",
-            "txt" => "text/plain",
-            "wav" => "audio/wav",
-            "xls" => "application/vnd.ms-excel",
-            "xlsx" =>
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "xml" => "application/xml",
-            "zip" => "application/zip",
+            'css' => 'text/css',
+            'csv' => 'text/csv',
+            'doc' => 'application/msword',
+            'docx' =>
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'flac' => 'audio/flac',
+            'gif' => 'image/gif',
+            'html' => 'text/html',
+            'jpeg' => 'image/jpeg',
+            'jpg' => 'image/jpeg',
+            'js' => 'application/javascript',
+            'json' => 'application/json',
+            'mp3' => 'audio/mpeg',
+            'mp4' => 'video/mp4',
+            'ogg' => 'audio/ogg',
+            'pdf' => 'application/pdf',
+            'png' => 'image/png',
+            'ppt' => 'application/vnd.ms-powerpoint',
+            'pptx' =>
+                'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'rar' => 'application/x-rar-compressed',
+            'svg' => 'image/svg+xml',
+            'txt' => 'text/plain',
+            'wav' => 'audio/wav',
+            'xls' => 'application/vnd.ms-excel',
+            'xlsx' =>
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'xml' => 'application/xml',
+            'zip' => 'application/zip',
             // ... add more types as needed ...
-            "default" => "application/octet-stream",
+            'default' => 'application/octet-stream',
         ];
 
-        return $types[strtolower($extension)] ?? $types["default"];
+        return $types[strtolower($extension)] ?? $types['default'];
     }
 
     // Function to convert folder name from plural to singular and capitalize the first letter
@@ -125,22 +125,22 @@ class FileController extends \App\Http\Controllers\Controller
 
             // Validate the file instance
             if (!$file instanceof File) {
-                return response()->json(["error" => "Invalid file data."], 400);
+                return response()->json(['error' => 'Invalid file data.'], 400);
             }
 
             // Validate file path and name
             $filename = $this->formatFileName($file);
             $filepath = $this->determineFilePath($file, $folder);
 
-            if ($filepath && Storage::disk("s3")->exists($filepath)) {
+            if ($filepath && Storage::disk('s3')->exists($filepath)) {
                 return $this->downloadFromS3($filepath, $filename);
             } elseif ($filepath && Storage::exists($filepath)) {
                 return $this->downloadFromFilesystem($filepath, $filename);
             }
 
-            return response()->json(["error" => "File not found."], 404);
+            return response()->json(['error' => 'File not found.'], 404);
         } catch (\Exception $e) {
-            return response()->json(["error" => $e->getMessage()], 500);
+            return response()->json(['error' => $e->getMessage()], 500);
         }
     }
 
@@ -155,7 +155,7 @@ class FileController extends \App\Http\Controllers\Controller
         try {
             // Use GuzzleHttp to make a HEAD request to the URL
             $client = new \GuzzleHttp\Client();
-            $response = $client->head($url, ["http_errors" => false]);
+            $response = $client->head($url, ['http_errors' => false]);
 
             // Return true if the status code indicates success
             return in_array($response->getStatusCode(), [200, 301, 302]);
@@ -167,19 +167,19 @@ class FileController extends \App\Http\Controllers\Controller
 
     protected function getFile($id, $folder)
     {
-        if ($folder === "null") {
+        if ($folder === 'null') {
             $file = File::find($id);
         } else {
-            $type = "App\\Models\\" . $this->singularizeAndCapitalize($folder);
-            $file = File::where("fileable_id", $id)
-                ->where("fileable_type", $type)
+            $type = 'App\\Models\\' . $this->singularizeAndCapitalize($folder);
+            $file = File::where('fileable_id', $id)
+                ->where('fileable_type', $type)
                 ->first();
         }
 
         // Ensure $file is a valid instance
         if (!$file) {
             throw new \Exception(
-                "File not found or invalid folder: " . $folder
+                'File not found or invalid folder: ' . $folder
             );
         }
 
@@ -188,11 +188,11 @@ class FileController extends \App\Http\Controllers\Controller
 
     protected function formatFileName($file)
     {
-        $filename = str_replace([" ", "-"], "_", $file->file_name);
-        if (strpos($file->file_name, "." . $file->file_extension) === false) {
-            $filename .= "." . $file->file_extension;
+        $filename = str_replace([' ', '-'], '_', $file->file_name);
+        if (strpos($file->file_name, '.' . $file->file_extension) === false) {
+            $filename .= '.' . $file->file_extension;
         }
-        return str_replace(",", "", $filename);
+        return str_replace(',', '', $filename);
     }
 
     protected function isPlural($word)
@@ -208,7 +208,7 @@ class FileController extends \App\Http\Controllers\Controller
     {
         $folderArray = [];
 
-        if ($folder == "null") {
+        if ($folder == 'null') {
             $modelName = class_basename($file->fileable_type);
         } else {
             $modelName = $folder;
@@ -223,11 +223,11 @@ class FileController extends \App\Http\Controllers\Controller
 
         foreach ($folderArray as $item) {
             $targetPath =
-                strpos($file->file_path, $item . "/") === false
-                    ? $item . "/" . $file->file_path
+                strpos($file->file_path, $item . '/') === false
+                    ? $item . '/' . $file->file_path
                     : $file->file_path;
 
-            if (Storage::disk("s3")->exists($targetPath)) {
+            if (Storage::disk('s3')->exists($targetPath)) {
                 return $targetPath;
             }
         }
@@ -249,7 +249,7 @@ class FileController extends \App\Http\Controllers\Controller
             Str::studly(Str::plural($name)),
         ];
 
-        Log::info("Generated folder variants: " . implode(", ", $variants));
+        Log::info('Generated folder variants: ' . implode(', ', $variants));
         return $variants;
     }
 
@@ -260,7 +260,7 @@ class FileController extends \App\Http\Controllers\Controller
 
         // Generate temporary URL for the file with properly encoded filename
         $url = Storage::temporaryUrl($filepath, now()->addMinutes(5), [
-            "ResponseContentDisposition" => "attachment; filename=\"{$encodedFilename}\"",
+            'ResponseContentDisposition' => "attachment; filename=\"{$encodedFilename}\"",
         ]);
 
         return redirect()->away($url);
@@ -272,20 +272,20 @@ class FileController extends \App\Http\Controllers\Controller
         $encodedFilename = rawurlencode($filename);
 
         return Storage::download(
-            storage_path() . "/app/" . $filepath,
+            storage_path() . '/app/' . $filepath,
             $encodedFilename
         );
     }
 
     public function sort_update(Request $request)
     {
-        $request->validate(["list" => "required"]);
+        $request->validate(['list' => 'required']);
 
-        foreach ($request->input("list") as $index => $item) {
-            File::where("id", $item["id"])->update(["sort_order" => $index]);
+        foreach ($request->input('list') as $index => $item) {
+            File::where('id', $item['id'])->update(['sort_order' => $index]);
         }
 
-        return response()->json(["error" => ""]);
+        return response()->json(['error' => '']);
     }
 
     public function show($id)
@@ -299,24 +299,24 @@ class FileController extends \App\Http\Controllers\Controller
     {
         // Validate the request
         $request->validate([
-            "file_name" => "required|string|max:255", // Add validation rules as needed
+            'file_name' => 'required|string|max:255', // Add validation rules as needed
         ]);
 
         try {
             // Retrieve the file and check if it exists
             $file = File::findOrFail($id);
-            $file->file_name = $request->input("file_name");
-            $file->file_title = $request->input("file_title");
-            $file->file_description = $request->input("file_description");
+            $file->file_name = $request->input('file_name');
+            $file->file_title = $request->input('file_title');
+            $file->file_description = $request->input('file_description');
             $file->save();
 
             return response()->json([
-                "error" => "",
+                'error' => '',
             ]);
         } catch (\Exception $e) {
             return response()->json(
                 [
-                    "error" => $e->getMessage(),
+                    'error' => $e->getMessage(),
                 ],
                 500
             );
@@ -327,39 +327,39 @@ class FileController extends \App\Http\Controllers\Controller
     {
         // Validate the request
         $validated = $request->validate([
-            "file_id" => "required|exists:files,id",
+            'file_id' => 'required|exists:files,id',
         ]);
 
         try {
             // Retrieve the file from the database
-            $file = File::find($validated["file_id"]);
+            $file = File::find($validated['file_id']);
 
             if (!$file) {
                 return response()->json(
                     [
-                        "error" => "File not found.",
+                        'error' => 'File not found.',
                     ],
                     404
                 );
             }
 
             // Check if file exists in storage (S3 or local)
-            if (Storage::disk("s3")->exists($file->file_path)) {
+            if (Storage::disk('s3')->exists($file->file_path)) {
                 // Delete file from storage
-                Storage::disk("s3")->delete($file->file_path);
+                Storage::disk('s3')->delete($file->file_path);
             }
 
             // Delete the file record from the database
             $file->delete();
 
             return response()->json([
-                "error" => "",
+                'error' => '',
             ]);
         } catch (\Exception $e) {
             return response()->json(
                 [
-                    "success" => false,
-                    "error" => $e->getMessage(),
+                    'success' => false,
+                    'error' => $e->getMessage(),
                 ],
                 500
             );

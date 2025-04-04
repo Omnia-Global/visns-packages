@@ -19,37 +19,66 @@ class AddFieldsToUsersTable extends Migration
                 $table
                     ->string('username')
                     ->nullable()
-                    ->unique();
+                    ->unique()
+                    ->after('email');
             }
 
             // Check if provider columns don't exist (for Socialite)
             if (!Schema::hasColumn('users', 'provider')) {
-                $table->string('provider')->nullable();
+                $table
+                    ->string('provider')
+                    ->nullable()
+                    ->after('reset_token_sent_at');
             }
 
             if (!Schema::hasColumn('users', 'provider_id')) {
-                $table->string('provider_id')->nullable();
+                $table
+                    ->string('provider_id')
+                    ->nullable()
+                    ->after('provider');
             }
 
             if (!Schema::hasColumn('users', 'provider_token')) {
-                $table->text('provider_token')->nullable();
+                $table
+                    ->text('provider_token')
+                    ->nullable()
+                    ->after('provider_id');
             }
 
             if (!Schema::hasColumn('users', 'provider_refresh_token')) {
-                $table->text('provider_refresh_token')->nullable();
+                $table
+                    ->text('provider_refresh_token')
+                    ->nullable()
+                    ->after('provider_token');
             }
 
             // Add Laravel Fortify 2FA fields
             if (!Schema::hasColumn('users', 'two_factor_secret')) {
-                $table->text('two_factor_secret')->nullable();
+                $table
+                    ->text('two_factor_secret')
+                    ->nullable()
+                    ->after('provider_refresh_token');
             }
 
             if (!Schema::hasColumn('users', 'two_factor_recovery_codes')) {
-                $table->text('two_factor_recovery_codes')->nullable();
+                $table
+                    ->text('two_factor_recovery_codes')
+                    ->nullable()
+                    ->after('two_factor_secret');
             }
 
             if (!Schema::hasColumn('users', 'two_factor_confirmed_at')) {
-                $table->timestamp('two_factor_confirmed_at')->nullable();
+                $table
+                    ->timestamp('two_factor_confirmed_at')
+                    ->nullable()
+                    ->after('two_factor_recovery_codes');
+            }
+
+            if (!Schema::hasColumn('users', 'signature')) {
+                $table
+                    ->text('signature')
+                    ->nullable()
+                    ->after('username');
             }
         });
     }
@@ -65,14 +94,15 @@ class AddFieldsToUsersTable extends Migration
             // We don't want to drop columns on rollback as they might contain user data
             // If you want to drop columns, uncomment the lines below
 
-            // $table->dropColumn('username');
-            // $table->dropColumn('provider');
-            // $table->dropColumn('provider_id');
-            // $table->dropColumn('provider_token');
-            // $table->dropColumn('provider_refresh_token');
-            // $table->dropColumn('two_factor_secret');
-            // $table->dropColumn('two_factor_recovery_codes');
-            // $table->dropColumn('two_factor_confirmed_at');
+            $table->dropColumn('username');
+            $table->dropColumn('provider');
+            $table->dropColumn('provider_id');
+            $table->dropColumn('provider_token');
+            $table->dropColumn('provider_refresh_token');
+            $table->dropColumn('two_factor_secret');
+            $table->dropColumn('two_factor_recovery_codes');
+            $table->dropColumn('two_factor_confirmed_at');
+            $table->dropColumn('signature');
         });
     }
 }

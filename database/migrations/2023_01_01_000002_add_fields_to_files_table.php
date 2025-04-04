@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-class CreateFilesTable extends Migration
+class AddFieldsToFilesTable extends Migration
 {
     /**
      * Run the migration.
@@ -27,7 +27,7 @@ class CreateFilesTable extends Migration
                 $table->text('file_description')->nullable();
                 $table->integer('sort_order')->nullable();
                 $table->timestamps();
-                
+
                 // Add index for faster lookups
                 $table->index(['fileable_id', 'fileable_type']);
             });
@@ -37,45 +37,47 @@ class CreateFilesTable extends Migration
                 if (!Schema::hasColumn('files', 'fileable_id')) {
                     $table->unsignedBigInteger('fileable_id')->nullable();
                 }
-                
+
                 if (!Schema::hasColumn('files', 'fileable_field')) {
                     $table->string('fileable_field')->nullable();
                 }
-                
+
                 if (!Schema::hasColumn('files', 'fileable_type')) {
                     $table->string('fileable_type')->nullable();
                 }
-                
+
                 if (!Schema::hasColumn('files', 'file_path')) {
                     $table->string('file_path');
                 }
-                
+
                 if (!Schema::hasColumn('files', 'file_name')) {
                     $table->string('file_name')->nullable();
                 }
-                
+
                 if (!Schema::hasColumn('files', 'file_extension')) {
                     $table->string('file_extension')->nullable();
                 }
-                
+
                 if (!Schema::hasColumn('files', 'file_size')) {
                     $table->unsignedBigInteger('file_size')->nullable();
                 }
-                
+
                 if (!Schema::hasColumn('files', 'file_title')) {
                     $table->string('file_title')->nullable();
                 }
-                
+
                 if (!Schema::hasColumn('files', 'file_description')) {
                     $table->text('file_description')->nullable();
                 }
-                
+
                 if (!Schema::hasColumn('files', 'sort_order')) {
                     $table->integer('sort_order')->nullable();
                 }
-                
+
                 // Add index if it doesn't exist
-                if (!Schema::hasIndex('files', ['fileable_id', 'fileable_type'])) {
+                if (
+                    !Schema::hasIndex('files', ['fileable_id', 'fileable_type'])
+                ) {
                     $table->index(['fileable_id', 'fileable_type']);
                 }
             });
