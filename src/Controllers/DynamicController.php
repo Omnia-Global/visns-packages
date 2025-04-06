@@ -1002,8 +1002,10 @@ class DynamicController extends \App\Http\Controllers\Controller
 
             foreach ($uploadedFiles as $uploadedFile) {
                 if (
-                    $uploadedFile['key'] &&
-                    $uploadedFile['file_relationship']
+                    isset(
+                        $uploadedFile['key'],
+                        $uploadedFile['file_relationship']
+                    )
                 ) {
                     $relationshipMethod = $uploadedFile['file_relationship'];
                     $unique_name =
