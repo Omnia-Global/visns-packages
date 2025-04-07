@@ -95,7 +95,7 @@ class UserController extends \App\Http\Controllers\Controller
 
         // Generate QR code
         $qrCodeUrl = $google2fa->getQRCodeUrl(
-            config('app.name'),
+            env('APP_NAME', config('app.name')),
             $user->email,
             $secretKey
         );
