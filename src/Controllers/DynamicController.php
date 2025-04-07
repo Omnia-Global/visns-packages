@@ -982,11 +982,9 @@ class DynamicController extends \App\Http\Controllers\Controller
                 'file_name' => $request->input('filename'),
                 'file_extension' => $request->input('extension'),
                 'file_size' => $request->input('filesize'),
-                'fileable_field' =>
-                    $request->filled('fileable_field') &&
-                    $request->has('fileable_field')
-                        ? $request->input('fileable_field')
-                        : $request->input('file_relationship'),
+                'fileable_field' => $request->filled('fileable_field')
+                    ? $request->input('fileable_field')
+                    : $request->input('file_relationship'),
             ]);
 
             // Dynamically attach the file to the resource
@@ -1031,7 +1029,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                             'file_name' => $uploadedFile['filename'],
                             'file_extension' => $uploadedFile['extension'],
                             'file_size' => $uploadedFile['filesize'],
-                            'fileable_field' => isset(
+                            'fileable_field' => !empty(
                                 $uploadedFile['fileable_field']
                             )
                                 ? $uploadedFile['fileable_field']
@@ -1253,11 +1251,9 @@ class DynamicController extends \App\Http\Controllers\Controller
                 'file_name' => $request->input('filename'),
                 'file_extension' => $request->input('extension'),
                 'file_size' => $request->input('filesize'),
-                'fileable_field' =>
-                    $request->filled('fileable_field') &&
-                    $request->has('fileable_field')
-                        ? $request->input('fileable_field')
-                        : $request->input('file_relationship'),
+                'fileable_field' => $request->filled('fileable_field')
+                    ? $request->input('fileable_field')
+                    : $request->input('file_relationship'),
             ]);
 
             // Dynamically attach the file to the resource
@@ -1351,9 +1347,11 @@ class DynamicController extends \App\Http\Controllers\Controller
                                     'file_size' =>
                                         $uploadedFile['filesize'] ??
                                         $uploadedFile['file_size'],
-                                    'fileable_field' =>
-                                        $uploadedFile['fileable_field'] ??
-                                        $uploadedFile['file_relationship'],
+                                    'fileable_field' => !empty(
+                                        $uploadedFile['fileable_field']
+                                    )
+                                        ? $uploadedFile['fileable_field']
+                                        : $uploadedFile['file_relationship'],
                                 ]);
 
                                 // Attach the file to the resource
