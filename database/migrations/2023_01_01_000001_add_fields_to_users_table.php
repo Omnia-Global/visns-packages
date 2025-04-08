@@ -16,69 +16,117 @@ class AddFieldsToUsersTable extends Migration
         Schema::table('users', function (Blueprint $table) {
             // Check if username column doesn't exist
             if (!Schema::hasColumn('users', 'username')) {
-                $table
-                    ->string('username')
-                    ->nullable()
-                    ->unique()
-                    ->after('email');
+                // Check if the referenced column exists before using after()
+                if (Schema::hasColumn('users', 'email')) {
+                    $table
+                        ->string('username')
+                        ->nullable()
+                        ->unique()
+                        ->after('email');
+                } else {
+                    $table
+                        ->string('username')
+                        ->nullable()
+                        ->unique();
+                }
             }
 
             // Check if provider columns don't exist (for Socialite)
             if (!Schema::hasColumn('users', 'provider')) {
-                $table
-                    ->string('provider')
-                    ->nullable()
-                    ->after('reset_token_sent_at');
+                // Check if the referenced column exists before using after()
+                if (Schema::hasColumn('users', 'username')) {
+                    $table
+                        ->string('provider')
+                        ->nullable()
+                        ->after('username');
+                } else {
+                    $table->string('provider')->nullable();
+                }
             }
 
             if (!Schema::hasColumn('users', 'provider_id')) {
-                $table
-                    ->string('provider_id')
-                    ->nullable()
-                    ->after('provider');
+                // Check if the referenced column exists before using after()
+                if (Schema::hasColumn('users', 'provider')) {
+                    $table
+                        ->string('provider_id')
+                        ->nullable()
+                        ->after('provider');
+                } else {
+                    $table->string('provider_id')->nullable();
+                }
             }
 
             if (!Schema::hasColumn('users', 'provider_token')) {
-                $table
-                    ->text('provider_token')
-                    ->nullable()
-                    ->after('provider_id');
+                // Check if the referenced column exists before using after()
+                if (Schema::hasColumn('users', 'provider_id')) {
+                    $table
+                        ->text('provider_token')
+                        ->nullable()
+                        ->after('provider_id');
+                } else {
+                    $table->text('provider_token')->nullable();
+                }
             }
 
             if (!Schema::hasColumn('users', 'provider_refresh_token')) {
-                $table
-                    ->text('provider_refresh_token')
-                    ->nullable()
-                    ->after('provider_token');
+                // Check if the referenced column exists before using after()
+                if (Schema::hasColumn('users', 'provider_token')) {
+                    $table
+                        ->text('provider_refresh_token')
+                        ->nullable()
+                        ->after('provider_token');
+                } else {
+                    $table->text('provider_refresh_token')->nullable();
+                }
             }
 
             // Add Laravel Fortify 2FA fields
             if (!Schema::hasColumn('users', 'two_factor_secret')) {
-                $table
-                    ->text('two_factor_secret')
-                    ->nullable()
-                    ->after('provider_refresh_token');
+                // Check if the referenced column exists before using after()
+                if (Schema::hasColumn('users', 'provider_refresh_token')) {
+                    $table
+                        ->text('two_factor_secret')
+                        ->nullable()
+                        ->after('provider_refresh_token');
+                } else {
+                    $table->text('two_factor_secret')->nullable();
+                }
             }
 
             if (!Schema::hasColumn('users', 'two_factor_recovery_codes')) {
-                $table
-                    ->text('two_factor_recovery_codes')
-                    ->nullable()
-                    ->after('two_factor_secret');
+                // Check if the referenced column exists before using after()
+                if (Schema::hasColumn('users', 'two_factor_secret')) {
+                    $table
+                        ->text('two_factor_recovery_codes')
+                        ->nullable()
+                        ->after('two_factor_secret');
+                } else {
+                    $table->text('two_factor_recovery_codes')->nullable();
+                }
             }
 
             if (!Schema::hasColumn('users', 'two_factor_confirmed_at')) {
-                $table
-                    ->timestamp('two_factor_confirmed_at')
-                    ->nullable()
-                    ->after('two_factor_recovery_codes');
+                // Check if the referenced column exists before using after()
+                if (Schema::hasColumn('users', 'two_factor_recovery_codes')) {
+                    $table
+                        ->timestamp('two_factor_confirmed_at')
+                        ->nullable()
+                        ->after('two_factor_recovery_codes');
+                } else {
+                    $table->timestamp('two_factor_confirmed_at')->nullable();
+                }
             }
 
             if (!Schema::hasColumn('users', 'signature')) {
-                $table
-                    ->text('signature')
-                    ->nullable()
-                    ->after('username');
+                // Check if the referenced column exists before using after()
+                if (Schema::hasColumn('users', 'username')) {
+                    $table
+                        ->text('signature')
+                        ->nullable()
+                        ->after('username');
+                } else {
+                    $table->text('signature')->nullable();
+                }
             }
         });
     }
