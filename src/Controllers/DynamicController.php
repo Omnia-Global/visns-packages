@@ -502,6 +502,7 @@ class DynamicController extends \App\Http\Controllers\Controller
         $id = $condition['id'] ?? null;
         $whereHas = $condition['whereHas'] ?? [];
         $type = $condition['type'] ?? null;
+        $orKey = $condition['orKey'] ?? null;
 
         // Special case: if only whereHas is provided (no id/value needed)
         if (empty($id) && !empty($whereHas)) {
@@ -615,8 +616,33 @@ class DynamicController extends \App\Http\Controllers\Controller
             }
         };
 
-        // Apply conditions with whereHas if provided
+        // Create a function to apply the condition with orKey if needed
+        $applyConditionWithOrKey = function ($q) use (
+            $orKey,
+            $value,
+            $applyCondition
+        ) {
+            if ($orKey) {
+                // Create a nested where clause with OR condition
+                $q->where(function ($subQ) use (
+                    $orKey,
+                    $value,
+                    $applyCondition
+                ) {
+                    // Apply the original condition
+                    $applyCondition($subQ);
+
+                    // Apply the OR condition with the orKey field
+                    $subQ->orWhere($orKey, $value);
+                });
+            } else {
+                // Apply the condition directly if no orKey
+                $applyCondition($q);
+            }
+        };
+
         if (!empty($whereHas)) {
+            // Apply conditions with whereHas if provided
             // Ensure whereHas is treated as an array, even if it's a single string
             $relations = is_string($whereHas) ? [$whereHas] : $whereHas;
 
@@ -624,7 +650,7 @@ class DynamicController extends \App\Http\Controllers\Controller
             $applyNestedWhereHas = function (
                 $query,
                 $relations,
-                $applyCondition
+                $conditionFunc
             ) use (&$applyNestedWhereHas) {
                 $relation = array_shift($relations); // Get the first relation
                 if (!is_string($relation)) {
@@ -635,28 +661,28 @@ class DynamicController extends \App\Http\Controllers\Controller
 
                 $query->whereHas($relation, function ($subQuery) use (
                     $relations,
-                    $applyCondition,
+                    $conditionFunc,
                     $applyNestedWhereHas
                 ) {
                     if (empty($relations)) {
                         // No more nested relations, apply the condition
-                        $applyCondition($subQuery);
+                        $conditionFunc($subQuery);
                     } else {
                         // Recursively process the remaining relations
                         $applyNestedWhereHas(
                             $subQuery,
                             $relations,
-                            $applyCondition
+                            $conditionFunc
                         );
                     }
                 });
             };
 
-            // Apply the recursive function for the relationships
-            $applyNestedWhereHas($query, $relations, $applyCondition);
+            // Apply the recursive function for the relationships with the orKey-aware condition function
+            $applyNestedWhereHas($query, $relations, $applyConditionWithOrKey);
         } else {
             // Apply the condition directly if no whereHas
-            $applyCondition($query);
+            $applyConditionWithOrKey($query);
         }
     }
 
