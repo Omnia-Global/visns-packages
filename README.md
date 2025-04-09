@@ -25,6 +25,13 @@ A comprehensive Laravel package that provides enhanced authentication, file mana
     -   [Role \& Permission Management](#role--permission-management)
         -   [Permission Management](#permission-management)
         -   [Role Management](#role-management)
+    -   [Dynamic Controller](#dynamic-controller)
+        -   [Basic Usage](#basic-usage)
+        -   [Filtering](#filtering)
+            -   [Available Filter Operators](#available-filter-operators)
+            -   [OR Conditions with orKey](#or-conditions-with-orkey)
+            -   [Relationship Filtering with whereHas](#relationship-filtering-with-wherehas)
+            -   [Combining OR Conditions with Relationships](#combining-or-conditions-with-relationships)
     -   [Configuration](#configuration)
         -   [Environment Variables](#environment-variables)
         -   [Package Configuration](#package-configuration)
@@ -92,9 +99,16 @@ php artisan migrate
     -   Notification handling
 
 -   **Role & Permission Management**
+
     -   Role-based access control
     -   Permission management
     -   User role assignment
+
+-   **Dynamic Controller**
+    -   Automatic model detection from URL
+    -   Advanced filtering with multiple operators
+    -   OR conditions with `orKey` parameter
+    -   Relationship filtering with `whereHas`
 
 ## Database Migrations
 
@@ -368,6 +382,78 @@ The `RoleController` provides methods for managing roles:
 -   `destroy` - Deletes a role
 -   `table` - Gets paginated roles for tables
 -   `dropdown` - Gets roles for dropdown lists
+
+## Dynamic Controller
+
+The package includes a `DynamicController` that provides a flexible way to interact with any model in your application. It automatically determines the model based on the URL path and provides standard CRUD operations and filtering capabilities.
+
+### Basic Usage
+
+The `DynamicController` is accessed through URLs like:
+
+```
+/ajax/{model_name}/{action}
+```
+
+For example:
+
+-   `/ajax/users/table` - Get a paginated list of users
+-   `/ajax/products/dropdown` - Get products for a dropdown list
+-   `/ajax/orders/show/123` - Get a specific order by ID
+
+### Filtering
+
+The `DynamicController` supports advanced filtering through the `where` parameter:
+
+```
+/ajax/users/table?where[0][id]=name&where[0][value]=John&where[0][operator]=contains
+```
+
+This will filter users where the name contains "John".
+
+#### Available Filter Operators
+
+-   `=` (default) - Exact match
+-   `contains` - Contains the value (like %value%)
+-   `not_contains` - Does not contain the value
+-   `gt` - Greater than
+-   `gte` - Greater than or equal to
+-   `lt` - Less than
+-   `lte` - Less than or equal to
+-   `inlist` - Value is in a list
+-   `notinlist` - Value is not in a list
+-   `inrange` - Value is in a range
+-   `is_null` - Field is null
+
+#### OR Conditions with orKey
+
+You can create OR conditions in your filters using the `orKey` parameter:
+
+```
+/ajax/users/table?where[0][id]=name&where[0][value]=John&where[0][orKey]=email
+```
+
+This will filter users where `name = 'John' OR email = 'John'`.
+
+#### Relationship Filtering with whereHas
+
+You can filter based on relationships using the `whereHas` parameter:
+
+```
+/ajax/users/table?where[0][id]=name&where[0][value]=John&where[0][whereHas]=posts
+```
+
+This will filter users who have posts AND whose name is "John".
+
+#### Combining OR Conditions with Relationships
+
+You can combine `orKey` and `whereHas` to create complex filters:
+
+```
+/ajax/users/table?where[0][id]=name&where[0][value]=John&where[0][orKey]=email&where[0][whereHas]=posts
+```
+
+This will filter users who have posts AND (`name = 'John' OR email = 'John'`).
 
 ## Configuration
 
