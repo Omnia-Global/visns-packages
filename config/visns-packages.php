@@ -33,4 +33,25 @@ return [
     |
     */
     'routes_prefix' => '',
+
+    /*
+    |--------------------------------------------------------------------------
+    | API Routes Middleware
+    |--------------------------------------------------------------------------
+    |
+    | The middleware that should be applied to the package API routes.
+    |
+    */
+    'api_middleware' => ['api'],
+
+    /*
+    |--------------------------------------------------------------------------
+    | API Routes Prefix
+    |--------------------------------------------------------------------------
+    |
+    | The prefix that should be applied to all package API routes.
+    | Default is 'api'.
+    |
+    */
+    'api_prefix' => 'api',
 ];

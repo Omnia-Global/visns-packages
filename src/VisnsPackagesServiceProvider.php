@@ -178,7 +178,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                             Route::post('/dropdown', 'dropdown');
                         });
 
-                    // Socialite routes
+                    // Socialite web routes
                     Route::controller(SocialiteController::class)->group(
                         function () {
                             Route::get(
@@ -189,6 +189,31 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                                 '/auth/{provider}/callback',
                                 'handleProviderCallback'
                             ); // Route to handle the callback from provider after authentication
+                        }
+                    );
+                });
+
+            // Register API routes
+            $apiMiddleware = config('visns-packages.api_middleware', ['api']);
+            $apiPrefix = config('visns-packages.api_prefix', 'api');
+
+            Route::middleware($apiMiddleware)
+                ->prefix($apiPrefix)
+                ->group(function () {
+                    // Auth API routes
+                    Route::controller(AuthController::class)->group(
+                        function () {
+                            Route::post('/login', 'login_api');
+                            Route::post('/two-factor-challenge', 'twoFactorAuthenticateApi');
+                            Route::post('/logout', 'logout_api');
+                        }
+                    );
+
+                    // Socialite API routes
+                    Route::controller(SocialiteController::class)->group(
+                        function () {
+                            Route::get('/auth/providers', 'getProviders'); // Get available OAuth providers
+                            Route::get('/auth/status', 'getAuthStatus'); // Check authentication status
                         }
                     );
                 });

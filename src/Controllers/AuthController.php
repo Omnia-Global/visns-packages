@@ -219,6 +219,22 @@ class AuthController extends \App\Http\Controllers\Controller
         return redirect('/login');
     }
 
+    /**
+     * API logout endpoint.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function logout_api(Request $request)
+    {
+        // Revoke the user's current token
+        if ($request->user()) {
+            $request->user()->currentAccessToken()->delete();
+        }
+
+        return response()->json(['message' => 'Successfully logged out']);
+    }
+
     public function login_api(Request $request)
     {
         $isEmail =
