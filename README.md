@@ -42,6 +42,11 @@ A comprehensive Laravel package that provides enhanced authentication, file mana
             -   [Permission Management Routes](#permission-management-routes)
             -   [Role Management Routes](#role-management-routes)
             -   [Social Authentication Routes](#social-authentication-routes)
+    -   [Timezone Handling](#timezone-handling)
+        -   [Basic Usage](#basic-usage-1)
+        -   [Configuration](#configuration-1)
+        -   [Custom Fields](#custom-fields)
+        -   [Manual Conversion](#manual-conversion)
     -   [License](#license)
 
 ## Installation
@@ -105,10 +110,16 @@ php artisan migrate
     -   User role assignment
 
 -   **Dynamic Controller**
+
     -   Automatic model detection from URL
     -   Advanced filtering with multiple operators
     -   OR conditions with `orKey` parameter
     -   Relationship filtering with `whereHas`
+
+-   **Timezone Handling**
+    -   Automatic timezone conversion for model attributes
+    -   Configurable display timezone
+    -   Consistent date formatting in API responses
 
 ## Database Migrations
 
@@ -617,6 +628,76 @@ Route::get('/auth/{provider}/callback', [
 ```
 
 You can disable automatic route registration by setting `register_routes` to `false` in the configuration file, or customize the middleware and prefix applied to these routes.
+
+## Timezone Handling
+
+The package includes a `TimezoneAware` trait that provides automatic timezone conversion for model attributes. This is particularly useful for applications that need to handle dates and times across different timezones.
+
+### Basic Usage
+
+To use the `TimezoneAware` trait, simply add it to your model:
+
+```php
+use Visnsstudio\VisnsPackages\Traits\TimezoneAware;
+
+class YourModel extends Model
+{
+    use TimezoneAware;
+
+    protected $casts = [
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
+        'published_at' => 'datetime',
+    ];
+}
+```
+
+The trait will automatically:
+
+1. Convert datetime fields from UTC to the application timezone when serializing to JSON
+2. Convert datetime fields from application timezone to UTC when saving to the database
+3. Provide helper methods for manual timezone conversion
+
+### Configuration
+
+The timezone handling can be configured in the `config/visns-packages.php` file:
+
+```php
+'timezone' => [
+    // Enable/disable automatic timezone conversion
+    'auto_convert' => true,
+
+    // The timezone to use for displaying dates (defaults to app.timezone)
+    'display_timezone' => env('DISPLAY_TIMEZONE', null),
+
+    // Custom date format for serialization (null uses the model's date format)
+    'date_format' => null,
+],
+```
+
+### Custom Fields
+
+By default, the trait will convert all datetime and date fields defined in your model's `$casts` array. If you want to specify which fields should be converted, you can define a `$timezoneAwareFields` property in your model:
+
+```php
+protected $timezoneAwareFields = [
+    'created_at',
+    'updated_at',
+    'published_at',
+];
+```
+
+### Manual Conversion
+
+The trait also provides methods for manual timezone conversion:
+
+```php
+// Convert from UTC to application timezone
+$localDate = $model->convertToApplicationTimezone($utcDate);
+
+// Convert from application timezone to UTC
+$utcDate = $model->convertToStorageTimezone($localDate);
+```
 
 ## License
 
