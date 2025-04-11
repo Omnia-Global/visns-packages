@@ -184,7 +184,7 @@ The package provides an `AuthController` with methods for handling user authenti
 
 ### Two-Factor Authentication (2FA)
 
-The package provides built-in two-factor authentication:
+The package provides built-in two-factor authentication using Google Authenticator, Microsoft Authenticator, or any other TOTP-compatible app:
 
 #### Setup
 
@@ -199,7 +199,7 @@ protected $fillable = [
 ];
 ```
 
-The package uses Google2FA for generating and validating two-factor authentication codes. It provides all the controllers and functionality needed to enable, confirm, and validate 2FA codes without requiring any additional packages.
+The package uses Google2FA for generating and validating two-factor authentication codes. It provides all the controllers and functionality needed to enable, confirm, and validate 2FA codes without requiring any additional packages. By default, the name that appears in authenticator apps is "Laravel", but you can customize this by setting the `2fa_app_name` option in the configuration file.
 
 #### Authentication Flow with 2FA
 
@@ -469,6 +469,7 @@ The package works with your existing Laravel configuration. Key environment vari
 -   `FRONT_END_URL` - For frontend redirects
 -   `MAIL_FROM_ADDRESS` - For sending emails
 -   `ALLOW_MULTIPLE_SESSIONS` - Controls multiple session behavior
+-   `APP_NAME` - Used for the name in 2FA authenticator apps (can be overridden in config)
 
 ### Package Configuration
 
@@ -490,6 +491,9 @@ return [
 
     // The prefix to apply to all package routes (leave empty for no prefix)
     'routes_prefix' => '',
+
+    // The name that appears in authenticator apps for 2FA
+    '2fa_app_name' => 'Your App Name',
 ];
 ```
 
