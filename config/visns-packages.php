@@ -66,5 +66,5 @@ return [
     | application name from config/app.php.
     |
     */
-    '2fa_app_name' => 'Your App Name',
+    '2fa_app_name' => env('APP_NAME', 'Omnia Global Framework'),
 ];
