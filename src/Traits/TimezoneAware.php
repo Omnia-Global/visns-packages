@@ -142,6 +142,12 @@ trait TimezoneAware
             $format = $customFormat;
         }
 
+        // Check if we should preserve the application timezone in the output
+        if (config('visns-packages.timezone.preserve_timezone', false)) {
+            // Use ISO8601 format with timezone information
+            return $date->toIso8601String();
+        }
+
         return $date->format($format);
     }
 

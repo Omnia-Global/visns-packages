@@ -96,5 +96,17 @@ return [
         |
         */
         'date_format' => null,
+
+        /*
+        |--------------------------------------------------------------------------
+        | Preserve Timezone
+        |--------------------------------------------------------------------------
+        |
+        | When true, dates will be serialized with the application timezone
+        | information instead of being converted to UTC in JSON responses.
+        | This ensures dates appear in the local timezone in API responses.
+        |
+        */
+        'preserve_timezone' => true,
     ],
 ];
