@@ -44,6 +44,7 @@ A comprehensive Laravel package that provides enhanced authentication, file mana
             -   [Permission Management Routes](#permission-management-routes)
             -   [Role Management Routes](#role-management-routes)
             -   [Social Authentication Routes](#social-authentication-routes)
+            -   [API Routes](#api-routes)
 
     -   [License](#license)
 
@@ -84,6 +85,7 @@ php artisan migrate
 -   **Enhanced Authentication System**
 
     -   Username/email login support
+    -   User registration
     -   Password reset functionality
     -   Social authentication integration with Laravel Socialite
     -   Two-factor authentication (2FA)
@@ -178,6 +180,7 @@ protected $fillable = [
 The package provides an `AuthController` with methods for handling user authentication:
 
 -   `authenticate` - Handles login with username or email
+-   `register` - Registers a new user
 -   `logout` - Handles user logout
 -   `forgot` - Initiates password reset
 -   `reset` - Completes password reset
@@ -310,6 +313,7 @@ To use social authentication, you need to install Laravel Socialite and configur
 The package supports API authentication with or without 2FA:
 
 -   `login_api` - Handles API login and returns tokens
+-   `register` - Registers a new user and returns a token
 -   `twoFactorAuthenticateApi` - Handles 2FA for API requests
 
 Add these routes to your application:
@@ -320,10 +324,33 @@ Route::post('/api/login', [
     \Visnsstudio\VisnsPackages\Controllers\AuthController::class,
     'login_api',
 ]);
+Route::post('/api/register', [
+    \Visnsstudio\VisnsPackages\Controllers\AuthController::class,
+    'register',
+]);
 Route::post('/api/two-factor-challenge', [
     \Visnsstudio\VisnsPackages\Controllers\AuthController::class,
     'twoFactorAuthenticateApi',
 ]);
+```
+
+For user registration via API:
+
+```javascript
+// Example API client code for registration
+axios
+    .post('/api/register', {
+        name: 'John Doe',
+        email: 'john@example.com',
+        username: 'johndoe',
+        password: 'password123',
+        password_confirmation: 'password123',
+    })
+    .then((response) => {
+        // Response contains the user object and API token
+        const token = response.data.id;
+        const user = response.data.user;
+    });
 ```
 
 For API authentication with 2FA remember feature:
@@ -618,6 +645,19 @@ Route::get('/auth/{provider}/callback', [
     SocialiteController::class,
     'handleProviderCallback',
 ]);
+```
+
+#### API Routes
+
+```php
+// API routes
+Route::post('/api/login', [AuthController::class, 'login_api']);
+Route::post('/api/register', [AuthController::class, 'register']);
+Route::post('/api/two-factor-challenge', [
+    AuthController::class,
+    'twoFactorAuthenticateApi',
+]);
+Route::post('/api/logout', [AuthController::class, 'logout_api']);
 ```
 
 You can disable automatic route registration by setting `register_routes` to `false` in the configuration file, or customize the middleware and prefix applied to these routes.
