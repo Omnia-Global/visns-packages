@@ -42,7 +42,7 @@ return [
     | The middleware that should be applied to the package API routes.
     |
     */
-    'api_middleware' => ['api'],
+    'api_middleware' => ['api', 'accept-json'],
 
     /*
     |--------------------------------------------------------------------------

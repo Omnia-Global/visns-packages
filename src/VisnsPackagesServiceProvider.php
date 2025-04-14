@@ -11,6 +11,7 @@ use Visnsstudio\VisnsPackages\Controllers\FileController;
 use Visnsstudio\VisnsPackages\Controllers\PermissionController;
 use Visnsstudio\VisnsPackages\Controllers\RoleController;
 use Visnsstudio\VisnsPackages\Controllers\SocialiteController;
+use Visnsstudio\VisnsPackages\Middleware\AcceptJson;
 
 class VisnsPackagesServiceProvider extends ServiceProvider
 {
@@ -57,6 +58,10 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             ],
             'visns-packages-config'
         );
+
+        // Register middleware
+        $router = $this->app['router'];
+        $router->aliasMiddleware('accept-json', AcceptJson::class);
 
         // Register routes
         $this->registerRoutes();
@@ -203,7 +208,10 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                 });
 
             // Register API routes
-            $apiMiddleware = config('visns-packages.api_middleware', ['api']);
+            $apiMiddleware = config('visns-packages.api_middleware', [
+                'api',
+                'accept-json',
+            ]);
             $apiPrefix = config('visns-packages.api_prefix', 'api');
 
             Route::middleware($apiMiddleware)
