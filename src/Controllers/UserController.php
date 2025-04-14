@@ -95,7 +95,10 @@ class UserController extends \App\Http\Controllers\Controller
 
         // Generate QR code
         $qrCodeUrl = $google2fa->getQRCodeUrl(
-            env('APP_NAME', config('app.name')),
+            config(
+                'visns-packages.2fa_app_name',
+                env('APP_NAME', config('app.name'))
+            ),
             $user->email,
             $secretKey
         );
@@ -267,7 +270,10 @@ class UserController extends \App\Http\Controllers\Controller
             if ($request->has('include_qr')) {
                 $google2fa = new Google2FA();
                 $qrCodeUrl = $google2fa->getQRCodeUrl(
-                    config('app.name'),
+                    config(
+                        'visns-packages.2fa_app_name',
+                        env('APP_NAME', config('app.name'))
+                    ),
                     $user->email,
                     $secretKey
                 );

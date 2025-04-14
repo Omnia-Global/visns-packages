@@ -54,4 +54,17 @@ return [
     |
     */
     'api_prefix' => 'api',
+
+    /*
+    |--------------------------------------------------------------------------
+    | Two-Factor Authentication App Name
+    |--------------------------------------------------------------------------
+    |
+    | This option controls the name that appears in authenticator apps like
+    | Microsoft Authenticator when users set up two-factor authentication.
+    | If not set, it will use the APP_NAME environment variable or the
+    | application name from config/app.php.
+    |
+    */
+    '2fa_app_name' => env('APP_NAME', 'Omnia Global Framework'),
 ];
