@@ -204,6 +204,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                     Route::controller(AuthController::class)->group(
                         function () {
                             Route::post('/login', 'login_api');
+                            Route::post('/register', 'register');
                             Route::post('/two-factor-challenge', 'twoFactorAuthenticateApi');
                             Route::post('/logout', 'logout_api');
                         }

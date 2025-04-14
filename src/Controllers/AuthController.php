@@ -235,6 +235,51 @@ class AuthController extends \App\Http\Controllers\Controller
         return response()->json(['message' => 'Successfully logged out']);
     }
 
+    /**
+     * Register a new user.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function register(Request $request)
+    {
+        // Validate the request data
+        $request->validate([
+            'name' => 'required|string|max:255',
+            'email' => 'required|string|email|max:255|unique:users',
+            'username' => 'required|string|max:255|unique:users',
+            'password' => 'required|string|min:8|confirmed',
+        ]);
+
+        // Create the user
+        $user = User::create([
+            'name' => $request->name,
+            'email' => $request->email,
+            'username' => $request->username,
+            'password' => Hash::make($request->password),
+            'email_verified_at' => null, // Will be verified later
+        ]);
+
+        // Assign default role if configured
+        if (env('DEFAULT_USER_ROLE')) {
+            if (method_exists($user, 'syncRoles')) {
+                $user->syncRoles([env('DEFAULT_USER_ROLE')]);
+            }
+        }
+
+        // Log the user in
+        Auth::login($user);
+
+        // Create a token for API access
+        $token = $user->createToken('authToken');
+
+        // Return the token
+        return response()->json([
+            'id' => $token->plainTextToken,
+            'user' => $user->load('roles.permissions'),
+        ], 201);
+    }
+
     public function login_api(Request $request)
     {
         $isEmail =
