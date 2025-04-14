@@ -69,10 +69,19 @@ class VisnsPackagesServiceProvider extends ServiceProvider
      */
     protected function registerRoutes()
     {
-        // Only register routes if enabled in config and not running in console
+        // Only register routes if enabled in config
+        // Allow routes to be registered when running route:list command
+        $runningInConsole = $this->app->runningInConsole();
+        $runningRouteList =
+            $runningInConsole &&
+            isset($_SERVER['argv']) &&
+            is_array($_SERVER['argv']) &&
+            count($_SERVER['argv']) > 1 &&
+            in_array($_SERVER['argv'][1], ['route:list', 'route:cache']);
+
         if (
             config('visns-packages.register_routes', true) &&
-            !$this->app->runningInConsole()
+            (!$runningInConsole || $runningRouteList)
         ) {
             // Get middleware from config
             $middleware = config('visns-packages.routes_middleware', ['web']);
@@ -205,7 +214,10 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                         function () {
                             Route::post('/login', 'login_api');
                             Route::post('/register', 'register');
-                            Route::post('/two-factor-challenge', 'twoFactorAuthenticateApi');
+                            Route::post(
+                                '/two-factor-challenge',
+                                'twoFactorAuthenticateApi'
+                            );
                             Route::post('/logout', 'logout_api');
                         }
                     );
