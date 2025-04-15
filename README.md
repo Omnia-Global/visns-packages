@@ -1,17 +1,17 @@
 # Visns Packages
 
-A comprehensive Laravel package that provides enhanced authentication, file management, and two-factor authentication capabilities for Laravel applications.
+A comprehensive Laravel package that provides enhanced authentication, file management, two-factor authentication, and report building capabilities for Laravel applications.
 
 ## Table of Contents
 
 -   [Visns Packages](#visns-packages)
-
     -   [Table of Contents](#table-of-contents)
     -   [Installation](#installation)
     -   [Features](#features)
     -   [Database Migrations](#database-migrations)
         -   [User Table Migrations](#user-table-migrations)
         -   [File Table Migrations](#file-table-migrations)
+        -   [Report Builder Migrations](#report-builder-migrations)
     -   [Authentication System](#authentication-system)
         -   [Basic Authentication](#basic-authentication)
         -   [Two-Factor Authentication (2FA)](#two-factor-authentication-2fa)
@@ -26,6 +26,11 @@ A comprehensive Laravel package that provides enhanced authentication, file mana
     -   [Role \& Permission Management](#role--permission-management)
         -   [Permission Management](#permission-management)
         -   [Role Management](#role-management)
+    -   [Report Builder](#report-builder)
+        -   [Database Schema Exploration](#database-schema-exploration)
+        -   [Report Configuration](#report-configuration)
+        -   [Executing Reports](#executing-reports)
+        -   [Saving and Managing Reports](#saving-and-managing-reports)
     -   [Dynamic Controller](#dynamic-controller)
         -   [Basic Usage](#basic-usage)
         -   [Filtering](#filtering)
@@ -34,7 +39,6 @@ A comprehensive Laravel package that provides enhanced authentication, file mana
             -   [Relationship Filtering with whereHas](#relationship-filtering-with-wherehas)
             -   [Combining OR Conditions with Relationships](#combining-or-conditions-with-relationships)
     -   [Configuration](#configuration)
-
         -   [Environment Variables](#environment-variables)
         -   [Package Configuration](#package-configuration)
         -   [Automatic Route Registration](#automatic-route-registration)
@@ -43,9 +47,9 @@ A comprehensive Laravel package that provides enhanced authentication, file mana
             -   [File Management Routes](#file-management-routes)
             -   [Permission Management Routes](#permission-management-routes)
             -   [Role Management Routes](#role-management-routes)
+            -   [Report Builder Routes](#report-builder-routes)
             -   [Social Authentication Routes](#social-authentication-routes)
             -   [API Routes](#api-routes)
-
     -   [License](#license)
 
 ## Installation
@@ -109,6 +113,13 @@ php artisan migrate
     -   Permission management
     -   User role assignment
 
+-   **Report Builder**
+
+    -   Database schema exploration
+    -   Custom report creation with table joins and filters
+    -   SQL query generation and execution
+    -   Report saving and management
+
 -   **Dynamic Controller**
 
     -   Automatic model detection from URL
@@ -170,6 +181,33 @@ protected $fillable = [
     'file_title',
     'file_description',
     'sort_order',
+];
+```
+
+### Report Builder Migrations
+
+The package includes migrations for a `report_builders` table that stores custom report configurations.
+
+**Report Builder table fields:**
+
+-   `label` - Name of the report
+-   `detail` - JSON field storing the report configuration (tables, columns, joins, filters, etc.)
+-   `user_id` - User who created the report
+-   `is_public` - Whether the report is public or private
+
+The ReportBuilder model has these fields in the `$fillable` array and appropriate casts:
+
+```php
+protected $fillable = [
+    'label',
+    'detail',
+    'user_id',
+    'is_public',
+];
+
+protected $casts = [
+    'detail' => 'array',
+    'is_public' => 'boolean',
 ];
 ```
 
@@ -414,6 +452,84 @@ The `RoleController` provides methods for managing roles:
 -   `table` - Gets paginated roles for tables
 -   `dropdown` - Gets roles for dropdown lists
 
+## Report Builder
+
+The package includes a powerful report builder system that allows users to create custom reports by exploring the database schema, selecting tables and columns, configuring joins and filters, and executing SQL queries.
+
+### Database Schema Exploration
+
+The `ReportBuilderController` provides methods for exploring the database schema:
+
+-   `getTables` - Gets all tables in the database
+-   `getTableColumns` - Gets columns for a specific table
+-   `getAllTablesAndColumns` - Gets all tables and their columns
+-   `getTableRelationships` - Gets relationships for a specific table
+-   `getColumnTypeInfo` - Gets detailed type information for a specific column
+
+### Report Configuration
+
+Users can create custom reports by:
+
+1. Selecting a main table
+2. Adding columns from the main table and joined tables
+3. Configuring table joins (INNER, LEFT, RIGHT)
+4. Adding filters with various operators
+5. Setting up sorting and grouping
+
+The report configuration is stored as a JSON object in the `detail` field of the `report_builders` table.
+
+### Executing Reports
+
+The `executeQuery` method in the `ReportBuilderController` allows executing a report by:
+
+1. Accepting a report configuration or a saved report ID
+2. Building a dynamic SQL query based on the configuration
+3. Executing the query and returning the results
+
+Example request to execute a report:
+
+```javascript
+fetch('/ajax/reportBuilder/execute', {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+        query: {
+            mainTable: 'users',
+            columns: [
+                { table: 'users', column: 'id' },
+                { table: 'users', column: 'name' },
+                { table: 'users', column: 'email' },
+            ],
+            filters: [
+                {
+                    table: 'users',
+                    column: 'created_at',
+                    operator: '>',
+                    value: '2023-01-01',
+                },
+            ],
+            sorting: [{ table: 'users', column: 'name', direction: 'asc' }],
+        },
+        limit: 50,
+        offset: 0,
+    }),
+});
+```
+
+### Saving and Managing Reports
+
+The `ReportBuilderController` also provides methods for saving and managing reports:
+
+-   `getReports` - Gets all reports accessible to the user
+-   `getReport` - Gets a specific report by ID
+-   `saveReport` - Saves a new report
+-   `updateReport` - Updates an existing report
+-   `deleteReport` - Deletes a report
+
+Users can save their report configurations for later use and share them with other users by making them public.
+
 ## Dynamic Controller
 
 The package includes a `DynamicController` that provides a flexible way to interact with any model in your application. It automatically determines the model based on the URL path and provides standard CRUD operations and filtering capabilities.
@@ -635,6 +751,38 @@ Route::put('/ajax/roles/{id}', [RoleController::class, 'update']);
 Route::delete('/ajax/roles/{id}', [RoleController::class, 'destroy']);
 Route::post('/ajax/roles/table', [RoleController::class, 'table']);
 Route::post('/ajax/roles/dropdown', [RoleController::class, 'dropdown']);
+```
+
+#### Report Builder Routes
+
+```php
+// Report Builder routes
+Route::prefix('ajax')
+    ->controller(ReportBuilderController::class)
+    ->group(function () {
+        // Database schema exploration
+        Route::post('/reportBuilder/getTables', 'getTables');
+        Route::post('/reportBuilder/getTableColumns', 'getTableColumns');
+        Route::post(
+            '/reportBuilder/getAllTablesAndColumns',
+            'getAllTablesAndColumns'
+        );
+        Route::post(
+            '/reportBuilder/getTableRelationships',
+            'getTableRelationships'
+        );
+        Route::post('/reportBuilder/getColumnTypeInfo', 'getColumnTypeInfo');
+
+        // Report management
+        Route::get('/reportBuilder/reports', 'getReports');
+        Route::get('/reportBuilder/reports/{id}', 'getReport');
+        Route::post('/reportBuilder/reports', 'saveReport');
+        Route::put('/reportBuilder/reports/{id}', 'updateReport');
+        Route::delete('/reportBuilder/reports/{id}', 'deleteReport');
+
+        // Execute report query
+        Route::post('/reportBuilder/execute', 'executeQuery');
+    });
 ```
 
 #### Social Authentication Routes
