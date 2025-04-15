@@ -1573,4 +1573,140 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             'sql' => $sql,
         ];
     }
+
+    /**
+     * Export report data as CSV or Excel
+     *
+     * @param Request $request
+     * @return \Symfony\Component\HttpFoundation\BinaryFileResponse
+     */
+    public function exportReport(Request $request)
+    {
+        try {
+            // Validate request
+            $validated = $request->validate([
+                'query' => 'required|array',
+                'report_id' => 'nullable|integer',
+                'format' => 'required|in:csv,xlsx',
+                'parameters' => 'nullable|array',
+            ]);
+
+            // Get the query configuration
+            $queryConfig = $validated['query'];
+            $format = $validated['format'];
+            $parameters = $validated['parameters'] ?? [];
+
+            // If report_id is provided, load the report configuration
+            $reportName = 'report';
+            if (isset($validated['report_id'])) {
+                $report = ReportBuilder::findOrFail($validated['report_id']);
+
+                // Check if user has access to this report
+                $userId = Auth::id() ?? $request->input('user_id');
+                if (!$report->is_public && $report->user_id !== $userId) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'You do not have permission to export this report',
+                    ], 403);
+                }
+
+                // Use the report configuration if query is not provided
+                if (empty($queryConfig)) {
+                    $queryConfig = $report->detail;
+                }
+
+                $reportName = $report->label;
+            }
+
+            // Build and execute the SQL query without limits for export
+            $result = $this->buildAndExecuteQuery($queryConfig, 100000, 0, $parameters);
+
+            // Format the date for the filename
+            $date = date('Ymd');
+            $filename = "{$date}_{$reportName}.{$format}";
+
+            // Generate the export file based on format
+            return $this->generateExportFile($result['data'], $filename, $format);
+        } catch (\Exception $e) {
+            Log::error('Error exporting report: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+            return response()->json([
+                'success' => false,
+                'message' => 'Error exporting report',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Generate export file in the specified format
+     *
+     * @param \Illuminate\Support\Collection $data
+     * @param string $filename
+     * @param string $format
+     * @return \Symfony\Component\HttpFoundation\BinaryFileResponse
+     */
+    private function generateExportFile($data, $filename, $format)
+    {
+        // Convert data collection to array
+        $dataArray = json_decode(json_encode($data), true);
+
+        // Get column headers from the first row
+        $headers = [];
+        if (!empty($dataArray)) {
+            $headers = array_keys($dataArray[0]);
+        }
+
+        // Create a temporary file
+        $tempFile = tempnam(sys_get_temp_dir(), 'report_');
+
+        if ($format === 'csv') {
+            // Generate CSV file
+            $handle = fopen($tempFile, 'w');
+
+            // Add headers
+            fputcsv($handle, $headers);
+
+            // Add data rows
+            foreach ($dataArray as $row) {
+                fputcsv($handle, $row);
+            }
+
+            fclose($handle);
+
+            // Return the file as a download
+            return response()->download($tempFile, $filename, [
+                'Content-Type' => 'text/csv',
+            ])->deleteFileAfterSend(true);
+        } else {
+            // Generate Excel file using PhpSpreadsheet
+            $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+            $sheet = $spreadsheet->getActiveSheet();
+
+            // Add headers (first row)
+            $column = 1;
+            foreach ($headers as $header) {
+                $sheet->setCellValueByColumnAndRow($column++, 1, $header);
+            }
+
+            // Add data rows
+            $row = 2;
+            foreach ($dataArray as $dataRow) {
+                $column = 1;
+                foreach ($dataRow as $value) {
+                    $sheet->setCellValueByColumnAndRow($column++, $row, $value);
+                }
+                $row++;
+            }
+
+            // Create Excel writer
+            $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+            $writer->save($tempFile);
+
+            // Return the file as a download
+            return response()->download($tempFile, $filename, [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            ])->deleteFileAfterSend(true);
+        }
+    }
 }

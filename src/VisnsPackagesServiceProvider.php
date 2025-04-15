@@ -257,6 +257,12 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                                 '/reportBuilder/execute',
                                 'executeQuery'
                             );
+
+                            // Export report
+                            Route::post(
+                                '/reportBuilder/export',
+                                'exportReport'
+                            );
                         });
                 });
 
