@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Log;
 
-class ReportBuilderController extends Controller
+class ReportBuilderController extends \App\Http\Controllers\Controller
 {
     /**
      * Get all tables in the database
