@@ -118,6 +118,7 @@ php artisan migrate
     -   Database schema exploration
     -   Custom report creation with table joins and filters
     -   SQL query generation and execution
+    -   Export reports to CSV and Excel (XLSX) formats
     -   Report saving and management
 
 -   **Dynamic Controller**
@@ -518,6 +519,80 @@ fetch('/ajax/reportBuilder/execute', {
 });
 ```
 
+### Exporting Reports
+
+The Report Builder includes functionality to export report data in CSV or Excel (XLSX) format. The `exportReport` method in the `ReportBuilderController` allows exporting a report by:
+
+1. Accepting a report configuration or a saved report ID
+2. Building a dynamic SQL query based on the configuration
+3. Executing the query and generating a downloadable file in the requested format
+
+Example request to export a report:
+
+```javascript
+// Create a form to handle the file download
+const form = document.createElement('form');
+form.method = 'POST';
+form.action = '/ajax/reportBuilder/export';
+
+// Add CSRF token if needed
+const csrfToken = document
+    .querySelector('meta[name="csrf-token"]')
+    .getAttribute('content');
+const csrfInput = document.createElement('input');
+csrfInput.type = 'hidden';
+csrfInput.name = '_token';
+csrfInput.value = csrfToken;
+form.appendChild(csrfInput);
+
+// Add report configuration
+const queryInput = document.createElement('input');
+queryInput.type = 'hidden';
+queryInput.name = 'query';
+queryInput.value = JSON.stringify({
+    mainTable: 'users',
+    columns: [
+        { table: 'users', column: 'id' },
+        { table: 'users', column: 'name' },
+        { table: 'users', column: 'email' },
+    ],
+    filters: [
+        {
+            table: 'users',
+            column: 'created_at',
+            operator: '>',
+            value: '2023-01-01',
+        },
+    ],
+    sorting: [{ table: 'users', column: 'name', direction: 'asc' }],
+});
+form.appendChild(queryInput);
+
+// Add format (csv or xlsx)
+const formatInput = document.createElement('input');
+formatInput.type = 'hidden';
+formatInput.name = 'format';
+formatInput.value = 'xlsx'; // or 'csv'
+form.appendChild(formatInput);
+
+// Submit the form to trigger the download
+document.body.appendChild(form);
+form.submit();
+document.body.removeChild(form);
+```
+
+Alternatively, you can export a saved report by providing its ID:
+
+```javascript
+const reportIdInput = document.createElement('input');
+reportIdInput.type = 'hidden';
+reportIdInput.name = 'report_id';
+reportIdInput.value = '123'; // The ID of the saved report
+form.appendChild(reportIdInput);
+```
+
+The exported file will be named with the format `YYYYMMDD_ReportName.format` (e.g., `20230101_UserReport.xlsx`).
+
 ### Saving and Managing Reports
 
 The `ReportBuilderController` also provides methods for saving and managing reports:
@@ -539,7 +614,9 @@ The package includes a `DynamicController` that provides a flexible way to inter
 The `DynamicController` is accessed through URLs like:
 
 ```
+
 /ajax/{model_name}/{action}
+
 ```
 
 For example:
@@ -553,7 +630,9 @@ For example:
 The `DynamicController` supports advanced filtering through the `where` parameter:
 
 ```
+
 /ajax/users/table?where[0][id]=name&where[0][value]=John&where[0][operator]=contains
+
 ```
 
 This will filter users where the name contains "John".
@@ -577,7 +656,9 @@ This will filter users where the name contains "John".
 You can create OR conditions in your filters using the `orKey` parameter:
 
 ```
+
 /ajax/users/table?where[0][id]=name&where[0][value]=John&where[0][orKey]=email
+
 ```
 
 This will filter users where `name = 'John' OR email = 'John'`.
@@ -587,7 +668,9 @@ This will filter users where `name = 'John' OR email = 'John'`.
 You can filter based on relationships using the `whereHas` parameter:
 
 ```
+
 /ajax/users/table?where[0][id]=name&where[0][value]=John&where[0][whereHas]=posts
+
 ```
 
 This will filter users who have posts AND whose name is "John".
@@ -597,7 +680,9 @@ This will filter users who have posts AND whose name is "John".
 You can combine `orKey` and `whereHas` to create complex filters:
 
 ```
+
 /ajax/users/table?where[0][id]=name&where[0][value]=John&where[0][orKey]=email&where[0][whereHas]=posts
+
 ```
 
 This will filter users who have posts AND (`name = 'John' OR email = 'John'`).
@@ -782,6 +867,9 @@ Route::prefix('ajax')
 
         // Execute report query
         Route::post('/reportBuilder/execute', 'executeQuery');
+
+        // Export report
+        Route::post('/reportBuilder/export', 'exportReport');
     });
 ```
 
