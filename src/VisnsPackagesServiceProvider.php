@@ -11,6 +11,7 @@ use Visnsstudio\VisnsPackages\Controllers\FileController;
 use Visnsstudio\VisnsPackages\Controllers\PermissionController;
 use Visnsstudio\VisnsPackages\Controllers\RoleController;
 use Visnsstudio\VisnsPackages\Controllers\SocialiteController;
+use Visnsstudio\VisnsPackages\Controllers\ReportBuilderController;
 use Visnsstudio\VisnsPackages\Middleware\AcceptJson;
 
 class VisnsPackagesServiceProvider extends ServiceProvider
@@ -203,6 +204,32 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                                 '/auth/{provider}/callback',
                                 'handleProviderCallback'
                             ); // Route to handle the callback from provider after authentication
+                        }
+                    );
+
+                    // Report Builder routes
+                    Route::controller(ReportBuilderController::class)->group(
+                        function () {
+                            Route::post(
+                                '/reportBuilder/getTables',
+                                'getTables'
+                            );
+                            Route::post(
+                                '/reportBuilder/getTableColumns',
+                                'getTableColumns'
+                            );
+                            Route::post(
+                                '/reportBuilder/getAllTablesAndColumns',
+                                'getAllTablesAndColumns'
+                            );
+                            Route::post(
+                                '/reportBuilder/getTableRelationships',
+                                'getTableRelationships'
+                            );
+                            Route::post(
+                                '/reportBuilder/getColumnTypeInfo',
+                                'getColumnTypeInfo'
+                            );
                         }
                     );
                 });
