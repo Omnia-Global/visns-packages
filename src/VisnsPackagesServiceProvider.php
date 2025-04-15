@@ -228,6 +228,10 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                                 'getTableRelationships'
                             );
                             Route::post(
+                                '/reportBuilder/getSuggestedJoins',
+                                'getSuggestedJoins'
+                            );
+                            Route::post(
                                 '/reportBuilder/getColumnTypeInfo',
                                 'getColumnTypeInfo'
                             );

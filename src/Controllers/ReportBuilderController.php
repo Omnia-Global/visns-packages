@@ -276,34 +276,138 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             foreach ($columns as $column) {
                 if (preg_match('/_id$/', $column)) {
                     // Extract the related table name (remove _id suffix)
-                    $relatedTable = preg_replace('/_id$/', 's', $column); // Simple pluralization
+                    $relatedTableBase = preg_replace('/_id$/', '', $column);
 
-                    // Check if the related table exists
-                    if (Schema::hasTable($relatedTable)) {
-                        $relationships[] = [
-                            'column' => $column,
-                            'related_table' => $relatedTable,
-                            'type' => 'belongs_to',
-                        ];
+                    // Try different pluralization patterns
+                    $possibleTables = [
+                        $relatedTableBase . 's',      // Simple pluralization (user -> users)
+                        $relatedTableBase . 'es',    // For words ending in 's', 'x', 'z', 'ch', 'sh' (box -> boxes)
+                        $relatedTableBase . 'ies',   // For words ending in 'y' (category -> categories)
+                        $relatedTableBase,           // No pluralization (staff -> staff)
+                    ];
+
+                    // Special cases for irregular plurals
+                    if ($relatedTableBase === 'person') $possibleTables[] = 'people';
+                    if ($relatedTableBase === 'child') $possibleTables[] = 'children';
+                    if ($relatedTableBase === 'foot') $possibleTables[] = 'feet';
+                    if ($relatedTableBase === 'tooth') $possibleTables[] = 'teeth';
+                    if ($relatedTableBase === 'goose') $possibleTables[] = 'geese';
+                    if ($relatedTableBase === 'man') $possibleTables[] = 'men';
+                    if ($relatedTableBase === 'woman') $possibleTables[] = 'women';
+                    if ($relatedTableBase === 'mouse') $possibleTables[] = 'mice';
+
+                    // Check if any of the possible tables exist
+                    foreach ($possibleTables as $possibleTable) {
+                        if (Schema::hasTable($possibleTable)) {
+                            // Check if the related table has an 'id' column
+                            if (Schema::hasColumn($possibleTable, 'id')) {
+                                $relationships[] = [
+                                    'source_table' => $tableName,
+                                    'source_column' => $column,
+                                    'target_table' => $possibleTable,
+                                    'target_column' => 'id',
+                                    'type' => 'belongs_to',
+                                    'join_type' => 'INNER JOIN',
+                                    'description' => "$tableName.$column references $possibleTable.id",
+                                    'confidence' => 'high'
+                                ];
+                                break; // Found a match, no need to check other possibilities
+                            }
+                        }
                     }
                 }
             }
 
             // Look for tables that might have foreign keys to this table
-            $singularTableName = rtrim($tableName, 's'); // Simple singularization
-            $potentialForeignKey = $singularTableName . '_id';
-
             $allTables = $this->getAllDatabaseTables();
+
+            // Try different singularization patterns for the current table
+            $singularTableName = rtrim($tableName, 's'); // Simple singularization
+            $potentialForeignKeys = [
+                $singularTableName . '_id',
+                $tableName . '_id'
+            ];
+
+            // Special cases for irregular plurals
+            if ($tableName === 'people') $potentialForeignKeys[] = 'person_id';
+            if ($tableName === 'children') $potentialForeignKeys[] = 'child_id';
+            if ($tableName === 'men') $potentialForeignKeys[] = 'man_id';
+            if ($tableName === 'women') $potentialForeignKeys[] = 'woman_id';
+            if ($tableName === 'feet') $potentialForeignKeys[] = 'foot_id';
+            if ($tableName === 'teeth') $potentialForeignKeys[] = 'tooth_id';
+            if ($tableName === 'geese') $potentialForeignKeys[] = 'goose_id';
+            if ($tableName === 'mice') $potentialForeignKeys[] = 'mouse_id';
+
             foreach ($allTables as $otherTable) {
                 if ($otherTable !== $tableName) {
                     $otherTableColumns = Schema::getColumnListing($otherTable);
 
-                    if (in_array($potentialForeignKey, $otherTableColumns)) {
-                        $relationships[] = [
-                            'column' => $potentialForeignKey,
-                            'related_table' => $otherTable,
-                            'type' => 'has_many',
-                        ];
+                    foreach ($potentialForeignKeys as $potentialForeignKey) {
+                        if (in_array($potentialForeignKey, $otherTableColumns)) {
+                            $relationships[] = [
+                                'source_table' => $otherTable,
+                                'source_column' => $potentialForeignKey,
+                                'target_table' => $tableName,
+                                'target_column' => 'id',
+                                'type' => 'has_many',
+                                'join_type' => 'LEFT JOIN',
+                                'description' => "$otherTable.$potentialForeignKey references $tableName.id",
+                                'confidence' => 'high'
+                            ];
+                        }
+                    }
+
+                    // Look for pivot tables (many-to-many relationships)
+                    // Format: table1_table2 or table2_table1
+                    $pivotPattern1 = $tableName . '_' . $otherTable;
+                    $pivotPattern2 = $otherTable . '_' . $tableName;
+
+                    if (in_array($pivotPattern1, $allTables)) {
+                        // This is likely a pivot table
+                        $pivotTable = $pivotPattern1;
+                        $pivotColumns = Schema::getColumnListing($pivotTable);
+
+                        $fk1 = $singularTableName . '_id';
+                        $fk2 = rtrim($otherTable, 's') . '_id';
+
+                        if (in_array($fk1, $pivotColumns) && in_array($fk2, $pivotColumns)) {
+                            $relationships[] = [
+                                'source_table' => $tableName,
+                                'source_column' => 'id',
+                                'pivot_table' => $pivotTable,
+                                'pivot_source_column' => $fk1,
+                                'pivot_target_column' => $fk2,
+                                'target_table' => $otherTable,
+                                'target_column' => 'id',
+                                'type' => 'many_to_many',
+                                'join_type' => 'LEFT JOIN',
+                                'description' => "$tableName has many $otherTable through $pivotTable",
+                                'confidence' => 'medium'
+                            ];
+                        }
+                    } else if (in_array($pivotPattern2, $allTables)) {
+                        // This is likely a pivot table
+                        $pivotTable = $pivotPattern2;
+                        $pivotColumns = Schema::getColumnListing($pivotTable);
+
+                        $fk1 = $singularTableName . '_id';
+                        $fk2 = rtrim($otherTable, 's') . '_id';
+
+                        if (in_array($fk1, $pivotColumns) && in_array($fk2, $pivotColumns)) {
+                            $relationships[] = [
+                                'source_table' => $tableName,
+                                'source_column' => 'id',
+                                'pivot_table' => $pivotTable,
+                                'pivot_source_column' => $fk1,
+                                'pivot_target_column' => $fk2,
+                                'target_table' => $otherTable,
+                                'target_column' => 'id',
+                                'type' => 'many_to_many',
+                                'join_type' => 'LEFT JOIN',
+                                'description' => "$tableName has many $otherTable through $pivotTable",
+                                'confidence' => 'medium'
+                            ];
+                        }
                     }
                 }
             }
@@ -328,6 +432,269 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 500
             );
         }
+    }
+
+    /**
+     * Get suggested joins for a table
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getSuggestedJoins(Request $request)
+    {
+        try {
+            $tableName = $request->input('table');
+
+            if (!$tableName) {
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' => 'Table name is required',
+                    ],
+                    400
+                );
+            }
+
+            // Check if table exists
+            if (!Schema::hasTable($tableName)) {
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' => "Table '{$tableName}' does not exist",
+                    ],
+                    404
+                );
+            }
+
+            // Get relationships for the table
+            $relationships = $this->getRelationshipsForTable($tableName);
+
+            // Convert relationships to suggested joins
+            $suggestedJoins = [];
+
+            foreach ($relationships as $relationship) {
+                if ($relationship['type'] === 'belongs_to') {
+                    // This table belongs to another table
+                    $suggestedJoins[] = [
+                        'sourceTable' => $relationship['source_table'],
+                        'sourceColumn' => $relationship['source_column'],
+                        'targetTable' => $relationship['target_table'],
+                        'targetColumn' => $relationship['target_column'],
+                        'joinType' => $relationship['join_type'],
+                        'description' => $relationship['description'],
+                        'confidence' => $relationship['confidence']
+                    ];
+                } else if ($relationship['type'] === 'has_many') {
+                    // Another table belongs to this table
+                    $suggestedJoins[] = [
+                        'sourceTable' => $relationship['target_table'],
+                        'sourceColumn' => $relationship['target_column'],
+                        'targetTable' => $relationship['source_table'],
+                        'targetColumn' => $relationship['source_column'],
+                        'joinType' => $relationship['join_type'],
+                        'description' => $relationship['description'],
+                        'confidence' => $relationship['confidence']
+                    ];
+                } else if ($relationship['type'] === 'many_to_many') {
+                    // Many-to-many relationship through a pivot table
+                    // First join from main table to pivot table
+                    $suggestedJoins[] = [
+                        'sourceTable' => $relationship['source_table'],
+                        'sourceColumn' => $relationship['source_column'],
+                        'targetTable' => $relationship['pivot_table'],
+                        'targetColumn' => $relationship['pivot_source_column'],
+                        'joinType' => $relationship['join_type'],
+                        'description' => "Join from {$relationship['source_table']} to pivot table {$relationship['pivot_table']}",
+                        'confidence' => $relationship['confidence'],
+                        'isFirstPartOfManyToMany' => true,
+                        'secondJoin' => [
+                            'sourceTable' => $relationship['pivot_table'],
+                            'sourceColumn' => $relationship['pivot_target_column'],
+                            'targetTable' => $relationship['target_table'],
+                            'targetColumn' => $relationship['target_column'],
+                            'joinType' => $relationship['join_type'],
+                            'description' => "Join from pivot table {$relationship['pivot_table']} to {$relationship['target_table']}",
+                            'confidence' => $relationship['confidence']
+                        ]
+                    ];
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'table' => $tableName,
+                    'suggestedJoins' => $suggestedJoins,
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error(
+                'Error getting suggested joins: ' . $e->getMessage()
+            );
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error getting suggested joins',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
+
+    /**
+     * Get relationships for a table
+     *
+     * @param string $tableName
+     * @return array
+     */
+    private function getRelationshipsForTable($tableName)
+    {
+        // Get foreign key columns (potential relationships)
+        $columns = Schema::getColumnListing($tableName);
+        $relationships = [];
+
+        // Look for columns that might be foreign keys (ending with _id)
+        foreach ($columns as $column) {
+            if (preg_match('/_id$/', $column)) {
+                // Extract the related table name (remove _id suffix)
+                $relatedTableBase = preg_replace('/_id$/', '', $column);
+
+                // Try different pluralization patterns
+                $possibleTables = [
+                    $relatedTableBase . 's',      // Simple pluralization (user -> users)
+                    $relatedTableBase . 'es',    // For words ending in 's', 'x', 'z', 'ch', 'sh' (box -> boxes)
+                    $relatedTableBase . 'ies',   // For words ending in 'y' (category -> categories)
+                    $relatedTableBase,           // No pluralization (staff -> staff)
+                ];
+
+                // Special cases for irregular plurals
+                if ($relatedTableBase === 'person') $possibleTables[] = 'people';
+                if ($relatedTableBase === 'child') $possibleTables[] = 'children';
+                if ($relatedTableBase === 'foot') $possibleTables[] = 'feet';
+                if ($relatedTableBase === 'tooth') $possibleTables[] = 'teeth';
+                if ($relatedTableBase === 'goose') $possibleTables[] = 'geese';
+                if ($relatedTableBase === 'man') $possibleTables[] = 'men';
+                if ($relatedTableBase === 'woman') $possibleTables[] = 'women';
+                if ($relatedTableBase === 'mouse') $possibleTables[] = 'mice';
+
+                // Check if any of the possible tables exist
+                foreach ($possibleTables as $possibleTable) {
+                    if (Schema::hasTable($possibleTable)) {
+                        // Check if the related table has an 'id' column
+                        if (Schema::hasColumn($possibleTable, 'id')) {
+                            $relationships[] = [
+                                'source_table' => $tableName,
+                                'source_column' => $column,
+                                'target_table' => $possibleTable,
+                                'target_column' => 'id',
+                                'type' => 'belongs_to',
+                                'join_type' => 'INNER JOIN',
+                                'description' => "$tableName.$column references $possibleTable.id",
+                                'confidence' => 'high'
+                            ];
+                            break; // Found a match, no need to check other possibilities
+                        }
+                    }
+                }
+            }
+        }
+
+        // Look for tables that might have foreign keys to this table
+        $allTables = $this->getAllDatabaseTables();
+
+        // Try different singularization patterns for the current table
+        $singularTableName = rtrim($tableName, 's'); // Simple singularization
+        $potentialForeignKeys = [
+            $singularTableName . '_id',
+            $tableName . '_id'
+        ];
+
+        // Special cases for irregular plurals
+        if ($tableName === 'people') $potentialForeignKeys[] = 'person_id';
+        if ($tableName === 'children') $potentialForeignKeys[] = 'child_id';
+        if ($tableName === 'men') $potentialForeignKeys[] = 'man_id';
+        if ($tableName === 'women') $potentialForeignKeys[] = 'woman_id';
+        if ($tableName === 'feet') $potentialForeignKeys[] = 'foot_id';
+        if ($tableName === 'teeth') $potentialForeignKeys[] = 'tooth_id';
+        if ($tableName === 'geese') $potentialForeignKeys[] = 'goose_id';
+        if ($tableName === 'mice') $potentialForeignKeys[] = 'mouse_id';
+
+        foreach ($allTables as $otherTable) {
+            if ($otherTable !== $tableName) {
+                $otherTableColumns = Schema::getColumnListing($otherTable);
+
+                foreach ($potentialForeignKeys as $potentialForeignKey) {
+                    if (in_array($potentialForeignKey, $otherTableColumns)) {
+                        $relationships[] = [
+                            'source_table' => $otherTable,
+                            'source_column' => $potentialForeignKey,
+                            'target_table' => $tableName,
+                            'target_column' => 'id',
+                            'type' => 'has_many',
+                            'join_type' => 'LEFT JOIN',
+                            'description' => "$otherTable.$potentialForeignKey references $tableName.id",
+                            'confidence' => 'high'
+                        ];
+                    }
+                }
+
+                // Look for pivot tables (many-to-many relationships)
+                // Format: table1_table2 or table2_table1
+                $pivotPattern1 = $tableName . '_' . $otherTable;
+                $pivotPattern2 = $otherTable . '_' . $tableName;
+
+                if (in_array($pivotPattern1, $allTables)) {
+                    // This is likely a pivot table
+                    $pivotTable = $pivotPattern1;
+                    $pivotColumns = Schema::getColumnListing($pivotTable);
+
+                    $fk1 = $singularTableName . '_id';
+                    $fk2 = rtrim($otherTable, 's') . '_id';
+
+                    if (in_array($fk1, $pivotColumns) && in_array($fk2, $pivotColumns)) {
+                        $relationships[] = [
+                            'source_table' => $tableName,
+                            'source_column' => 'id',
+                            'pivot_table' => $pivotTable,
+                            'pivot_source_column' => $fk1,
+                            'pivot_target_column' => $fk2,
+                            'target_table' => $otherTable,
+                            'target_column' => 'id',
+                            'type' => 'many_to_many',
+                            'join_type' => 'LEFT JOIN',
+                            'description' => "$tableName has many $otherTable through $pivotTable",
+                            'confidence' => 'medium'
+                        ];
+                    }
+                } else if (in_array($pivotPattern2, $allTables)) {
+                    // This is likely a pivot table
+                    $pivotTable = $pivotPattern2;
+                    $pivotColumns = Schema::getColumnListing($pivotTable);
+
+                    $fk1 = $singularTableName . '_id';
+                    $fk2 = rtrim($otherTable, 's') . '_id';
+
+                    if (in_array($fk1, $pivotColumns) && in_array($fk2, $pivotColumns)) {
+                        $relationships[] = [
+                            'source_table' => $tableName,
+                            'source_column' => 'id',
+                            'pivot_table' => $pivotTable,
+                            'pivot_source_column' => $fk1,
+                            'pivot_target_column' => $fk2,
+                            'target_table' => $otherTable,
+                            'target_column' => 'id',
+                            'type' => 'many_to_many',
+                            'join_type' => 'LEFT JOIN',
+                            'description' => "$tableName has many $otherTable through $pivotTable",
+                            'confidence' => 'medium'
+                        ];
+                    }
+                }
+            }
+        }
+
+        return $relationships;
     }
 
     /**
