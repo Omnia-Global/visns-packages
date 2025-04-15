@@ -208,8 +208,9 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                     );
 
                     // Report Builder routes
-                    Route::controller(ReportBuilderController::class)->group(
-                        function () {
+                    Route::prefix('ajax')
+                        ->controller(ReportBuilderController::class)
+                        ->group(function () {
                             Route::post(
                                 '/reportBuilder/getTables',
                                 'getTables'
@@ -230,8 +231,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                                 '/reportBuilder/getColumnTypeInfo',
                                 'getColumnTypeInfo'
                             );
-                        }
-                    );
+                        });
                 });
 
             // Register API routes
