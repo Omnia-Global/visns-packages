@@ -231,6 +231,28 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                                 '/reportBuilder/getColumnTypeInfo',
                                 'getColumnTypeInfo'
                             );
+
+                            // Report management endpoints
+                            Route::get('/reportBuilder/reports', 'getReports');
+                            Route::get(
+                                '/reportBuilder/reports/{id}',
+                                'getReport'
+                            );
+                            Route::post('/reportBuilder/reports', 'saveReport');
+                            Route::put(
+                                '/reportBuilder/reports/{id}',
+                                'updateReport'
+                            );
+                            Route::delete(
+                                '/reportBuilder/reports/{id}',
+                                'deleteReport'
+                            );
+
+                            // Execute report query
+                            Route::post(
+                                '/reportBuilder/execute',
+                                'executeQuery'
+                            );
                         });
                 });
 

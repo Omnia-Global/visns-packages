@@ -6,8 +6,10 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Auth;
+use Visnsstudio\VisnsPackages\Models\ReportBuilder;
 
-class ReportBuilderController extends \App\Http\Controllers\Controller
+class ReportBuilderController extends Controller
 {
     /**
      * Get all tables in the database
@@ -626,5 +628,582 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 500
             );
         }
+    }
+
+    /**
+     * Get all saved reports
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getReports(Request $request)
+    {
+        try {
+            // Get user ID from authenticated user or request
+            $userId = Auth::id() ?? $request->input('user_id');
+
+            // Query to get reports
+            $query = ReportBuilder::query();
+
+            // Filter by user if user ID is provided
+            if ($userId) {
+                $query->where(function ($q) use ($userId) {
+                    $q->where('user_id', $userId)->orWhere('is_public', true);
+                });
+            } else {
+                // If no user ID, only return public reports
+                $query->where('is_public', true);
+            }
+
+            // Get reports
+            $reports = $query->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => $reports,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching reports: ' . $e->getMessage());
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error fetching reports',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
+
+    /**
+     * Get a specific report by ID
+     *
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getReport(Request $request, $id)
+    {
+        try {
+            $report = ReportBuilder::findOrFail($id);
+
+            // Check if user has access to this report
+            $userId = Auth::id() ?? $request->input('user_id');
+            if (!$report->is_public && $report->user_id !== $userId) {
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' =>
+                            'You do not have permission to view this report',
+                    ],
+                    403
+                );
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $report,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching report: ' . $e->getMessage());
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error fetching report',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
+
+    /**
+     * Save a new report
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function saveReport(Request $request)
+    {
+        try {
+            // Validate request
+            $validated = $request->validate([
+                'label' => 'required|string|max:255',
+                'detail' => 'required|array',
+                'is_public' => 'boolean',
+            ]);
+
+            // Get user ID from authenticated user or request
+            $userId = Auth::id() ?? $request->input('user_id');
+
+            // Create new report
+            $report = new ReportBuilder();
+            $report->label = $validated['label'];
+            $report->detail = $validated['detail'];
+            $report->is_public = $validated['is_public'] ?? false;
+            $report->user_id = $userId;
+            $report->save();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Report saved successfully',
+                'data' => $report,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error saving report: ' . $e->getMessage());
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error saving report',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
+
+    /**
+     * Update an existing report
+     *
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function updateReport(Request $request, $id)
+    {
+        try {
+            // Find the report
+            $report = ReportBuilder::findOrFail($id);
+
+            // Check if user has permission to update this report
+            $userId = Auth::id() ?? $request->input('user_id');
+            if ($report->user_id !== $userId) {
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' =>
+                            'You do not have permission to update this report',
+                    ],
+                    403
+                );
+            }
+
+            // Validate request
+            $validated = $request->validate([
+                'label' => 'string|max:255',
+                'detail' => 'array',
+                'is_public' => 'boolean',
+            ]);
+
+            // Update report
+            if (isset($validated['label'])) {
+                $report->label = $validated['label'];
+            }
+
+            if (isset($validated['detail'])) {
+                $report->detail = $validated['detail'];
+            }
+
+            if (isset($validated['is_public'])) {
+                $report->is_public = $validated['is_public'];
+            }
+
+            $report->save();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Report updated successfully',
+                'data' => $report,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error updating report: ' . $e->getMessage());
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error updating report',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
+
+    /**
+     * Delete a report
+     *
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function deleteReport(Request $request, $id)
+    {
+        try {
+            // Find the report
+            $report = ReportBuilder::findOrFail($id);
+
+            // Check if user has permission to delete this report
+            $userId = Auth::id() ?? $request->input('user_id');
+            if ($report->user_id !== $userId) {
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' =>
+                            'You do not have permission to delete this report',
+                    ],
+                    403
+                );
+            }
+
+            // Delete the report
+            $report->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Report deleted successfully',
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error deleting report: ' . $e->getMessage());
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error deleting report',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
+
+    /**
+     * Execute a report query and return the results
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function executeQuery(Request $request)
+    {
+        try {
+            // Validate request
+            $validated = $request->validate([
+                'query' => 'required|array',
+                'report_id' => 'nullable|integer',
+                'limit' => 'nullable|integer|min:1|max:1000',
+                'offset' => 'nullable|integer|min:0',
+                'parameters' => 'nullable|array',
+            ]);
+
+            // Set default limit if not provided
+            $limit = $validated['limit'] ?? 100;
+            $offset = $validated['offset'] ?? 0;
+            $parameters = $validated['parameters'] ?? [];
+
+            // Get the query configuration
+            $queryConfig = $validated['query'];
+
+            // If report_id is provided, load the report configuration
+            if (isset($validated['report_id'])) {
+                $report = ReportBuilder::findOrFail($validated['report_id']);
+
+                // Check if user has access to this report
+                $userId = Auth::id() ?? $request->input('user_id');
+                if (!$report->is_public && $report->user_id !== $userId) {
+                    return response()->json(
+                        [
+                            'success' => false,
+                            'message' =>
+                                'You do not have permission to execute this report',
+                        ],
+                        403
+                    );
+                }
+
+                // Use the report configuration if query is not provided
+                if (empty($queryConfig)) {
+                    $queryConfig = $report->detail;
+                }
+            }
+
+            // Build and execute the SQL query
+            $result = $this->buildAndExecuteQuery(
+                $queryConfig,
+                $limit,
+                $offset,
+                $parameters
+            );
+
+            return response()->json([
+                'success' => true,
+                'data' => $result['data'],
+                'total' => $result['total'],
+                'sql' => $result['sql'], // Include the generated SQL for debugging
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error executing report query: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error executing report query',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
+
+    /**
+     * Build and execute a SQL query based on the report configuration
+     *
+     * @param array $queryConfig
+     * @param int $limit
+     * @param int $offset
+     * @param array $parameters
+     * @return array
+     */
+    private function buildAndExecuteQuery(
+        array $queryConfig,
+        int $limit = 100,
+        int $offset = 0,
+        array $parameters = []
+    ) {
+        // Extract configuration
+        $mainTable = $queryConfig['mainTable'] ?? null;
+        $columns = $queryConfig['columns'] ?? [];
+        $joins = $queryConfig['joins'] ?? [];
+        $filters = $queryConfig['filters'] ?? [];
+        $sorting = $queryConfig['sorting'] ?? [];
+        $groupBy = $queryConfig['groupBy'] ?? [];
+
+        // Validate main table
+        if (!$mainTable) {
+            throw new \Exception('Main table is required');
+        }
+
+        // Validate columns
+        if (empty($columns)) {
+            throw new \Exception('At least one column must be selected');
+        }
+
+        // Start building the query
+        $query = DB::table($mainTable);
+
+        // Add joins
+        foreach ($joins as $join) {
+            $joinType = strtolower($join['joinType'] ?? 'inner');
+            $targetTable = $join['targetTable'] ?? null;
+            $sourceColumn = $join['sourceColumn'] ?? null;
+            $targetColumn = $join['targetColumn'] ?? null;
+
+            if (!$targetTable || !$sourceColumn || !$targetColumn) {
+                continue; // Skip invalid joins
+            }
+
+            // Determine join method
+            switch ($joinType) {
+                case 'left':
+                    $query->leftJoin(
+                        $targetTable,
+                        "$mainTable.$sourceColumn",
+                        '=',
+                        "$targetTable.$targetColumn"
+                    );
+                    break;
+                case 'right':
+                    $query->rightJoin(
+                        $targetTable,
+                        "$mainTable.$sourceColumn",
+                        '=',
+                        "$targetTable.$targetColumn"
+                    );
+                    break;
+                case 'inner':
+                default:
+                    $query->join(
+                        $targetTable,
+                        "$mainTable.$sourceColumn",
+                        '=',
+                        "$targetTable.$targetColumn"
+                    );
+                    break;
+            }
+        }
+
+        // Add columns
+        $selectColumns = [];
+        foreach ($columns as $column) {
+            $tableName = $column['table'] ?? $mainTable;
+            $columnName = $column['column'] ?? null;
+            $alias = $column['alias'] ?? null;
+
+            if (!$columnName) {
+                continue; // Skip invalid columns
+            }
+
+            if ($alias) {
+                $selectColumns[] = DB::raw(
+                    "$tableName.$columnName as `$alias`"
+                );
+            } else {
+                $selectColumns[] = "$tableName.$columnName";
+            }
+        }
+
+        $query->select($selectColumns);
+
+        // Add filters
+        foreach ($filters as $filter) {
+            $tableName = $filter['table'] ?? $mainTable;
+            $columnName = $filter['column'] ?? null;
+            $operator = $filter['operator'] ?? '=';
+            $value = $filter['value'] ?? null;
+            $logicalOperator = strtolower($filter['logicalOperator'] ?? 'and');
+
+            if (!$columnName) {
+                continue; // Skip invalid filters
+            }
+
+            // Check if this is a parameter reference
+            if (
+                is_string($value) &&
+                preg_match('/^\{([^\}]+)\}$/', $value, $matches)
+            ) {
+                $paramName = $matches[1];
+                if (isset($parameters[$paramName])) {
+                    $value = $parameters[$paramName];
+                }
+            }
+
+            // Apply the filter
+            $columnRef = "$tableName.$columnName";
+
+            if ($logicalOperator === 'or') {
+                switch (strtolower($operator)) {
+                    case 'like':
+                        $query->orWhere($columnRef, 'like', "%$value%");
+                        break;
+                    case 'not like':
+                        $query->orWhere($columnRef, 'not like', "%$value%");
+                        break;
+                    case 'in':
+                        if (is_array($value)) {
+                            $query->orWhereIn($columnRef, $value);
+                        }
+                        break;
+                    case 'not in':
+                        if (is_array($value)) {
+                            $query->orWhereNotIn($columnRef, $value);
+                        }
+                        break;
+                    case 'between':
+                        if (is_array($value) && count($value) === 2) {
+                            $query->orWhereBetween($columnRef, $value);
+                        }
+                        break;
+                    case 'not between':
+                        if (is_array($value) && count($value) === 2) {
+                            $query->orWhereNotBetween($columnRef, $value);
+                        }
+                        break;
+                    case 'null':
+                        $query->orWhereNull($columnRef);
+                        break;
+                    case 'not null':
+                        $query->orWhereNotNull($columnRef);
+                        break;
+                    default:
+                        $query->orWhere($columnRef, $operator, $value);
+                        break;
+                }
+            } else {
+                switch (strtolower($operator)) {
+                    case 'like':
+                        $query->where($columnRef, 'like', "%$value%");
+                        break;
+                    case 'not like':
+                        $query->where($columnRef, 'not like', "%$value%");
+                        break;
+                    case 'in':
+                        if (is_array($value)) {
+                            $query->whereIn($columnRef, $value);
+                        }
+                        break;
+                    case 'not in':
+                        if (is_array($value)) {
+                            $query->whereNotIn($columnRef, $value);
+                        }
+                        break;
+                    case 'between':
+                        if (is_array($value) && count($value) === 2) {
+                            $query->whereBetween($columnRef, $value);
+                        }
+                        break;
+                    case 'not between':
+                        if (is_array($value) && count($value) === 2) {
+                            $query->whereNotBetween($columnRef, $value);
+                        }
+                        break;
+                    case 'null':
+                        $query->whereNull($columnRef);
+                        break;
+                    case 'not null':
+                        $query->whereNotNull($columnRef);
+                        break;
+                    default:
+                        $query->where($columnRef, $operator, $value);
+                        break;
+                }
+            }
+        }
+
+        // Add group by
+        foreach ($groupBy as $group) {
+            $tableName = $group['table'] ?? $mainTable;
+            $columnName = $group['column'] ?? null;
+
+            if (!$columnName) {
+                continue; // Skip invalid group by
+            }
+
+            $query->groupBy("$tableName.$columnName");
+        }
+
+        // Add sorting
+        foreach ($sorting as $sort) {
+            $tableName = $sort['table'] ?? $mainTable;
+            $columnName = $sort['column'] ?? null;
+            $direction = strtolower($sort['direction'] ?? 'asc');
+
+            if (!$columnName) {
+                continue; // Skip invalid sorting
+            }
+
+            $query->orderBy("$tableName.$columnName", $direction);
+        }
+
+        // Get the total count before applying limit and offset
+        $countQuery = clone $query;
+        $total = $countQuery->count();
+
+        // Apply limit and offset
+        $query->limit($limit)->offset($offset);
+
+        // Get the SQL for debugging
+        $sql = $query->toSql();
+        $bindings = $query->getBindings();
+
+        // Replace bindings in SQL for debugging
+        foreach ($bindings as $binding) {
+            $value = is_numeric($binding) ? $binding : "'$binding'";
+            $sql = preg_replace('/\?/', $value, $sql, 1);
+        }
+
+        // Execute the query
+        $results = $query->get();
+
+        return [
+            'data' => $results,
+            'total' => $total,
+            'sql' => $sql,
+        ];
     }
 }
