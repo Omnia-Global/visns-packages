@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
 use Visnsstudio\VisnsPackages\Models\ReportBuilder;
 
-class ReportBuilderController extends Controller
+class ReportBuilderController extends \App\Http\Controllers\Controller
 {
     /**
      * Get all tables in the database
