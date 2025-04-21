@@ -32,8 +32,10 @@ class PermissionController extends \App\Http\Controllers\Controller
         return response()->json($results);
     }
 
-    public function show(Permission $permission)
+    public function show($id)
     {
+        $permission = Permission::find($id);
+
         return response()->json($permission);
     }
 
