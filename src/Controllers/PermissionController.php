@@ -11,28 +11,28 @@ class PermissionController extends \App\Http\Controllers\Controller
     {
         $data = [];
 
-        $query = Permission::orderBy("name", "asc");
+        $query = Permission::orderBy('name', 'asc');
 
-        if ($request->input("id")) {
-            $query->where($request->input("filter"), $request->input("id"));
+        if ($request->input('id')) {
+            $query->where($request->input('filter'), $request->input('id'));
         }
 
-        foreach ($query->get(["id", "name"]) as $item) {
+        foreach ($query->get(['id', 'name']) as $item) {
             array_push($data, [
-                "id" => $item->name,
-                "label" => $item->name,
-                "key" => $item->id,
+                'id' => $item->id,
+                'label' => $item->name,
+                'key' => $item->id,
             ]);
         }
 
         $results = [
-            "data" => $data,
+            'data' => $data,
         ];
 
         return response()->json($results);
     }
 
-    public function get(Permission $permission)
+    public function show(Permission $permission)
     {
         return response()->json($permission);
     }
@@ -40,18 +40,18 @@ class PermissionController extends \App\Http\Controllers\Controller
     public function table(Request $request)
     {
         $data = Permission::orderBy(
-            $request->input("sortBy"),
-            $request->input("sort")
-        )->where("name", "like", "%" . $request->input("search") . "%");
+            $request->input('sortBy'),
+            $request->input('sort')
+        )->where('name', 'like', '%' . $request->input('search') . '%');
 
-        if ($request->has("where") && $request->filled("where")) {
-            foreach ($request->input("where") as $a => $b) {
-                $data->where($b["id"], $b["value"]);
+        if ($request->has('where') && $request->filled('where')) {
+            foreach ($request->input('where') as $a => $b) {
+                $data->where($b['id'], $b['value']);
             }
         }
 
         $data = $data->paginate(
-            $request->input("take") ? $request->input("take") : 10
+            $request->input('take') ? $request->input('take') : 10
         );
 
         return response()->json($data);
@@ -59,52 +59,52 @@ class PermissionController extends \App\Http\Controllers\Controller
 
     public function store(Request $request)
     {
-        $error = "";
+        $error = '';
 
         $request->validate([
-            "name" => "required",
+            'name' => 'required',
         ]);
 
         $permission = new Permission();
 
-        if ($request->has("name")) {
-            $permission->name = $request->input("name");
+        if ($request->has('name')) {
+            $permission->name = $request->input('name');
         }
 
         $permission->save();
 
         return response()->json([
-            "error" => $error,
+            'error' => $error,
         ]);
     }
 
     public function update(Request $request, Permission $permission)
     {
-        $error = "";
+        $error = '';
 
         $request->validate([
-            "name" => "required",
+            'name' => 'required',
         ]);
 
-        if ($request->has("name")) {
-            $permission->name = $request->input("name");
+        if ($request->has('name')) {
+            $permission->name = $request->input('name');
         }
 
         $permission->save();
 
         return response()->json([
-            "error" => $error,
+            'error' => $error,
         ]);
     }
 
     public function destroy(Permission $permission)
     {
-        $error = "";
+        $error = '';
 
         $permission->delete();
 
         return response()->json([
-            "error" => $error,
+            'error' => $error,
         ]);
     }
 }
