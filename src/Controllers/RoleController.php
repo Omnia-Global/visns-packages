@@ -47,10 +47,9 @@ class RoleController extends \App\Http\Controllers\Controller
 
     public function table(Request $request)
     {
-        $data = Role::orderBy(
-            $request->input('sortBy'),
-            $request->input('sort')
-        )->where('name', 'like', '%' . $request->input('search') . '%');
+        $data = Role::with('permissions')
+            ->orderBy($request->input('sortBy'), $request->input('sort'))
+            ->where('name', 'like', '%' . $request->input('search') . '%');
 
         if ($request->has('where') && $request->filled('where')) {
             foreach ($request->input('where') as $a => $b) {
