@@ -1508,47 +1508,162 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
             // If we have a JSON key, we need to use JSON filtering
             if ($jsonKey && !empty($jsonKey)) {
-                // Convert dot notation to JSON path
-                $jsonPath = str_replace('.', '->', $jsonKey);
+                // Get database connection type
+                $connection = DB::connection()->getDriverName();
 
-                // Create the JSON column reference
-                $jsonColumnRef = "$columnRef->$jsonPath";
+                // Different JSON syntax for different database systems
+                if ($connection === 'mysql') {
+                    // MySQL uses -> for JSON path and ->> for extracting values as text
+                    // Convert dot notation to JSON path with proper quoting
+                    $jsonPath = '';
+                    $pathParts = explode('.', $jsonKey);
 
-                if ($logicalOperator === 'or') {
-                    switch (strtolower($operator)) {
-                        case 'like':
-                            $query->orWhere(DB::raw("LOWER($jsonColumnRef)"), 'like', "%" . strtolower($value) . "%");
-                            break;
-                        case 'not like':
-                            $query->orWhere(DB::raw("LOWER($jsonColumnRef)"), 'not like', "%" . strtolower($value) . "%");
-                            break;
-                        case 'null':
-                            $query->orWhereNull(DB::raw($jsonColumnRef));
-                            break;
-                        case 'not null':
-                            $query->orWhereNotNull(DB::raw($jsonColumnRef));
-                            break;
-                        default:
-                            $query->orWhere(DB::raw($jsonColumnRef), $operator, $value);
-                            break;
+                    foreach ($pathParts as $index => $part) {
+                        // For the last part, use ->> to extract as text for comparison
+                        if ($index === count($pathParts) - 1) {
+                            $jsonPath .= "->>'$.{$part}'";
+                        } else {
+                            $jsonPath .= "->'$.{$part}'";
+                        }
+                    }
+
+                    // Create the JSON column reference
+                    $jsonColumnRef = "$columnRef$jsonPath";
+
+                    if ($logicalOperator === 'or') {
+                        switch (strtolower($operator)) {
+                            case 'like':
+                                $query->orWhereRaw("LOWER($jsonColumnRef) LIKE ?", ["%" . strtolower($value) . "%"]);
+                                break;
+                            case 'not like':
+                                $query->orWhereRaw("LOWER($jsonColumnRef) NOT LIKE ?", ["%" . strtolower($value) . "%"]);
+                                break;
+                            case 'null':
+                                $query->orWhereRaw("$jsonColumnRef IS NULL");
+                                break;
+                            case 'not null':
+                                $query->orWhereRaw("$jsonColumnRef IS NOT NULL");
+                                break;
+                            default:
+                                $query->orWhereRaw("$jsonColumnRef $operator ?", [$value]);
+                                break;
+                        }
+                    } else {
+                        switch (strtolower($operator)) {
+                            case 'like':
+                                $query->whereRaw("LOWER($jsonColumnRef) LIKE ?", ["%" . strtolower($value) . "%"]);
+                                break;
+                            case 'not like':
+                                $query->whereRaw("LOWER($jsonColumnRef) NOT LIKE ?", ["%" . strtolower($value) . "%"]);
+                                break;
+                            case 'null':
+                                $query->whereRaw("$jsonColumnRef IS NULL");
+                                break;
+                            case 'not null':
+                                $query->whereRaw("$jsonColumnRef IS NOT NULL");
+                                break;
+                            default:
+                                $query->whereRaw("$jsonColumnRef $operator ?", [$value]);
+                                break;
+                        }
+                    }
+                } else if ($connection === 'pgsql') {
+                    // PostgreSQL uses -> for JSON objects and ->> for extracting text
+                    // Convert dot notation to JSON path
+                    $jsonPath = '';
+                    $pathParts = explode('.', $jsonKey);
+
+                    foreach ($pathParts as $index => $part) {
+                        // For the last part, use ->> to extract as text for comparison
+                        if ($index === count($pathParts) - 1) {
+                            $jsonPath .= "->>'$part'";
+                        } else {
+                            $jsonPath .= "->'$part'";
+                        }
+                    }
+
+                    // Create the JSON column reference
+                    $jsonColumnRef = "$columnRef$jsonPath";
+
+                    if ($logicalOperator === 'or') {
+                        switch (strtolower($operator)) {
+                            case 'like':
+                                $query->orWhere(DB::raw("LOWER($jsonColumnRef)"), 'like', "%" . strtolower($value) . "%");
+                                break;
+                            case 'not like':
+                                $query->orWhere(DB::raw("LOWER($jsonColumnRef)"), 'not like', "%" . strtolower($value) . "%");
+                                break;
+                            case 'null':
+                                $query->orWhereNull(DB::raw($jsonColumnRef));
+                                break;
+                            case 'not null':
+                                $query->orWhereNotNull(DB::raw($jsonColumnRef));
+                                break;
+                            default:
+                                $query->orWhere(DB::raw($jsonColumnRef), $operator, $value);
+                                break;
+                        }
+                    } else {
+                        switch (strtolower($operator)) {
+                            case 'like':
+                                $query->where(DB::raw("LOWER($jsonColumnRef)"), 'like', "%" . strtolower($value) . "%");
+                                break;
+                            case 'not like':
+                                $query->where(DB::raw("LOWER($jsonColumnRef)"), 'not like', "%" . strtolower($value) . "%");
+                                break;
+                            case 'null':
+                                $query->whereNull(DB::raw($jsonColumnRef));
+                                break;
+                            case 'not null':
+                                $query->whereNotNull(DB::raw($jsonColumnRef));
+                                break;
+                            default:
+                                $query->where(DB::raw($jsonColumnRef), $operator, $value);
+                                break;
+                        }
                     }
                 } else {
-                    switch (strtolower($operator)) {
-                        case 'like':
-                            $query->where(DB::raw("LOWER($jsonColumnRef)"), 'like', "%" . strtolower($value) . "%");
-                            break;
-                        case 'not like':
-                            $query->where(DB::raw("LOWER($jsonColumnRef)"), 'not like', "%" . strtolower($value) . "%");
-                            break;
-                        case 'null':
-                            $query->whereNull(DB::raw($jsonColumnRef));
-                            break;
-                        case 'not null':
-                            $query->whereNotNull(DB::raw($jsonColumnRef));
-                            break;
-                        default:
-                            $query->where(DB::raw($jsonColumnRef), $operator, $value);
-                            break;
+                    // SQLite and other databases - use JSON_EXTRACT function if available
+                    // This is a fallback and may not work for all databases
+                    $jsonPath = '$.' . $jsonKey;
+                    $jsonColumnRef = "JSON_EXTRACT($columnRef, '$jsonPath')";
+
+                    if ($logicalOperator === 'or') {
+                        switch (strtolower($operator)) {
+                            case 'like':
+                                $query->orWhereRaw("LOWER($jsonColumnRef) LIKE ?", ["%" . strtolower($value) . "%"]);
+                                break;
+                            case 'not like':
+                                $query->orWhereRaw("LOWER($jsonColumnRef) NOT LIKE ?", ["%" . strtolower($value) . "%"]);
+                                break;
+                            case 'null':
+                                $query->orWhereRaw("$jsonColumnRef IS NULL");
+                                break;
+                            case 'not null':
+                                $query->orWhereRaw("$jsonColumnRef IS NOT NULL");
+                                break;
+                            default:
+                                $query->orWhereRaw("$jsonColumnRef $operator ?", [$value]);
+                                break;
+                        }
+                    } else {
+                        switch (strtolower($operator)) {
+                            case 'like':
+                                $query->whereRaw("LOWER($jsonColumnRef) LIKE ?", ["%" . strtolower($value) . "%"]);
+                                break;
+                            case 'not like':
+                                $query->whereRaw("LOWER($jsonColumnRef) NOT LIKE ?", ["%" . strtolower($value) . "%"]);
+                                break;
+                            case 'null':
+                                $query->whereRaw("$jsonColumnRef IS NULL");
+                                break;
+                            case 'not null':
+                                $query->whereRaw("$jsonColumnRef IS NOT NULL");
+                                break;
+                            default:
+                                $query->whereRaw("$jsonColumnRef $operator ?", [$value]);
+                                break;
+                        }
                     }
                 }
             } else {
