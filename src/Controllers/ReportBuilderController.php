@@ -8,6 +8,9 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
 use Visnsstudio\VisnsPackages\Models\ReportBuilder;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use Mpdf\Mpdf;
 
 class ReportBuilderController extends \App\Http\Controllers\Controller
 {
@@ -280,21 +283,37 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
                     // Try different pluralization patterns
                     $possibleTables = [
-                        $relatedTableBase . 's',      // Simple pluralization (user -> users)
-                        $relatedTableBase . 'es',    // For words ending in 's', 'x', 'z', 'ch', 'sh' (box -> boxes)
-                        $relatedTableBase . 'ies',   // For words ending in 'y' (category -> categories)
-                        $relatedTableBase,           // No pluralization (staff -> staff)
+                        $relatedTableBase . 's', // Simple pluralization (user -> users)
+                        $relatedTableBase . 'es', // For words ending in 's', 'x', 'z', 'ch', 'sh' (box -> boxes)
+                        $relatedTableBase . 'ies', // For words ending in 'y' (category -> categories)
+                        $relatedTableBase, // No pluralization (staff -> staff)
                     ];
 
                     // Special cases for irregular plurals
-                    if ($relatedTableBase === 'person') $possibleTables[] = 'people';
-                    if ($relatedTableBase === 'child') $possibleTables[] = 'children';
-                    if ($relatedTableBase === 'foot') $possibleTables[] = 'feet';
-                    if ($relatedTableBase === 'tooth') $possibleTables[] = 'teeth';
-                    if ($relatedTableBase === 'goose') $possibleTables[] = 'geese';
-                    if ($relatedTableBase === 'man') $possibleTables[] = 'men';
-                    if ($relatedTableBase === 'woman') $possibleTables[] = 'women';
-                    if ($relatedTableBase === 'mouse') $possibleTables[] = 'mice';
+                    if ($relatedTableBase === 'person') {
+                        $possibleTables[] = 'people';
+                    }
+                    if ($relatedTableBase === 'child') {
+                        $possibleTables[] = 'children';
+                    }
+                    if ($relatedTableBase === 'foot') {
+                        $possibleTables[] = 'feet';
+                    }
+                    if ($relatedTableBase === 'tooth') {
+                        $possibleTables[] = 'teeth';
+                    }
+                    if ($relatedTableBase === 'goose') {
+                        $possibleTables[] = 'geese';
+                    }
+                    if ($relatedTableBase === 'man') {
+                        $possibleTables[] = 'men';
+                    }
+                    if ($relatedTableBase === 'woman') {
+                        $possibleTables[] = 'women';
+                    }
+                    if ($relatedTableBase === 'mouse') {
+                        $possibleTables[] = 'mice';
+                    }
 
                     // Check if any of the possible tables exist
                     foreach ($possibleTables as $possibleTable) {
@@ -309,7 +328,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                                     'type' => 'belongs_to',
                                     'join_type' => 'INNER JOIN',
                                     'description' => "$tableName.$column references $possibleTable.id",
-                                    'confidence' => 'high'
+                                    'confidence' => 'high',
                                 ];
                                 break; // Found a match, no need to check other possibilities
                             }
@@ -325,25 +344,43 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             $singularTableName = rtrim($tableName, 's'); // Simple singularization
             $potentialForeignKeys = [
                 $singularTableName . '_id',
-                $tableName . '_id'
+                $tableName . '_id',
             ];
 
             // Special cases for irregular plurals
-            if ($tableName === 'people') $potentialForeignKeys[] = 'person_id';
-            if ($tableName === 'children') $potentialForeignKeys[] = 'child_id';
-            if ($tableName === 'men') $potentialForeignKeys[] = 'man_id';
-            if ($tableName === 'women') $potentialForeignKeys[] = 'woman_id';
-            if ($tableName === 'feet') $potentialForeignKeys[] = 'foot_id';
-            if ($tableName === 'teeth') $potentialForeignKeys[] = 'tooth_id';
-            if ($tableName === 'geese') $potentialForeignKeys[] = 'goose_id';
-            if ($tableName === 'mice') $potentialForeignKeys[] = 'mouse_id';
+            if ($tableName === 'people') {
+                $potentialForeignKeys[] = 'person_id';
+            }
+            if ($tableName === 'children') {
+                $potentialForeignKeys[] = 'child_id';
+            }
+            if ($tableName === 'men') {
+                $potentialForeignKeys[] = 'man_id';
+            }
+            if ($tableName === 'women') {
+                $potentialForeignKeys[] = 'woman_id';
+            }
+            if ($tableName === 'feet') {
+                $potentialForeignKeys[] = 'foot_id';
+            }
+            if ($tableName === 'teeth') {
+                $potentialForeignKeys[] = 'tooth_id';
+            }
+            if ($tableName === 'geese') {
+                $potentialForeignKeys[] = 'goose_id';
+            }
+            if ($tableName === 'mice') {
+                $potentialForeignKeys[] = 'mouse_id';
+            }
 
             foreach ($allTables as $otherTable) {
                 if ($otherTable !== $tableName) {
                     $otherTableColumns = Schema::getColumnListing($otherTable);
 
                     foreach ($potentialForeignKeys as $potentialForeignKey) {
-                        if (in_array($potentialForeignKey, $otherTableColumns)) {
+                        if (
+                            in_array($potentialForeignKey, $otherTableColumns)
+                        ) {
                             $relationships[] = [
                                 'source_table' => $otherTable,
                                 'source_column' => $potentialForeignKey,
@@ -352,7 +389,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                                 'type' => 'has_many',
                                 'join_type' => 'LEFT JOIN',
                                 'description' => "$otherTable.$potentialForeignKey references $tableName.id",
-                                'confidence' => 'high'
+                                'confidence' => 'high',
                             ];
                         }
                     }
@@ -370,7 +407,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                         $fk1 = $singularTableName . '_id';
                         $fk2 = rtrim($otherTable, 's') . '_id';
 
-                        if (in_array($fk1, $pivotColumns) && in_array($fk2, $pivotColumns)) {
+                        if (
+                            in_array($fk1, $pivotColumns) &&
+                            in_array($fk2, $pivotColumns)
+                        ) {
                             $relationships[] = [
                                 'source_table' => $tableName,
                                 'source_column' => 'id',
@@ -382,10 +422,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                                 'type' => 'many_to_many',
                                 'join_type' => 'LEFT JOIN',
                                 'description' => "$tableName has many $otherTable through $pivotTable",
-                                'confidence' => 'medium'
+                                'confidence' => 'medium',
                             ];
                         }
-                    } else if (in_array($pivotPattern2, $allTables)) {
+                    } elseif (in_array($pivotPattern2, $allTables)) {
                         // This is likely a pivot table
                         $pivotTable = $pivotPattern2;
                         $pivotColumns = Schema::getColumnListing($pivotTable);
@@ -393,7 +433,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                         $fk1 = $singularTableName . '_id';
                         $fk2 = rtrim($otherTable, 's') . '_id';
 
-                        if (in_array($fk1, $pivotColumns) && in_array($fk2, $pivotColumns)) {
+                        if (
+                            in_array($fk1, $pivotColumns) &&
+                            in_array($fk2, $pivotColumns)
+                        ) {
                             $relationships[] = [
                                 'source_table' => $tableName,
                                 'source_column' => 'id',
@@ -405,7 +448,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                                 'type' => 'many_to_many',
                                 'join_type' => 'LEFT JOIN',
                                 'description' => "$tableName has many $otherTable through $pivotTable",
-                                'confidence' => 'medium'
+                                'confidence' => 'medium',
                             ];
                         }
                     }
@@ -482,9 +525,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                         'targetColumn' => $relationship['target_column'],
                         'joinType' => $relationship['join_type'],
                         'description' => $relationship['description'],
-                        'confidence' => $relationship['confidence']
+                        'confidence' => $relationship['confidence'],
                     ];
-                } else if ($relationship['type'] === 'has_many') {
+                } elseif ($relationship['type'] === 'has_many') {
                     // Another table belongs to this table
                     $suggestedJoins[] = [
                         'sourceTable' => $relationship['target_table'],
@@ -493,9 +536,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                         'targetColumn' => $relationship['source_column'],
                         'joinType' => $relationship['join_type'],
                         'description' => $relationship['description'],
-                        'confidence' => $relationship['confidence']
+                        'confidence' => $relationship['confidence'],
                     ];
-                } else if ($relationship['type'] === 'many_to_many') {
+                } elseif ($relationship['type'] === 'many_to_many') {
                     // Many-to-many relationship through a pivot table
                     // First join from main table to pivot table
                     $suggestedJoins[] = [
@@ -509,13 +552,14 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                         'isFirstPartOfManyToMany' => true,
                         'secondJoin' => [
                             'sourceTable' => $relationship['pivot_table'],
-                            'sourceColumn' => $relationship['pivot_target_column'],
+                            'sourceColumn' =>
+                                $relationship['pivot_target_column'],
                             'targetTable' => $relationship['target_table'],
                             'targetColumn' => $relationship['target_column'],
                             'joinType' => $relationship['join_type'],
                             'description' => "Join from pivot table {$relationship['pivot_table']} to {$relationship['target_table']}",
-                            'confidence' => $relationship['confidence']
-                        ]
+                            'confidence' => $relationship['confidence'],
+                        ],
                     ];
                 }
             }
@@ -528,9 +572,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 ],
             ]);
         } catch (\Exception $e) {
-            Log::error(
-                'Error getting suggested joins: ' . $e->getMessage()
-            );
+            Log::error('Error getting suggested joins: ' . $e->getMessage());
             return response()->json(
                 [
                     'success' => false,
@@ -562,21 +604,37 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
                 // Try different pluralization patterns
                 $possibleTables = [
-                    $relatedTableBase . 's',      // Simple pluralization (user -> users)
-                    $relatedTableBase . 'es',    // For words ending in 's', 'x', 'z', 'ch', 'sh' (box -> boxes)
-                    $relatedTableBase . 'ies',   // For words ending in 'y' (category -> categories)
-                    $relatedTableBase,           // No pluralization (staff -> staff)
+                    $relatedTableBase . 's', // Simple pluralization (user -> users)
+                    $relatedTableBase . 'es', // For words ending in 's', 'x', 'z', 'ch', 'sh' (box -> boxes)
+                    $relatedTableBase . 'ies', // For words ending in 'y' (category -> categories)
+                    $relatedTableBase, // No pluralization (staff -> staff)
                 ];
 
                 // Special cases for irregular plurals
-                if ($relatedTableBase === 'person') $possibleTables[] = 'people';
-                if ($relatedTableBase === 'child') $possibleTables[] = 'children';
-                if ($relatedTableBase === 'foot') $possibleTables[] = 'feet';
-                if ($relatedTableBase === 'tooth') $possibleTables[] = 'teeth';
-                if ($relatedTableBase === 'goose') $possibleTables[] = 'geese';
-                if ($relatedTableBase === 'man') $possibleTables[] = 'men';
-                if ($relatedTableBase === 'woman') $possibleTables[] = 'women';
-                if ($relatedTableBase === 'mouse') $possibleTables[] = 'mice';
+                if ($relatedTableBase === 'person') {
+                    $possibleTables[] = 'people';
+                }
+                if ($relatedTableBase === 'child') {
+                    $possibleTables[] = 'children';
+                }
+                if ($relatedTableBase === 'foot') {
+                    $possibleTables[] = 'feet';
+                }
+                if ($relatedTableBase === 'tooth') {
+                    $possibleTables[] = 'teeth';
+                }
+                if ($relatedTableBase === 'goose') {
+                    $possibleTables[] = 'geese';
+                }
+                if ($relatedTableBase === 'man') {
+                    $possibleTables[] = 'men';
+                }
+                if ($relatedTableBase === 'woman') {
+                    $possibleTables[] = 'women';
+                }
+                if ($relatedTableBase === 'mouse') {
+                    $possibleTables[] = 'mice';
+                }
 
                 // Check if any of the possible tables exist
                 foreach ($possibleTables as $possibleTable) {
@@ -591,7 +649,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                                 'type' => 'belongs_to',
                                 'join_type' => 'INNER JOIN',
                                 'description' => "$tableName.$column references $possibleTable.id",
-                                'confidence' => 'high'
+                                'confidence' => 'high',
                             ];
                             break; // Found a match, no need to check other possibilities
                         }
@@ -607,18 +665,34 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         $singularTableName = rtrim($tableName, 's'); // Simple singularization
         $potentialForeignKeys = [
             $singularTableName . '_id',
-            $tableName . '_id'
+            $tableName . '_id',
         ];
 
         // Special cases for irregular plurals
-        if ($tableName === 'people') $potentialForeignKeys[] = 'person_id';
-        if ($tableName === 'children') $potentialForeignKeys[] = 'child_id';
-        if ($tableName === 'men') $potentialForeignKeys[] = 'man_id';
-        if ($tableName === 'women') $potentialForeignKeys[] = 'woman_id';
-        if ($tableName === 'feet') $potentialForeignKeys[] = 'foot_id';
-        if ($tableName === 'teeth') $potentialForeignKeys[] = 'tooth_id';
-        if ($tableName === 'geese') $potentialForeignKeys[] = 'goose_id';
-        if ($tableName === 'mice') $potentialForeignKeys[] = 'mouse_id';
+        if ($tableName === 'people') {
+            $potentialForeignKeys[] = 'person_id';
+        }
+        if ($tableName === 'children') {
+            $potentialForeignKeys[] = 'child_id';
+        }
+        if ($tableName === 'men') {
+            $potentialForeignKeys[] = 'man_id';
+        }
+        if ($tableName === 'women') {
+            $potentialForeignKeys[] = 'woman_id';
+        }
+        if ($tableName === 'feet') {
+            $potentialForeignKeys[] = 'foot_id';
+        }
+        if ($tableName === 'teeth') {
+            $potentialForeignKeys[] = 'tooth_id';
+        }
+        if ($tableName === 'geese') {
+            $potentialForeignKeys[] = 'goose_id';
+        }
+        if ($tableName === 'mice') {
+            $potentialForeignKeys[] = 'mouse_id';
+        }
 
         foreach ($allTables as $otherTable) {
             if ($otherTable !== $tableName) {
@@ -634,7 +708,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                             'type' => 'has_many',
                             'join_type' => 'LEFT JOIN',
                             'description' => "$otherTable.$potentialForeignKey references $tableName.id",
-                            'confidence' => 'high'
+                            'confidence' => 'high',
                         ];
                     }
                 }
@@ -652,7 +726,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     $fk1 = $singularTableName . '_id';
                     $fk2 = rtrim($otherTable, 's') . '_id';
 
-                    if (in_array($fk1, $pivotColumns) && in_array($fk2, $pivotColumns)) {
+                    if (
+                        in_array($fk1, $pivotColumns) &&
+                        in_array($fk2, $pivotColumns)
+                    ) {
                         $relationships[] = [
                             'source_table' => $tableName,
                             'source_column' => 'id',
@@ -664,10 +741,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                             'type' => 'many_to_many',
                             'join_type' => 'LEFT JOIN',
                             'description' => "$tableName has many $otherTable through $pivotTable",
-                            'confidence' => 'medium'
+                            'confidence' => 'medium',
                         ];
                     }
-                } else if (in_array($pivotPattern2, $allTables)) {
+                } elseif (in_array($pivotPattern2, $allTables)) {
                     // This is likely a pivot table
                     $pivotTable = $pivotPattern2;
                     $pivotColumns = Schema::getColumnListing($pivotTable);
@@ -675,7 +752,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     $fk1 = $singularTableName . '_id';
                     $fk2 = rtrim($otherTable, 's') . '_id';
 
-                    if (in_array($fk1, $pivotColumns) && in_array($fk2, $pivotColumns)) {
+                    if (
+                        in_array($fk1, $pivotColumns) &&
+                        in_array($fk2, $pivotColumns)
+                    ) {
                         $relationships[] = [
                             'source_table' => $tableName,
                             'source_column' => 'id',
@@ -687,7 +767,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                             'type' => 'many_to_many',
                             'join_type' => 'LEFT JOIN',
                             'description' => "$tableName has many $otherTable through $pivotTable",
-                            'confidence' => 'medium'
+                            'confidence' => 'medium',
                         ];
                     }
                 }
@@ -836,20 +916,25 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 // Different query based on database type
                 if ($connection === 'pgsql') {
                     // PostgreSQL has native JSON type
-                    $result = DB::select("SELECT format_type(a.atttypid, a.atttypmod) as type
+                    $result = DB::select(
+                        "SELECT format_type(a.atttypid, a.atttypmod) as type
                                          FROM pg_attribute a
                                          JOIN pg_class t ON a.attrelid = t.oid
                                          JOIN pg_namespace s ON t.relnamespace = s.oid
                                          WHERE a.attname = ?
                                          AND t.relname = ?
                                          AND s.nspname = current_schema()",
-                                         [$column, $tableName]);
+                        [$column, $tableName]
+                    );
 
                     if (!empty($result) && isset($result[0]->type)) {
                         $type = strtolower($result[0]->type);
-                        Log::info('Retrieved column type using PostgreSQL query', [
-                            'type' => $type,
-                        ]);
+                        Log::info(
+                            'Retrieved column type using PostgreSQL query',
+                            [
+                                'type' => $type,
+                            ]
+                        );
 
                         // Check for JSON types
                         if ($type === 'json' || $type === 'jsonb') {
@@ -905,13 +990,20 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                         if ($inferredType === 'string') {
                             $trimmed = trim($value);
                             if (
-                                (substr($trimmed, 0, 1) === '{' && substr($trimmed, -1) === '}') ||
-                                (substr($trimmed, 0, 1) === '[' && substr($trimmed, -1) === ']')
+                                (substr($trimmed, 0, 1) === '{' &&
+                                    substr($trimmed, -1) === '}') ||
+                                (substr($trimmed, 0, 1) === '[' &&
+                                    substr($trimmed, -1) === ']')
                             ) {
                                 // Try to decode it as JSON
                                 $decoded = json_decode($value, true);
-                                if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
-                                    Log::info('Detected JSON string from sample value');
+                                if (
+                                    json_last_error() === JSON_ERROR_NONE &&
+                                    is_array($decoded)
+                                ) {
+                                    Log::info(
+                                        'Detected JSON string from sample value'
+                                    );
                                     return 'json';
                                 }
                             }
@@ -1533,28 +1625,45 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     if ($logicalOperator === 'or') {
                         switch (strtolower($operator)) {
                             case 'like':
-                                $query->orWhereRaw("LOWER($jsonColumnRef) LIKE ?", ["%" . strtolower($value) . "%"]);
+                                $query->orWhereRaw(
+                                    "LOWER($jsonColumnRef) LIKE ?",
+                                    ['%' . strtolower($value) . '%']
+                                );
                                 break;
                             case 'not like':
-                                $query->orWhereRaw("LOWER($jsonColumnRef) NOT LIKE ?", ["%" . strtolower($value) . "%"]);
+                                $query->orWhereRaw(
+                                    "LOWER($jsonColumnRef) NOT LIKE ?",
+                                    ['%' . strtolower($value) . '%']
+                                );
                                 break;
                             case 'null':
                                 $query->orWhereRaw("$jsonColumnRef IS NULL");
                                 break;
                             case 'not null':
-                                $query->orWhereRaw("$jsonColumnRef IS NOT NULL");
+                                $query->orWhereRaw(
+                                    "$jsonColumnRef IS NOT NULL"
+                                );
                                 break;
                             default:
-                                $query->orWhereRaw("$jsonColumnRef $operator ?", [$value]);
+                                $query->orWhereRaw(
+                                    "$jsonColumnRef $operator ?",
+                                    [$value]
+                                );
                                 break;
                         }
                     } else {
                         switch (strtolower($operator)) {
                             case 'like':
-                                $query->whereRaw("LOWER($jsonColumnRef) LIKE ?", ["%" . strtolower($value) . "%"]);
+                                $query->whereRaw(
+                                    "LOWER($jsonColumnRef) LIKE ?",
+                                    ['%' . strtolower($value) . '%']
+                                );
                                 break;
                             case 'not like':
-                                $query->whereRaw("LOWER($jsonColumnRef) NOT LIKE ?", ["%" . strtolower($value) . "%"]);
+                                $query->whereRaw(
+                                    "LOWER($jsonColumnRef) NOT LIKE ?",
+                                    ['%' . strtolower($value) . '%']
+                                );
                                 break;
                             case 'null':
                                 $query->whereRaw("$jsonColumnRef IS NULL");
@@ -1563,11 +1672,13 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                                 $query->whereRaw("$jsonColumnRef IS NOT NULL");
                                 break;
                             default:
-                                $query->whereRaw("$jsonColumnRef $operator ?", [$value]);
+                                $query->whereRaw("$jsonColumnRef $operator ?", [
+                                    $value,
+                                ]);
                                 break;
                         }
                     }
-                } else if ($connection === 'pgsql') {
+                } elseif ($connection === 'pgsql') {
                     // PostgreSQL uses -> for JSON objects and ->> for extracting text
                     // Convert dot notation to JSON path
                     $jsonPath = '';
@@ -1588,10 +1699,18 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     if ($logicalOperator === 'or') {
                         switch (strtolower($operator)) {
                             case 'like':
-                                $query->orWhere(DB::raw("LOWER($jsonColumnRef)"), 'like', "%" . strtolower($value) . "%");
+                                $query->orWhere(
+                                    DB::raw("LOWER($jsonColumnRef)"),
+                                    'like',
+                                    '%' . strtolower($value) . '%'
+                                );
                                 break;
                             case 'not like':
-                                $query->orWhere(DB::raw("LOWER($jsonColumnRef)"), 'not like', "%" . strtolower($value) . "%");
+                                $query->orWhere(
+                                    DB::raw("LOWER($jsonColumnRef)"),
+                                    'not like',
+                                    '%' . strtolower($value) . '%'
+                                );
                                 break;
                             case 'null':
                                 $query->orWhereNull(DB::raw($jsonColumnRef));
@@ -1600,16 +1719,28 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                                 $query->orWhereNotNull(DB::raw($jsonColumnRef));
                                 break;
                             default:
-                                $query->orWhere(DB::raw($jsonColumnRef), $operator, $value);
+                                $query->orWhere(
+                                    DB::raw($jsonColumnRef),
+                                    $operator,
+                                    $value
+                                );
                                 break;
                         }
                     } else {
                         switch (strtolower($operator)) {
                             case 'like':
-                                $query->where(DB::raw("LOWER($jsonColumnRef)"), 'like', "%" . strtolower($value) . "%");
+                                $query->where(
+                                    DB::raw("LOWER($jsonColumnRef)"),
+                                    'like',
+                                    '%' . strtolower($value) . '%'
+                                );
                                 break;
                             case 'not like':
-                                $query->where(DB::raw("LOWER($jsonColumnRef)"), 'not like', "%" . strtolower($value) . "%");
+                                $query->where(
+                                    DB::raw("LOWER($jsonColumnRef)"),
+                                    'not like',
+                                    '%' . strtolower($value) . '%'
+                                );
                                 break;
                             case 'null':
                                 $query->whereNull(DB::raw($jsonColumnRef));
@@ -1618,7 +1749,11 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                                 $query->whereNotNull(DB::raw($jsonColumnRef));
                                 break;
                             default:
-                                $query->where(DB::raw($jsonColumnRef), $operator, $value);
+                                $query->where(
+                                    DB::raw($jsonColumnRef),
+                                    $operator,
+                                    $value
+                                );
                                 break;
                         }
                     }
@@ -1631,28 +1766,45 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     if ($logicalOperator === 'or') {
                         switch (strtolower($operator)) {
                             case 'like':
-                                $query->orWhereRaw("LOWER($jsonColumnRef) LIKE ?", ["%" . strtolower($value) . "%"]);
+                                $query->orWhereRaw(
+                                    "LOWER($jsonColumnRef) LIKE ?",
+                                    ['%' . strtolower($value) . '%']
+                                );
                                 break;
                             case 'not like':
-                                $query->orWhereRaw("LOWER($jsonColumnRef) NOT LIKE ?", ["%" . strtolower($value) . "%"]);
+                                $query->orWhereRaw(
+                                    "LOWER($jsonColumnRef) NOT LIKE ?",
+                                    ['%' . strtolower($value) . '%']
+                                );
                                 break;
                             case 'null':
                                 $query->orWhereRaw("$jsonColumnRef IS NULL");
                                 break;
                             case 'not null':
-                                $query->orWhereRaw("$jsonColumnRef IS NOT NULL");
+                                $query->orWhereRaw(
+                                    "$jsonColumnRef IS NOT NULL"
+                                );
                                 break;
                             default:
-                                $query->orWhereRaw("$jsonColumnRef $operator ?", [$value]);
+                                $query->orWhereRaw(
+                                    "$jsonColumnRef $operator ?",
+                                    [$value]
+                                );
                                 break;
                         }
                     } else {
                         switch (strtolower($operator)) {
                             case 'like':
-                                $query->whereRaw("LOWER($jsonColumnRef) LIKE ?", ["%" . strtolower($value) . "%"]);
+                                $query->whereRaw(
+                                    "LOWER($jsonColumnRef) LIKE ?",
+                                    ['%' . strtolower($value) . '%']
+                                );
                                 break;
                             case 'not like':
-                                $query->whereRaw("LOWER($jsonColumnRef) NOT LIKE ?", ["%" . strtolower($value) . "%"]);
+                                $query->whereRaw(
+                                    "LOWER($jsonColumnRef) NOT LIKE ?",
+                                    ['%' . strtolower($value) . '%']
+                                );
                                 break;
                             case 'null':
                                 $query->whereRaw("$jsonColumnRef IS NULL");
@@ -1661,7 +1813,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                                 $query->whereRaw("$jsonColumnRef IS NOT NULL");
                                 break;
                             default:
-                                $query->whereRaw("$jsonColumnRef $operator ?", [$value]);
+                                $query->whereRaw("$jsonColumnRef $operator ?", [
+                                    $value,
+                                ]);
                                 break;
                         }
                     }
@@ -1804,11 +1958,15 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
      * Export report data as CSV, Excel or PDF
      *
      * @param Request $request
-     * @return \Symfony\Component\HttpFoundation\BinaryFileResponse
+     * @return \Symfony\Component\HttpFoundation\BinaryFileResponse|\Illuminate\Http\JsonResponse
      */
     public function exportReport(Request $request)
     {
         try {
+            Log::info('Export report request received', [
+                'request_data' => $request->all(),
+            ]);
+
             // Validate request
             $validated = $request->validate([
                 'query' => 'required|array',
@@ -1819,8 +1977,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
             // Get the query configuration
             $queryConfig = $validated['query'];
-            $format = $validated['format'];
+            $format = strtolower($validated['format']); // Ensure format is lowercase
             $parameters = $validated['parameters'] ?? [];
+
+            Log::info('Export format requested', ['format' => $format]);
 
             // If report_id is provided, load the report configuration
             $reportName = 'report';
@@ -1830,10 +1990,18 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 // Check if user has access to this report
                 $userId = Auth::id() ?? $request->input('user_id');
                 if (!$report->is_public && $report->user_id !== $userId) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'You do not have permission to export this report',
-                    ], 403);
+                    Log::warning('Permission denied for report export', [
+                        'report_id' => $validated['report_id'],
+                        'user_id' => $userId,
+                    ]);
+                    return response()->json(
+                        [
+                            'success' => false,
+                            'message' =>
+                                'You do not have permission to export this report',
+                        ],
+                        403
+                    );
                 }
 
                 // Use the report configuration if query is not provided
@@ -1845,22 +2013,84 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             }
 
             // Build and execute the SQL query without limits for export
-            $result = $this->buildAndExecuteQuery($queryConfig, 100000, 0, $parameters);
+            Log::info('Building query for export', [
+                'report_name' => $reportName,
+            ]);
+
+            $result = $this->buildAndExecuteQuery(
+                $queryConfig,
+                100000,
+                0,
+                $parameters
+            );
+
+            // Check if we have data to export
+            if (empty($result['data']) || count($result['data']) === 0) {
+                Log::warning('No data to export', [
+                    'report_name' => $reportName,
+                    'format' => $format,
+                ]);
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' =>
+                            'No data to export. The query returned no results.',
+                    ],
+                    404
+                );
+            }
 
             // Format the date for the filename
             $date = date('Ymd');
             $filename = "{$date}_{$reportName}.{$format}";
 
+            Log::info('Generating export file', [
+                'filename' => $filename,
+                'format' => $format,
+                'row_count' => count($result['data']),
+            ]);
+
             // Generate the export file based on format
-            return $this->generateExportFile($result['data'], $filename, $format);
+            return $this->generateExportFile(
+                $result['data'],
+                $filename,
+                $format
+            );
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            Log::warning('Validation error during report export', [
+                'errors' => $e->errors(),
+            ]);
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Validation error',
+                    'errors' => $e->errors(),
+                ],
+                422
+            );
         } catch (\Exception $e) {
             Log::error('Error exporting report: ' . $e->getMessage());
             Log::error('Stack trace: ' . $e->getTraceAsString());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error exporting report',
-                'error' => $e->getMessage(),
-            ], 500);
+
+            // Include more details in the response for debugging
+            $errorDetails = [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ];
+
+            if (config('app.debug')) {
+                $errorDetails['trace'] = $e->getTraceAsString();
+            }
+
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error exporting report',
+                    'error' => $errorDetails,
+                ],
+                500
+            );
         }
     }
 
@@ -1941,7 +2171,13 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
                 if (is_array($jsonData)) {
                     // Extract keys recursively
-                    $this->extractJsonKeys($jsonData, '', $allKeys, $keyFrequency, $keyExamples);
+                    $this->extractJsonKeys(
+                        $jsonData,
+                        '',
+                        $allKeys,
+                        $keyFrequency,
+                        $keyExamples
+                    );
                 }
             }
 
@@ -1954,7 +2190,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 $formattedKeys[] = [
                     'key' => $key,
                     'frequency' => $frequency,
-                    'percentage' => $totalRecords > 0 ? round(($frequency / $totalRecords) * 100, 2) : 0,
+                    'percentage' =>
+                        $totalRecords > 0
+                            ? round(($frequency / $totalRecords) * 100, 2)
+                            : 0,
                     'example' => $keyExamples[$key] ?? null,
                 ];
             }
@@ -1992,8 +2231,13 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
      * @param array &$keyExamples Reference to array storing example values for each key
      * @return void
      */
-    private function extractJsonKeys($data, $prefix, &$allKeys, &$keyFrequency, &$keyExamples)
-    {
+    private function extractJsonKeys(
+        $data,
+        $prefix,
+        &$allKeys,
+        &$keyFrequency,
+        &$keyExamples
+    ) {
         if (!is_array($data)) {
             return;
         }
@@ -2015,7 +2259,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
                     // Store an example value if we don't have one yet
                     if (!isset($keyExamples[$fullKey]) && !is_array($value)) {
-                        $keyExamples[$fullKey] = $this->formatExampleValue($value);
+                        $keyExamples[$fullKey] = $this->formatExampleValue(
+                            $value
+                        );
                     }
                 } else {
                     $keyFrequency[$fullKey]++;
@@ -2023,7 +2269,13 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
                 // Recursively process nested objects/arrays
                 if (is_array($value)) {
-                    $this->extractJsonKeys($value, $fullKey, $allKeys, $keyFrequency, $keyExamples);
+                    $this->extractJsonKeys(
+                        $value,
+                        $fullKey,
+                        $allKeys,
+                        $keyFrequency,
+                        $keyExamples
+                    );
                 }
             }
         } else {
@@ -2031,7 +2283,13 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             $sampleSize = min(count($data), 5);
             for ($i = 0; $i < $sampleSize; $i++) {
                 if (isset($data[$i]) && is_array($data[$i])) {
-                    $this->extractJsonKeys($data[$i], $prefix ? "{$prefix}[*]" : "[*]", $allKeys, $keyFrequency, $keyExamples);
+                    $this->extractJsonKeys(
+                        $data[$i],
+                        $prefix ? "{$prefix}[*]" : '[*]',
+                        $allKeys,
+                        $keyFrequency,
+                        $keyExamples
+                    );
                 }
             }
         }
@@ -2083,11 +2341,11 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         }
 
         if (is_numeric($value)) {
-            return (string)$value;
+            return (string) $value;
         }
 
         // For other types, convert to string
-        return (string)$value;
+        return (string) $value;
     }
 
     /**
@@ -2154,88 +2412,289 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             fclose($handle);
 
             // Return the file as a download
-            return response()->download($tempFile, $filename, [
-                'Content-Type' => 'text/csv',
-            ])->deleteFileAfterSend(true);
+            return response()
+                ->download($tempFile, $filename, [
+                    'Content-Type' => 'text/csv',
+                ])
+                ->deleteFileAfterSend(true);
         } elseif ($format === 'pdf') {
-            // Generate PDF file using HTML and browser rendering
-            // Create HTML content
-            $html = '<!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="UTF-8">
-                <title>' . htmlspecialchars(str_replace('.pdf', '', $filename)) . '</title>
-                <style>
-                    body { font-family: Arial, sans-serif; margin: 20px; }
-                    h1 { text-align: center; margin-bottom: 20px; }
-                    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-                    th { background-color: #f2f2f2; font-weight: bold; text-align: left; }
-                    th, td { border: 1px solid #ddd; padding: 8px; }
-                    tr:nth-child(even) { background-color: #f9f9f9; }
-                    .json-data { white-space: pre-wrap; font-family: monospace; font-size: 0.9em; }
-                </style>
-            </head>
-            <body>
-                <h1>' . htmlspecialchars(str_replace('.pdf', '', $filename)) . '</h1>
-                <table>
-                    <thead>
-                        <tr>';
+            try {
+                // Generate PDF file using mPDF
+                // Create HTML content
+                $html =
+                    '<!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>' .
+                    htmlspecialchars(str_replace('.pdf', '', $filename)) .
+                    '</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; margin: 20px; }
+                        h1 { text-align: center; margin-bottom: 20px; }
+                        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+                        th { background-color: #f2f2f2; font-weight: bold; text-align: left; }
+                        th, td { border: 1px solid #ddd; padding: 8px; }
+                        tr:nth-child(even) { background-color: #f9f9f9; }
+                        .json-data { white-space: pre-wrap; font-family: monospace; font-size: 0.9em; }
+                    </style>
+                </head>
+                <body>
+                    <h1>' .
+                    htmlspecialchars(str_replace('.pdf', '', $filename)) .
+                    '</h1>
+                    <table>
+                        <thead>
+                            <tr>';
 
-            // Add table headers
-            foreach ($headers as $header) {
-                $html .= '<th>' . htmlspecialchars($this->formatColumnName($header)) . '</th>';
-            }
-
-            $html .= '</tr>
-                    </thead>
-                    <tbody>';
-
-            // Add table rows
-            foreach ($dataArray as $dataRow) {
-                $html .= '<tr>';
-                foreach ($dataRow as $key => $value) {
-                    // Format JSON values for better readability
-                    if (is_string($value) && $this->isJsonString($value)) {
-                        try {
-                            $jsonData = json_decode($value, true);
-                            if (json_last_error() === JSON_ERROR_NONE) {
-                                $value = '<div class="json-data">' . htmlspecialchars(json_encode($jsonData, JSON_PRETTY_PRINT)) . '</div>';
-                            }
-                        } catch (\Exception $e) {
-                            // Keep original value if JSON formatting fails
-                        }
-                    }
-
-                    // Handle null values
-                    if (is_null($value)) {
-                        $value = '';
-                    }
-
-                    // Convert arrays to JSON strings
-                    if (is_array($value)) {
-                        $value = '<div class="json-data">' . htmlspecialchars(json_encode($value, JSON_PRETTY_PRINT)) . '</div>';
-                    }
-
-                    $html .= '<td>' . (is_string($value) && substr($value, 0, 5) === '<div ' ? $value : htmlspecialchars($value)) . '</td>';
+                // Add table headers
+                foreach ($headers as $header) {
+                    $html .=
+                        '<th>' .
+                        htmlspecialchars($this->formatColumnName($header)) .
+                        '</th>';
                 }
-                $html .= '</tr>';
+
+                $html .= '</tr>
+                        </thead>
+                        <tbody>';
+
+                // Add table rows
+                foreach ($dataArray as $dataRow) {
+                    $html .= '<tr>';
+                    foreach ($dataRow as $key => $value) {
+                        // Format JSON values for better readability
+                        if (is_string($value) && $this->isJsonString($value)) {
+                            try {
+                                $jsonData = json_decode($value, true);
+                                if (json_last_error() === JSON_ERROR_NONE) {
+                                    $value =
+                                        '<div class="json-data">' .
+                                        htmlspecialchars(
+                                            json_encode(
+                                                $jsonData,
+                                                JSON_PRETTY_PRINT
+                                            )
+                                        ) .
+                                        '</div>';
+                                }
+                            } catch (\Exception $e) {
+                                // Keep original value if JSON formatting fails
+                            }
+                        }
+
+                        // Handle null values
+                        if (is_null($value)) {
+                            $value = '';
+                        }
+
+                        // Convert arrays to JSON strings
+                        if (is_array($value)) {
+                            $value =
+                                '<div class="json-data">' .
+                                htmlspecialchars(
+                                    json_encode($value, JSON_PRETTY_PRINT)
+                                ) .
+                                '</div>';
+                        }
+
+                        $html .=
+                            '<td>' .
+                            (is_string($value) &&
+                            substr($value, 0, 5) === '<div '
+                                ? $value
+                                : htmlspecialchars($value)) .
+                            '</td>';
+                    }
+                    $html .= '</tr>';
+                }
+
+                $html .= '</tbody>
+                    </table>
+                </body>
+                </html>';
+
+                // Initialize mPDF with error handling
+                Log::info('Initializing mPDF for PDF generation');
+
+                try {
+                    // Set mPDF configuration options
+                    $mpdfConfig = [
+                        'margin_left' => 10,
+                        'margin_right' => 10,
+                        'margin_top' => 15,
+                        'margin_bottom' => 15,
+                        'tempDir' => sys_get_temp_dir(), // Ensure temp directory is writable
+                    ];
+
+                    // Initialize mPDF
+                    $mpdf = new Mpdf($mpdfConfig);
+
+                    // Set document information
+                    $mpdf->SetTitle(str_replace('.pdf', '', $filename));
+                    $mpdf->SetAuthor('Report Builder');
+
+                    Log::info('mPDF initialized successfully');
+                } catch (\Exception $e) {
+                    Log::error(
+                        'Failed to initialize mPDF: ' . $e->getMessage()
+                    );
+                    throw new \Exception(
+                        'PDF generation failed: ' . $e->getMessage()
+                    );
+                }
+
+                try {
+                    // Write HTML to PDF
+                    Log::info('Writing HTML content to PDF');
+                    $mpdf->WriteHTML($html);
+
+                    // Save PDF to temporary file
+                    Log::info('Saving PDF to temporary file', [
+                        'tempFile' => $tempFile,
+                    ]);
+                    $mpdf->Output($tempFile, 'F');
+
+                    // Verify the file was created
+                    if (!file_exists($tempFile) || filesize($tempFile) === 0) {
+                        throw new \Exception(
+                            'PDF file was not created or is empty'
+                        );
+                    }
+
+                    Log::info('PDF file created successfully', [
+                        'filesize' => filesize($tempFile),
+                        'filename' => $filename,
+                    ]);
+
+                    // Return the file as a download
+                    return response()
+                        ->download($tempFile, $filename, [
+                            'Content-Type' => 'application/pdf',
+                        ])
+                        ->deleteFileAfterSend(true);
+                } catch (\Exception $e) {
+                    Log::error(
+                        'Error during PDF generation: ' . $e->getMessage()
+                    );
+                    throw $e; // Re-throw to be caught by the outer catch block
+                }
+            } catch (\Exception $e) {
+                // Log the error
+                Log::error('PDF generation error: ' . $e->getMessage());
+                Log::error('Stack trace: ' . $e->getTraceAsString());
+
+                // If mPDF fails, fallback to HTML
+                $html =
+                    '<!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>' .
+                    htmlspecialchars(str_replace('.pdf', '', $filename)) .
+                    '</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; margin: 20px; }
+                        h1 { text-align: center; margin-bottom: 20px; }
+                        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+                        th { background-color: #f2f2f2; font-weight: bold; text-align: left; }
+                        th, td { border: 1px solid #ddd; padding: 8px; }
+                        tr:nth-child(even) { background-color: #f9f9f9; }
+                        .json-data { white-space: pre-wrap; font-family: monospace; font-size: 0.9em; }
+                        .error-message { color: red; text-align: center; margin: 20px; }
+                    </style>
+                </head>
+                <body>
+                    <h1>' .
+                    htmlspecialchars(str_replace('.pdf', '', $filename)) .
+                    '</h1>
+                    <div class="error-message">
+                        <p>PDF generation failed. Displaying HTML version instead.</p>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>';
+
+                // Add table headers
+                foreach ($headers as $header) {
+                    $html .=
+                        '<th>' .
+                        htmlspecialchars($this->formatColumnName($header)) .
+                        '</th>';
+                }
+
+                $html .= '</tr>
+                        </thead>
+                        <tbody>';
+
+                // Add table rows
+                foreach ($dataArray as $dataRow) {
+                    $html .= '<tr>';
+                    foreach ($dataRow as $key => $value) {
+                        // Format JSON values for better readability
+                        if (is_string($value) && $this->isJsonString($value)) {
+                            try {
+                                $jsonData = json_decode($value, true);
+                                if (json_last_error() === JSON_ERROR_NONE) {
+                                    $value =
+                                        '<div class="json-data">' .
+                                        htmlspecialchars(
+                                            json_encode(
+                                                $jsonData,
+                                                JSON_PRETTY_PRINT
+                                            )
+                                        ) .
+                                        '</div>';
+                                }
+                            } catch (\Exception $e) {
+                                // Keep original value if JSON formatting fails
+                            }
+                        }
+
+                        // Handle null values
+                        if (is_null($value)) {
+                            $value = '';
+                        }
+
+                        // Convert arrays to JSON strings
+                        if (is_array($value)) {
+                            $value =
+                                '<div class="json-data">' .
+                                htmlspecialchars(
+                                    json_encode($value, JSON_PRETTY_PRINT)
+                                ) .
+                                '</div>';
+                        }
+
+                        $html .=
+                            '<td>' .
+                            (is_string($value) &&
+                            substr($value, 0, 5) === '<div '
+                                ? $value
+                                : htmlspecialchars($value)) .
+                            '</td>';
+                    }
+                    $html .= '</tr>';
+                }
+
+                $html .= '</tbody>
+                    </table>
+                </body>
+                </html>';
+
+                // Write HTML to the temporary file
+                file_put_contents($tempFile, $html);
+
+                // Return the file as a download
+                return response()
+                    ->download($tempFile, $filename, [
+                        'Content-Type' => 'text/html',
+                    ])
+                    ->deleteFileAfterSend(true);
             }
-
-            $html .= '</tbody>
-                </table>
-            </body>
-            </html>';
-
-            // Write HTML to the temporary file
-            file_put_contents($tempFile, $html);
-
-            // Return the file as a download
-            return response()->download($tempFile, $filename, [
-                'Content-Type' => 'text/html',
-            ])->deleteFileAfterSend(true);
         } else {
             // Generate Excel file using PhpSpreadsheet
-            $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+            $spreadsheet = new Spreadsheet();
             $sheet = $spreadsheet->getActiveSheet();
 
             // Add headers (first row)
@@ -2255,13 +2714,16 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             }
 
             // Create Excel writer
-            $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+            $writer = new Xlsx($spreadsheet);
             $writer->save($tempFile);
 
             // Return the file as a download
-            return response()->download($tempFile, $filename, [
-                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            ])->deleteFileAfterSend(true);
+            return response()
+                ->download($tempFile, $filename, [
+                    'Content-Type' =>
+                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                ])
+                ->deleteFileAfterSend(true);
         }
     }
 }
