@@ -806,6 +806,12 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     Log::info('Retrieved column type using Schema Builder', [
                         'type' => $type,
                     ]);
+
+                    // Check if it's a JSON type
+                    if ($type === 'json') {
+                        return 'json';
+                    }
+
                     return $type;
                 } catch (\Exception $e) {
                     Log::info(
@@ -818,23 +824,60 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             // Method 2: Using raw query
             try {
                 $databaseName = DB::connection()->getDatabaseName();
+                $connection = DB::connection()->getDriverName();
+
                 Log::info('Using raw query to get column type', [
                     'database' => $databaseName,
                     'table' => $tableName,
                     'column' => $column,
+                    'connection' => $connection,
                 ]);
 
-                $result = DB::select(
-                    'SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?',
-                    [$databaseName, $tableName, $column]
-                );
+                // Different query based on database type
+                if ($connection === 'pgsql') {
+                    // PostgreSQL has native JSON type
+                    $result = DB::select("SELECT format_type(a.atttypid, a.atttypmod) as type
+                                         FROM pg_attribute a
+                                         JOIN pg_class t ON a.attrelid = t.oid
+                                         JOIN pg_namespace s ON t.relnamespace = s.oid
+                                         WHERE a.attname = ?
+                                         AND t.relname = ?
+                                         AND s.nspname = current_schema()",
+                                         [$column, $tableName]);
 
-                if (!empty($result)) {
-                    $type = strtolower($result[0]->DATA_TYPE);
-                    Log::info('Retrieved column type using raw query', [
-                        'type' => $type,
-                    ]);
-                    return $type;
+                    if (!empty($result) && isset($result[0]->type)) {
+                        $type = strtolower($result[0]->type);
+                        Log::info('Retrieved column type using PostgreSQL query', [
+                            'type' => $type,
+                        ]);
+
+                        // Check for JSON types
+                        if ($type === 'json' || $type === 'jsonb') {
+                            return 'json';
+                        }
+
+                        return $type;
+                    }
+                } else {
+                    // MySQL and other databases
+                    $result = DB::select(
+                        'SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?',
+                        [$databaseName, $tableName, $column]
+                    );
+
+                    if (!empty($result)) {
+                        $type = strtolower($result[0]->DATA_TYPE);
+                        Log::info('Retrieved column type using raw query', [
+                            'type' => $type,
+                        ]);
+
+                        // Check for JSON type
+                        if ($type === 'json') {
+                            return 'json';
+                        }
+
+                        return $type;
+                    }
                 }
             } catch (\Exception $e) {
                 Log::info(
@@ -857,6 +900,23 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                         Log::info('Inferred column type from sample value', [
                             'type' => $inferredType,
                         ]);
+
+                        // Check if it might be a JSON string
+                        if ($inferredType === 'string') {
+                            $trimmed = trim($value);
+                            if (
+                                (substr($trimmed, 0, 1) === '{' && substr($trimmed, -1) === '}') ||
+                                (substr($trimmed, 0, 1) === '[' && substr($trimmed, -1) === ']')
+                            ) {
+                                // Try to decode it as JSON
+                                $decoded = json_decode($value, true);
+                                if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                                    Log::info('Detected JSON string from sample value');
+                                    return 'json';
+                                }
+                            }
+                        }
+
                         return $inferredType;
                     }
                 }
@@ -1443,81 +1503,132 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             // Apply the filter
             $columnRef = "$tableName.$columnName";
 
-            if ($logicalOperator === 'or') {
-                switch (strtolower($operator)) {
-                    case 'like':
-                        $query->orWhere($columnRef, 'like', "%$value%");
-                        break;
-                    case 'not like':
-                        $query->orWhere($columnRef, 'not like', "%$value%");
-                        break;
-                    case 'in':
-                        if (is_array($value)) {
-                            $query->orWhereIn($columnRef, $value);
-                        }
-                        break;
-                    case 'not in':
-                        if (is_array($value)) {
-                            $query->orWhereNotIn($columnRef, $value);
-                        }
-                        break;
-                    case 'between':
-                        if (is_array($value) && count($value) === 2) {
-                            $query->orWhereBetween($columnRef, $value);
-                        }
-                        break;
-                    case 'not between':
-                        if (is_array($value) && count($value) === 2) {
-                            $query->orWhereNotBetween($columnRef, $value);
-                        }
-                        break;
-                    case 'null':
-                        $query->orWhereNull($columnRef);
-                        break;
-                    case 'not null':
-                        $query->orWhereNotNull($columnRef);
-                        break;
-                    default:
-                        $query->orWhere($columnRef, $operator, $value);
-                        break;
+            // Check if this is a JSON field filter
+            $jsonKey = $filter['jsonKey'] ?? null;
+
+            // If we have a JSON key, we need to use JSON filtering
+            if ($jsonKey && !empty($jsonKey)) {
+                // Convert dot notation to JSON path
+                $jsonPath = str_replace('.', '->', $jsonKey);
+
+                // Create the JSON column reference
+                $jsonColumnRef = "$columnRef->$jsonPath";
+
+                if ($logicalOperator === 'or') {
+                    switch (strtolower($operator)) {
+                        case 'like':
+                            $query->orWhere(DB::raw("LOWER($jsonColumnRef)"), 'like', "%" . strtolower($value) . "%");
+                            break;
+                        case 'not like':
+                            $query->orWhere(DB::raw("LOWER($jsonColumnRef)"), 'not like', "%" . strtolower($value) . "%");
+                            break;
+                        case 'null':
+                            $query->orWhereNull(DB::raw($jsonColumnRef));
+                            break;
+                        case 'not null':
+                            $query->orWhereNotNull(DB::raw($jsonColumnRef));
+                            break;
+                        default:
+                            $query->orWhere(DB::raw($jsonColumnRef), $operator, $value);
+                            break;
+                    }
+                } else {
+                    switch (strtolower($operator)) {
+                        case 'like':
+                            $query->where(DB::raw("LOWER($jsonColumnRef)"), 'like', "%" . strtolower($value) . "%");
+                            break;
+                        case 'not like':
+                            $query->where(DB::raw("LOWER($jsonColumnRef)"), 'not like', "%" . strtolower($value) . "%");
+                            break;
+                        case 'null':
+                            $query->whereNull(DB::raw($jsonColumnRef));
+                            break;
+                        case 'not null':
+                            $query->whereNotNull(DB::raw($jsonColumnRef));
+                            break;
+                        default:
+                            $query->where(DB::raw($jsonColumnRef), $operator, $value);
+                            break;
+                    }
                 }
             } else {
-                switch (strtolower($operator)) {
-                    case 'like':
-                        $query->where($columnRef, 'like', "%$value%");
-                        break;
-                    case 'not like':
-                        $query->where($columnRef, 'not like', "%$value%");
-                        break;
-                    case 'in':
-                        if (is_array($value)) {
-                            $query->whereIn($columnRef, $value);
-                        }
-                        break;
-                    case 'not in':
-                        if (is_array($value)) {
-                            $query->whereNotIn($columnRef, $value);
-                        }
-                        break;
-                    case 'between':
-                        if (is_array($value) && count($value) === 2) {
-                            $query->whereBetween($columnRef, $value);
-                        }
-                        break;
-                    case 'not between':
-                        if (is_array($value) && count($value) === 2) {
-                            $query->whereNotBetween($columnRef, $value);
-                        }
-                        break;
-                    case 'null':
-                        $query->whereNull($columnRef);
-                        break;
-                    case 'not null':
-                        $query->whereNotNull($columnRef);
-                        break;
-                    default:
-                        $query->where($columnRef, $operator, $value);
-                        break;
+                // Regular column filtering (non-JSON)
+                if ($logicalOperator === 'or') {
+                    switch (strtolower($operator)) {
+                        case 'like':
+                            $query->orWhere($columnRef, 'like', "%$value%");
+                            break;
+                        case 'not like':
+                            $query->orWhere($columnRef, 'not like', "%$value%");
+                            break;
+                        case 'in':
+                            if (is_array($value)) {
+                                $query->orWhereIn($columnRef, $value);
+                            }
+                            break;
+                        case 'not in':
+                            if (is_array($value)) {
+                                $query->orWhereNotIn($columnRef, $value);
+                            }
+                            break;
+                        case 'between':
+                            if (is_array($value) && count($value) === 2) {
+                                $query->orWhereBetween($columnRef, $value);
+                            }
+                            break;
+                        case 'not between':
+                            if (is_array($value) && count($value) === 2) {
+                                $query->orWhereNotBetween($columnRef, $value);
+                            }
+                            break;
+                        case 'null':
+                            $query->orWhereNull($columnRef);
+                            break;
+                        case 'not null':
+                            $query->orWhereNotNull($columnRef);
+                            break;
+                        default:
+                            $query->orWhere($columnRef, $operator, $value);
+                            break;
+                    }
+                } else {
+                    switch (strtolower($operator)) {
+                        case 'like':
+                            $query->where($columnRef, 'like', "%$value%");
+                            break;
+                        case 'not like':
+                            $query->where($columnRef, 'not like', "%$value%");
+                            break;
+                        case 'in':
+                            if (is_array($value)) {
+                                $query->whereIn($columnRef, $value);
+                            }
+                            break;
+                        case 'not in':
+                            if (is_array($value)) {
+                                $query->whereNotIn($columnRef, $value);
+                            }
+                            break;
+                        case 'between':
+                            if (is_array($value) && count($value) === 2) {
+                                $query->whereBetween($columnRef, $value);
+                            }
+                            break;
+                        case 'not between':
+                            if (is_array($value) && count($value) === 2) {
+                                $query->whereNotBetween($columnRef, $value);
+                            }
+                            break;
+                        case 'null':
+                            $query->whereNull($columnRef);
+                            break;
+                        case 'not null':
+                            $query->whereNotNull($columnRef);
+                            break;
+                        default:
+                            $query->where($columnRef, $operator, $value);
+                            break;
+                    }
                 }
             }
         }
@@ -1636,6 +1747,232 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 'error' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Get available keys from a JSON field in a table
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getJsonFieldKeys(Request $request)
+    {
+        try {
+            // Validate request
+            $validated = $request->validate([
+                'table' => 'required|string',
+                'column' => 'required|string',
+                'limit' => 'nullable|integer|min:1|max:1000',
+            ]);
+
+            $tableName = $validated['table'];
+            $columnName = $validated['column'];
+            $limit = $validated['limit'] ?? 100;
+
+            // Check if table exists
+            if (!Schema::hasTable($tableName)) {
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' => "Table '{$tableName}' does not exist",
+                    ],
+                    404
+                );
+            }
+
+            // Check if column exists
+            if (!Schema::hasColumn($tableName, $columnName)) {
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' => "Column '{$columnName}' does not exist in table '{$tableName}'",
+                    ],
+                    404
+                );
+            }
+
+            // Get column type
+            $columnType = $this->getColumnType($tableName, $columnName);
+
+            // Check if column is a JSON type
+            if (!in_array(strtolower($columnType), ['json', 'jsonb'])) {
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' => "Column '{$columnName}' is not a JSON type column",
+                    ],
+                    400
+                );
+            }
+
+            // Query the table to get sample JSON data
+            $query = DB::table($tableName)
+                ->select($columnName)
+                ->whereNotNull($columnName)
+                ->where($columnName, '<>', '{}')
+                ->where($columnName, '<>', '[]')
+                ->limit($limit);
+
+            $results = $query->get();
+
+            // Extract all unique keys from the JSON data
+            $allKeys = [];
+            $keyFrequency = [];
+            $keyExamples = [];
+            $totalRecords = count($results);
+
+            foreach ($results as $row) {
+                $jsonData = json_decode($row->{$columnName}, true);
+
+                if (is_array($jsonData)) {
+                    // Extract keys recursively
+                    $this->extractJsonKeys($jsonData, '', $allKeys, $keyFrequency, $keyExamples);
+                }
+            }
+
+            // Sort keys by frequency (most common first)
+            arsort($keyFrequency);
+
+            // Format the response
+            $formattedKeys = [];
+            foreach ($keyFrequency as $key => $frequency) {
+                $formattedKeys[] = [
+                    'key' => $key,
+                    'frequency' => $frequency,
+                    'percentage' => $totalRecords > 0 ? round(($frequency / $totalRecords) * 100, 2) : 0,
+                    'example' => $keyExamples[$key] ?? null,
+                ];
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'table' => $tableName,
+                    'column' => $columnName,
+                    'total_records_analyzed' => $totalRecords,
+                    'keys' => $formattedKeys,
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error extracting JSON field keys: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error extracting JSON field keys',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
+
+    /**
+     * Recursively extract keys from a JSON structure
+     *
+     * @param array $data The JSON data as an array
+     * @param string $prefix Current key prefix for nested objects
+     * @param array &$allKeys Reference to array of all keys found
+     * @param array &$keyFrequency Reference to array tracking key frequency
+     * @param array &$keyExamples Reference to array storing example values for each key
+     * @return void
+     */
+    private function extractJsonKeys($data, $prefix, &$allKeys, &$keyFrequency, &$keyExamples)
+    {
+        if (!is_array($data)) {
+            return;
+        }
+
+        // Handle both objects and arrays
+        if ($this->isAssociativeArray($data)) {
+            // Object-like structure
+            foreach ($data as $key => $value) {
+                $fullKey = $prefix ? "{$prefix}.{$key}" : $key;
+
+                // Add this key to our collection
+                if (!in_array($fullKey, $allKeys)) {
+                    $allKeys[] = $fullKey;
+                }
+
+                // Increment frequency counter
+                if (!isset($keyFrequency[$fullKey])) {
+                    $keyFrequency[$fullKey] = 1;
+
+                    // Store an example value if we don't have one yet
+                    if (!isset($keyExamples[$fullKey]) && !is_array($value)) {
+                        $keyExamples[$fullKey] = $this->formatExampleValue($value);
+                    }
+                } else {
+                    $keyFrequency[$fullKey]++;
+                }
+
+                // Recursively process nested objects/arrays
+                if (is_array($value)) {
+                    $this->extractJsonKeys($value, $fullKey, $allKeys, $keyFrequency, $keyExamples);
+                }
+            }
+        } else {
+            // Array structure - check the first few items to identify structure
+            $sampleSize = min(count($data), 5);
+            for ($i = 0; $i < $sampleSize; $i++) {
+                if (isset($data[$i]) && is_array($data[$i])) {
+                    $this->extractJsonKeys($data[$i], $prefix ? "{$prefix}[*]" : "[*]", $allKeys, $keyFrequency, $keyExamples);
+                }
+            }
+        }
+    }
+
+    /**
+     * Check if an array is associative (object-like) or sequential (array-like)
+     *
+     * @param array $array
+     * @return bool
+     */
+    private function isAssociativeArray($array)
+    {
+        if (!is_array($array)) {
+            return false;
+        }
+
+        // If array is empty, consider it associative
+        if (empty($array)) {
+            return true;
+        }
+
+        // Check if array keys are sequential integers starting from 0
+        return array_keys($array) !== range(0, count($array) - 1);
+    }
+
+    /**
+     * Format an example value for display
+     *
+     * @param mixed $value
+     * @return string
+     */
+    private function formatExampleValue($value)
+    {
+        if (is_null($value)) {
+            return 'null';
+        }
+
+        if (is_bool($value)) {
+            return $value ? 'true' : 'false';
+        }
+
+        if (is_string($value)) {
+            // Truncate long strings
+            if (strlen($value) > 50) {
+                return substr($value, 0, 47) . '...';
+            }
+            return $value;
+        }
+
+        if (is_numeric($value)) {
+            return (string)$value;
+        }
+
+        // For other types, convert to string
+        return (string)$value;
     }
 
     /**

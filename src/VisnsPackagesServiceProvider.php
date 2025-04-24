@@ -263,6 +263,12 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                                 '/reportBuilder/export',
                                 'exportReport'
                             );
+
+                            // Get JSON field keys
+                            Route::post(
+                                '/reportBuilder/getJsonFieldKeys',
+                                'getJsonFieldKeys'
+                            );
                         });
                 });
 
