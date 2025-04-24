@@ -1801,7 +1801,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
     }
 
     /**
-     * Export report data as CSV or Excel
+     * Export report data as CSV, Excel or PDF
      *
      * @param Request $request
      * @return \Symfony\Component\HttpFoundation\BinaryFileResponse
@@ -1813,7 +1813,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             $validated = $request->validate([
                 'query' => 'required|array',
                 'report_id' => 'nullable|integer',
-                'format' => 'required|in:csv,xlsx',
+                'format' => 'required|in:csv,xlsx,pdf',
                 'parameters' => 'nullable|array',
             ]);
 
@@ -2091,6 +2091,33 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
     }
 
     /**
+     * Check if a string is valid JSON
+     *
+     * @param string $string
+     * @return bool
+     */
+    private function isJsonString($string)
+    {
+        if (!is_string($string)) {
+            return false;
+        }
+
+        $string = trim($string);
+
+        // Quick check for JSON-like structure
+        if (
+            (substr($string, 0, 1) !== '{' || substr($string, -1) !== '}') &&
+            (substr($string, 0, 1) !== '[' || substr($string, -1) !== ']')
+        ) {
+            return false;
+        }
+
+        // Try to decode the string
+        json_decode($string);
+        return json_last_error() === JSON_ERROR_NONE;
+    }
+
+    /**
      * Generate export file in the specified format
      *
      * @param \Illuminate\Support\Collection $data
@@ -2129,6 +2156,82 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             // Return the file as a download
             return response()->download($tempFile, $filename, [
                 'Content-Type' => 'text/csv',
+            ])->deleteFileAfterSend(true);
+        } elseif ($format === 'pdf') {
+            // Generate PDF file using HTML and browser rendering
+            // Create HTML content
+            $html = '<!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>' . htmlspecialchars(str_replace('.pdf', '', $filename)) . '</title>
+                <style>
+                    body { font-family: Arial, sans-serif; margin: 20px; }
+                    h1 { text-align: center; margin-bottom: 20px; }
+                    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+                    th { background-color: #f2f2f2; font-weight: bold; text-align: left; }
+                    th, td { border: 1px solid #ddd; padding: 8px; }
+                    tr:nth-child(even) { background-color: #f9f9f9; }
+                    .json-data { white-space: pre-wrap; font-family: monospace; font-size: 0.9em; }
+                </style>
+            </head>
+            <body>
+                <h1>' . htmlspecialchars(str_replace('.pdf', '', $filename)) . '</h1>
+                <table>
+                    <thead>
+                        <tr>';
+
+            // Add table headers
+            foreach ($headers as $header) {
+                $html .= '<th>' . htmlspecialchars($this->formatColumnName($header)) . '</th>';
+            }
+
+            $html .= '</tr>
+                    </thead>
+                    <tbody>';
+
+            // Add table rows
+            foreach ($dataArray as $dataRow) {
+                $html .= '<tr>';
+                foreach ($dataRow as $key => $value) {
+                    // Format JSON values for better readability
+                    if (is_string($value) && $this->isJsonString($value)) {
+                        try {
+                            $jsonData = json_decode($value, true);
+                            if (json_last_error() === JSON_ERROR_NONE) {
+                                $value = '<div class="json-data">' . htmlspecialchars(json_encode($jsonData, JSON_PRETTY_PRINT)) . '</div>';
+                            }
+                        } catch (\Exception $e) {
+                            // Keep original value if JSON formatting fails
+                        }
+                    }
+
+                    // Handle null values
+                    if (is_null($value)) {
+                        $value = '';
+                    }
+
+                    // Convert arrays to JSON strings
+                    if (is_array($value)) {
+                        $value = '<div class="json-data">' . htmlspecialchars(json_encode($value, JSON_PRETTY_PRINT)) . '</div>';
+                    }
+
+                    $html .= '<td>' . (is_string($value) && substr($value, 0, 5) === '<div ' ? $value : htmlspecialchars($value)) . '</td>';
+                }
+                $html .= '</tr>';
+            }
+
+            $html .= '</tbody>
+                </table>
+            </body>
+            </html>';
+
+            // Write HTML to the temporary file
+            file_put_contents($tempFile, $html);
+
+            // Return the file as a download
+            return response()->download($tempFile, $filename, [
+                'Content-Type' => 'text/html',
             ])->deleteFileAfterSend(true);
         } else {
             // Generate Excel file using PhpSpreadsheet
