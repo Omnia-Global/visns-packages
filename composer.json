@@ -1,7 +1,7 @@
 {
     "name": "visnsstudio/visns-packages",
     "description": "Laravel/PHP packages used for Omnia Global Projects",
-    "version": "3.5.8.17",
+    "version": "3.5.8.18",
     "type": "library",
     "license": "MIT",
     "autoload": {

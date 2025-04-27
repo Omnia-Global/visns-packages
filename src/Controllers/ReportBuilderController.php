@@ -2078,16 +2078,24 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             return '';
         }
 
+        // Special handling for project details
+        if (isset($data['sector']) && isset($data['project_status'])) {
+            return $this->formatProjectDetailsForHtml($data);
+        }
+
         $html =
-            '<div class="json-data" style="font-family: Arial, sans-serif; font-size: 12px; line-height: 1.4;">';
+            '<div class="json-data" style="font-family: Arial, sans-serif; font-size: 12px; line-height: 1.4; border-left: 3px solid #e0e0e0; padding-left: 10px;">';
 
         foreach ($data as $key => $value) {
+            // Format the key for better readability
+            $displayKey = $this->humanizeFieldName($key);
+
             if (is_array($value)) {
-                // For nested arrays, just show a simplified version
+                // For nested arrays, show a more detailed version
                 if (!empty($value)) {
                     $html .=
-                        '<div class="json-item" style="margin-bottom: 4px;"><span class="json-key" style="font-weight: bold; color: #333;">' .
-                        htmlspecialchars($key) .
+                        '<div class="json-item" style="margin-bottom: 6px;"><span class="json-key" style="font-weight: bold; color: #333;">' .
+                        htmlspecialchars($displayKey) .
                         ':</span> ';
 
                     if (isset($value[0]) && is_array($value[0])) {
@@ -2097,26 +2105,140 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                             count($value) .
                             ' items]</span>';
                     } else {
-                        // It's an associative array
-                        $valueKeys = array_keys($value);
+                        // It's an associative array - show nested values
                         $html .=
-                            '<span style="color: #666;">{' .
-                            implode(
-                                ', ',
-                                array_map('htmlspecialchars', $valueKeys)
-                            ) .
-                            '}</span>';
+                            '<div style="margin-left: 15px; margin-top: 3px;">';
+                        foreach ($value as $nestedKey => $nestedValue) {
+                            $nestedDisplayKey = $this->humanizeFieldName(
+                                $nestedKey
+                            );
+
+                            $html .=
+                                '<div style="margin-bottom: 3px;"><span style="font-weight: bold; color: #555;">' .
+                                htmlspecialchars($nestedDisplayKey) .
+                                ':</span> ';
+
+                            if (is_array($nestedValue)) {
+                                $html .=
+                                    '<span style="color: #666;">[...]</span>';
+                            } else {
+                                $formattedValue = $this->formatValueForDisplay(
+                                    $nestedValue,
+                                    $nestedKey
+                                );
+                                $html .=
+                                    '<span style="color: #0066cc;">' .
+                                    htmlspecialchars($formattedValue) .
+                                    '</span>';
+                            }
+
+                            $html .= '</div>';
+                        }
+                        $html .= '</div>';
                     }
 
                     $html .= '</div>';
                 }
             } else {
+                $formattedValue = $this->formatValueForDisplay($value, $key);
                 $html .=
                     '<div class="json-item" style="margin-bottom: 4px;"><span class="json-key" style="font-weight: bold; color: #333;">' .
-                    htmlspecialchars($key) .
+                    htmlspecialchars($displayKey) .
+                    ':</span> <span class="json-value" style="color: #0066cc;">' .
+                    htmlspecialchars($formattedValue) .
+                    '</span></div>';
+            }
+        }
+
+        $html .= '</div>';
+        return $html;
+    }
+
+    /**
+     * Format project details JSON specifically for HTML display
+     *
+     * @param array $data
+     * @return string
+     */
+    private function formatProjectDetailsForHtml($data)
+    {
+        $html =
+            '<div class="json-data project-details" style="font-family: Arial, sans-serif; font-size: 12px; line-height: 1.5; border-left: 3px solid #4a86e8; padding-left: 10px; background-color: #f8f9fa;">';
+
+        // Handle common project detail fields in a specific order
+        $orderedFields = [
+            'sector' => 'Sector',
+            'project_status' => 'Project Status',
+            'active_projects' => 'Active Projects',
+            'agreement_end_date' => 'Agreement End Date',
+            'agreement_start_date' => 'Agreement Start Date',
+        ];
+
+        foreach ($orderedFields as $field => $label) {
+            if (isset($data[$field])) {
+                $value = $this->formatValueForDisplay($data[$field], $field);
+                $html .=
+                    '<div class="json-item" style="margin-bottom: 5px;"><span class="json-key" style="font-weight: bold; color: #333;">' .
+                    htmlspecialchars($label) .
                     ':</span> <span class="json-value" style="color: #0066cc;">' .
                     htmlspecialchars($value) .
                     '</span></div>';
+            }
+        }
+
+        // Add any remaining fields not in the ordered list
+        foreach ($data as $key => $value) {
+            if (!isset($orderedFields[$key])) {
+                $displayKey = $this->humanizeFieldName($key);
+
+                if (is_array($value)) {
+                    // Handle nested arrays
+                    $html .=
+                        '<div class="json-item" style="margin-bottom: 5px;"><span class="json-key" style="font-weight: bold; color: #333;">' .
+                        htmlspecialchars($displayKey) .
+                        ':</span> ';
+
+                    if (!empty($value)) {
+                        if (isset($value[0]) && is_array($value[0])) {
+                            $html .=
+                                '<span style="color: #666;">[' .
+                                count($value) .
+                                ' items]</span>';
+                        } else {
+                            $nestedValues = [];
+                            foreach ($value as $nestedKey => $nestedValue) {
+                                $nestedDisplayKey = $this->humanizeFieldName(
+                                    $nestedKey
+                                );
+                                $formattedValue = is_array($nestedValue)
+                                    ? '[...]'
+                                    : $this->formatValueForDisplay(
+                                        $nestedValue,
+                                        $nestedKey
+                                    );
+                                $nestedValues[] =
+                                    $nestedDisplayKey . ': ' . $formattedValue;
+                            }
+                            $html .=
+                                '<span style="color: #666;">{' .
+                                implode(', ', $nestedValues) .
+                                '}</span>';
+                        }
+                    }
+
+                    $html .= '</div>';
+                } else {
+                    $formattedValue = $this->formatValueForDisplay(
+                        $value,
+                        $key
+                    );
+                    $html .=
+                        '<div class="json-item" style="margin-bottom: 5px;"><span class="json-key" style="font-weight: bold; color: #333;">' .
+                        htmlspecialchars($displayKey) .
+                        ':</span> <span class="json-value" style="color: #0066cc;">' .
+                        htmlspecialchars($formattedValue) .
+                        '</span></div>';
+                }
             }
         }
 
@@ -2136,32 +2258,141 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             return '';
         }
 
+        // Special handling for project details
+        if (isset($data['sector']) && isset($data['project_status'])) {
+            return $this->formatProjectDetailsForExcel($data);
+        }
+
         $result = [];
 
+        // Format each key-value pair
         foreach ($data as $key => $value) {
+            // Format the key for better readability
+            $displayKey = $this->humanizeFieldName($key);
+
             if (is_array($value)) {
                 if (!empty($value)) {
                     if (isset($value[0]) && is_array($value[0])) {
                         // It's a numeric array of objects
-                        $result[] = "$key: [" . count($value) . ' items]';
+                        $result[] =
+                            "$displayKey: [" . count($value) . ' items]';
                     } else {
-                        // It's an associative array
-                        $valueKeys = array_keys($value);
-                        $result[] = "$key: {" . implode(', ', $valueKeys) . '}';
+                        // It's an associative array - format nested values
+                        $nestedValues = [];
+                        foreach ($value as $nestedKey => $nestedValue) {
+                            $nestedDisplayKey = $this->humanizeFieldName(
+                                $nestedKey
+                            );
+                            if (is_array($nestedValue)) {
+                                $nestedValues[] = "$nestedDisplayKey: [...]";
+                            } else {
+                                $formattedValue = $this->formatValueForDisplay(
+                                    $nestedValue,
+                                    $nestedKey
+                                );
+                                $nestedValues[] = "$nestedDisplayKey: $formattedValue";
+                            }
+                        }
+                        $result[] =
+                            "$displayKey: {" .
+                            implode(', ', $nestedValues) .
+                            '}';
                     }
                 }
             } else {
-                if (is_bool($value)) {
-                    $value = $value ? 'true' : 'false';
-                } elseif (is_null($value)) {
-                    $value = 'null';
-                }
-
-                $result[] = "$key: $value";
+                $formattedValue = $this->formatValueForDisplay($value, $key);
+                $result[] = "$displayKey: $formattedValue";
             }
         }
 
         return implode("\n", $result);
+    }
+
+    /**
+     * Format project details JSON specifically for Excel
+     *
+     * @param array $data
+     * @return string
+     */
+    private function formatProjectDetailsForExcel($data)
+    {
+        $result = [];
+
+        // Handle common project detail fields in a specific order
+        $orderedFields = [
+            'sector' => 'Sector',
+            'project_status' => 'Project Status',
+            'active_projects' => 'Active Projects',
+            'agreement_end_date' => 'Agreement End Date',
+            'agreement_start_date' => 'Agreement Start Date',
+        ];
+
+        foreach ($orderedFields as $field => $label) {
+            if (isset($data[$field])) {
+                $value = $this->formatValueForDisplay($data[$field], $field);
+                $result[] = "$label: $value";
+            }
+        }
+
+        // Add any remaining fields not in the ordered list
+        foreach ($data as $key => $value) {
+            if (!isset($orderedFields[$key])) {
+                $displayKey = $this->humanizeFieldName($key);
+                $formattedValue = $this->formatValueForDisplay($value, $key);
+                $result[] = "$displayKey: $formattedValue";
+            }
+        }
+
+        return implode("\n", $result);
+    }
+
+    /**
+     * Format a value for display based on its type and field name
+     *
+     * @param mixed $value
+     * @param string $fieldName
+     * @return string
+     */
+    private function formatValueForDisplay($value, $fieldName)
+    {
+        if (is_null($value)) {
+            return '';
+        }
+
+        if (is_bool($value)) {
+            return $value ? 'Yes' : 'No';
+        }
+
+        // Format dates
+        if (strpos($fieldName, '_date') !== false && is_string($value)) {
+            // Try to parse and format the date
+            try {
+                $date = new \DateTime($value);
+                return $date->format('d/m/Y');
+            } catch (\Exception $e) {
+                // If it's not a valid date, return as is
+                return $value;
+            }
+        }
+
+        return (string) $value;
+    }
+
+    /**
+     * Convert a field name to a more human-readable format
+     *
+     * @param string $fieldName
+     * @return string
+     */
+    private function humanizeFieldName($fieldName)
+    {
+        // Replace underscores with spaces
+        $humanized = str_replace('_', ' ', $fieldName);
+
+        // Capitalize each word
+        $humanized = ucwords($humanized);
+
+        return $humanized;
     }
 
     /**
@@ -2621,8 +2852,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     tr:nth-child(even) { background-color: #f9f9f9; }
 
                     /* JSON Styling */
-                    .json-data { font-family: Arial, sans-serif; font-size: 12px; line-height: 1.4; }
-                    .json-item { margin-bottom: 4px; }
+                    .json-data { font-family: Arial, sans-serif; font-size: 12px; line-height: 1.4; border-left: 3px solid #e0e0e0; padding-left: 10px; margin-bottom: 8px; }
+                    .json-data.project-details { border-left: 3px solid #4a86e8; background-color: #f8f9fa; padding: 8px 10px; }
+                    .json-item { margin-bottom: 5px; }
                     .json-key { font-weight: bold; color: #333; }
                     .json-value { color: #0066cc; }
 
