@@ -2067,6 +2067,104 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
     }
 
     /**
+     * Format JSON data for display in HTML
+     *
+     * @param array $data
+     * @return string
+     */
+    private function formatJsonForDisplay($data)
+    {
+        if (empty($data)) {
+            return '';
+        }
+
+        $html =
+            '<div class="json-data" style="font-family: Arial, sans-serif; font-size: 12px; line-height: 1.4;">';
+
+        foreach ($data as $key => $value) {
+            if (is_array($value)) {
+                // For nested arrays, just show a simplified version
+                if (!empty($value)) {
+                    $html .=
+                        '<div class="json-item" style="margin-bottom: 4px;"><span class="json-key" style="font-weight: bold; color: #333;">' .
+                        htmlspecialchars($key) .
+                        ':</span> ';
+
+                    if (isset($value[0]) && is_array($value[0])) {
+                        // It's a numeric array of objects
+                        $html .=
+                            '<span style="color: #666;">[' .
+                            count($value) .
+                            ' items]</span>';
+                    } else {
+                        // It's an associative array
+                        $valueKeys = array_keys($value);
+                        $html .=
+                            '<span style="color: #666;">{' .
+                            implode(
+                                ', ',
+                                array_map('htmlspecialchars', $valueKeys)
+                            ) .
+                            '}</span>';
+                    }
+
+                    $html .= '</div>';
+                }
+            } else {
+                $html .=
+                    '<div class="json-item" style="margin-bottom: 4px;"><span class="json-key" style="font-weight: bold; color: #333;">' .
+                    htmlspecialchars($key) .
+                    ':</span> <span class="json-value" style="color: #0066cc;">' .
+                    htmlspecialchars($value) .
+                    '</span></div>';
+            }
+        }
+
+        $html .= '</div>';
+        return $html;
+    }
+
+    /**
+     * Format JSON data for Excel export
+     *
+     * @param array $data
+     * @return string
+     */
+    private function formatJsonForExcel($data)
+    {
+        if (empty($data)) {
+            return '';
+        }
+
+        $result = [];
+
+        foreach ($data as $key => $value) {
+            if (is_array($value)) {
+                if (!empty($value)) {
+                    if (isset($value[0]) && is_array($value[0])) {
+                        // It's a numeric array of objects
+                        $result[] = "$key: [" . count($value) . ' items]';
+                    } else {
+                        // It's an associative array
+                        $valueKeys = array_keys($value);
+                        $result[] = "$key: {" . implode(', ', $valueKeys) . '}';
+                    }
+                }
+            } else {
+                if (is_bool($value)) {
+                    $value = $value ? 'true' : 'false';
+                } elseif (is_null($value)) {
+                    $value = 'null';
+                }
+
+                $result[] = "$key: $value";
+            }
+        }
+
+        return implode("\n", $result);
+    }
+
+    /**
      * Get available keys from a JSON field in a table
      *
      * @param Request $request
@@ -2471,9 +2569,18 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                         $value = '';
                     }
 
-                    // Convert arrays to strings
+                    // Format JSON values for better readability
                     if (is_array($value)) {
-                        $value = json_encode($value);
+                        // For Excel, we need to simplify the JSON structure
+                        $value = $this->formatJsonForExcel($value);
+                    } elseif (
+                        is_string($value) &&
+                        $this->isJsonString($value)
+                    ) {
+                        // If it's a JSON string, decode and format it
+                        $value = $this->formatJsonForExcel(
+                            json_decode($value, true)
+                        );
                     }
 
                     $sheet->setCellValueByColumnAndRow($column++, $row, $value);
@@ -2512,6 +2619,21 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     th { background-color: #f2f2f2; font-weight: bold; text-align: left; }
                     th, td { border: 1px solid #ddd; padding: 8px; }
                     tr:nth-child(even) { background-color: #f9f9f9; }
+
+                    /* JSON Styling */
+                    .json-data { font-family: Arial, sans-serif; font-size: 12px; line-height: 1.4; }
+                    .json-item { margin-bottom: 4px; }
+                    .json-key { font-weight: bold; color: #333; }
+                    .json-value { color: #0066cc; }
+
+                    /* Print styles */
+                    @media print {
+                        body { font-size: 10pt; }
+                        h1 { font-size: 14pt; }
+                        table { page-break-inside: auto; }
+                        tr { page-break-inside: avoid; page-break-after: auto; }
+                        td { word-break: break-word; }
+                    }
                 </style>
             </head>
             <body>
@@ -2543,12 +2665,19 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                         $value = '';
                     }
 
-                    // Convert arrays to strings
+                    // Format JSON values or arrays for better readability
                     if (is_array($value)) {
-                        $value = json_encode($value);
+                        $value = $this->formatJsonForDisplay($value);
+                    } elseif (
+                        is_string($value) &&
+                        $this->isJsonString($value)
+                    ) {
+                        $value = $this->formatJsonForDisplay(
+                            json_decode($value, true)
+                        );
                     }
 
-                    $html .= '<td>' . htmlspecialchars($value) . '</td>';
+                    $html .= '<td>' . $value . '</td>';
                 }
                 $html .= '</tr>';
             }
