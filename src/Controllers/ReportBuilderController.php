@@ -1963,22 +1963,102 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
     public function exportReport(Request $request)
     {
         try {
+            // Log the raw request data for debugging
             Log::info('Export report request received', [
                 'request_data' => $request->all(),
+                'request_content_type' => $request->header('Content-Type'),
+                'request_method' => $request->method(),
             ]);
 
-            // Validate request
-            $validated = $request->validate([
-                'query' => 'required|array',
-                'report_id' => 'nullable|integer',
-                'format' => 'required|in:csv,xlsx,pdf',
-                'parameters' => 'nullable|array',
+            // SIMPLIFIED APPROACH: Skip complex validation and directly process the request
+
+            // Get and validate the query parameter
+            $query = $request->input('query');
+            if (empty($query) || !is_array($query)) {
+                Log::error('Invalid or missing query parameter', [
+                    'query' => $query,
+                ]);
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' =>
+                            'The query parameter is required and must be an array',
+                    ],
+                    422
+                );
+            }
+
+            // Get and process the format parameter
+            $format = $request->input('format');
+            Log::info('Raw format value', [
+                'format' => $format,
+                'type' => gettype($format),
+            ]);
+
+            // Normalize the format value
+            if (is_string($format)) {
+                $format = strtolower(trim($format));
+            } else {
+                // If format is not provided or not a string, default to PDF
+                Log::warning('Format is not a string, defaulting to PDF', [
+                    'format' => $format,
+                    'type' => gettype($format),
+                ]);
+                $format = 'pdf';
+            }
+
+            // Validate the format
+            $allowedFormats = ['csv', 'xlsx', 'pdf'];
+            if (!in_array($format, $allowedFormats)) {
+                Log::error('Invalid format specified', [
+                    'format' => $format,
+                    'allowed_formats' => $allowedFormats,
+                ]);
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' => 'Invalid format specified',
+                        'error' =>
+                            "The format '{$format}' is not supported. Allowed formats are: " .
+                            implode(', ', $allowedFormats),
+                    ],
+                    422
+                );
+            }
+
+            Log::info('Format validated successfully', ['format' => $format]);
+
+            // Get the report_id parameter
+            $reportId = $request->input('report_id');
+
+            // Get parameters if provided
+            $parameters = $request->input('parameters', []);
+            if (!is_array($parameters)) {
+                $parameters = [];
+            }
+
+            // Create a validated data array
+            $validated = [
+                'query' => $query,
+                'format' => $format,
+                'parameters' => $parameters,
+            ];
+
+            if ($reportId !== null) {
+                $validated['report_id'] = $reportId;
+            }
+
+            Log::info('Request data processed successfully', [
+                'validated_data' => $validated,
             ]);
 
             // Get the query configuration
             $queryConfig = $validated['query'];
-            $format = strtolower($validated['format']); // Ensure format is lowercase
-            $parameters = $validated['parameters'] ?? [];
+
+            Log::info('Processed format value after validation', [
+                'original_format' => $validated['format'],
+                'normalized_format' => $format,
+            ]);
 
             Log::info('Export format requested', ['format' => $format]);
 
@@ -2056,27 +2136,143 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 $filename,
                 $format
             );
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            Log::warning('Validation error during report export', [
-                'errors' => $e->errors(),
-            ]);
-            return response()->json(
-                [
-                    'success' => false,
-                    'message' => 'Validation error',
-                    'errors' => $e->errors(),
-                ],
-                422
-            );
         } catch (\Exception $e) {
             Log::error('Error exporting report: ' . $e->getMessage());
             Log::error('Stack trace: ' . $e->getTraceAsString());
+            Log::error('Request data that caused the error', [
+                'request_data' => $request->all(),
+                'format' => $request->input('format'),
+            ]);
 
-            // Include more details in the response for debugging
+            // Check if this is a format-related error
+            if (stripos($e->getMessage(), 'format') !== false) {
+                Log::error('Format-related error detected', [
+                    'message' => $e->getMessage(),
+                    'format' => $request->input('format'),
+                ]);
+
+                // Try to extract the format from the request again
+                $format = null;
+
+                // Try from request input
+                $inputFormat = $request->input('format');
+                if (!empty($inputFormat) && is_string($inputFormat)) {
+                    $format = strtolower(trim($inputFormat));
+                }
+
+                // Try from raw JSON
+                if (empty($format)) {
+                    $requestContent = $request->getContent();
+                    if (!empty($requestContent)) {
+                        $jsonData = json_decode($requestContent, true);
+                        if (
+                            json_last_error() === JSON_ERROR_NONE &&
+                            isset($jsonData['format'])
+                        ) {
+                            $format = $jsonData['format'];
+                            if (is_string($format)) {
+                                $format = strtolower(trim($format));
+                            }
+                        }
+                    }
+                }
+
+                // If we still don't have a valid format, use PDF as default
+                if (
+                    empty($format) ||
+                    !in_array($format, ['csv', 'xlsx', 'pdf'])
+                ) {
+                    Log::warning('Using PDF as default format after error');
+                    $format = 'pdf';
+                }
+
+                // Try to continue with the export using the determined format
+                try {
+                    Log::info(
+                        'Attempting to continue with export using format: ' .
+                            $format
+                    );
+
+                    // Get query from request
+                    $query = $request->input('query');
+                    if (empty($query) || !is_array($query)) {
+                        // Try from raw JSON
+                        $requestContent = $request->getContent();
+                        if (!empty($requestContent)) {
+                            $jsonData = json_decode($requestContent, true);
+                            if (
+                                json_last_error() === JSON_ERROR_NONE &&
+                                isset($jsonData['query'])
+                            ) {
+                                $query = $jsonData['query'];
+                            }
+                        }
+                    }
+
+                    if (empty($query) || !is_array($query)) {
+                        throw new \Exception(
+                            'Cannot continue: valid query data is required'
+                        );
+                    }
+
+                    // Get report_id if available
+                    $reportId = $request->input('report_id');
+                    if (empty($reportId)) {
+                        $requestContent = $request->getContent();
+                        if (!empty($requestContent)) {
+                            $jsonData = json_decode($requestContent, true);
+                            if (
+                                json_last_error() === JSON_ERROR_NONE &&
+                                isset($jsonData['report_id'])
+                            ) {
+                                $reportId = $jsonData['report_id'];
+                            }
+                        }
+                    }
+
+                    // Set up report name
+                    $reportName = 'report';
+                    if (!empty($reportId)) {
+                        $report = ReportBuilder::find($reportId);
+                        if ($report) {
+                            $reportName = $report->label;
+                        }
+                    }
+
+                    // Execute query
+                    $result = $this->buildAndExecuteQuery(
+                        $query,
+                        100000,
+                        0,
+                        []
+                    );
+
+                    // Generate filename
+                    $date = date('Ymd');
+                    $filename = "{$date}_{$reportName}.{$format}";
+
+                    // Generate export file
+                    return $this->generateExportFile(
+                        $result['data'],
+                        $filename,
+                        $format
+                    );
+                } catch (\Exception $innerException) {
+                    Log::error(
+                        'Failed recovery attempt: ' .
+                            $innerException->getMessage()
+                    );
+                    // Continue to the error response below
+                }
+            }
+
+            // Include details in the response for debugging
             $errorDetails = [
                 'message' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
+                'request_format' => $request->input('format'),
+                'format_type' => gettype($request->input('format')),
             ];
 
             if (config('app.debug')) {
@@ -2381,21 +2577,102 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
      * @param \Illuminate\Support\Collection $data
      * @param string $filename
      * @param string $format
-     * @return \Symfony\Component\HttpFoundation\BinaryFileResponse
+     * @return \Symfony\Component\HttpFoundation\BinaryFileResponse|\Illuminate\Http\Response
+     * @throws \InvalidArgumentException If the format is invalid
+     * @throws \Exception If there's an error during file generation
      */
     private function generateExportFile($data, $filename, $format)
     {
+        // Log the input parameters
+        Log::info('generateExportFile called with parameters', [
+            'filename' => $filename,
+            'format' => $format,
+            'format_type' => gettype($format),
+            'data_count' => is_countable($data)
+                ? count($data)
+                : 'not countable',
+        ]);
+
+        // Normalize and validate format - with more flexible handling
+        if (is_string($format)) {
+            $format = strtolower(trim($format));
+        } else {
+            Log::warning(
+                'Format is not a string in generateExportFile, defaulting to PDF',
+                [
+                    'format' => $format,
+                    'type' => gettype($format),
+                ]
+            );
+            // Default to PDF instead of throwing an exception
+            $format = 'pdf';
+        }
+
+        // Map any similar formats to our allowed formats
+        $formatMap = [
+            // PDF formats
+            'pdf' => 'pdf',
+            'adobe' => 'pdf',
+            'acrobat' => 'pdf',
+            // Excel formats
+            'xlsx' => 'xlsx',
+            'xls' => 'xlsx',
+            'excel' => 'xlsx',
+            'spreadsheet' => 'xlsx',
+            // CSV formats
+            'csv' => 'csv',
+            'text' => 'csv',
+            'txt' => 'csv',
+            'comma' => 'csv',
+        ];
+
+        if (isset($formatMap[$format])) {
+            $format = $formatMap[$format];
+        }
+
+        // Validate format
+        $allowedFormats = ['csv', 'xlsx', 'pdf'];
+        if (!in_array($format, $allowedFormats)) {
+            Log::warning(
+                'Invalid format in generateExportFile, defaulting to PDF',
+                [
+                    'format' => $format,
+                    'allowed_formats' => $allowedFormats,
+                ]
+            );
+            // Default to PDF instead of throwing an exception
+            $format = 'pdf';
+        }
+
+        Log::info('Final format for export', ['format' => $format]);
+
         // Convert data collection to array
         $dataArray = json_decode(json_encode($data), true);
+
+        // Check if data was properly converted
+        if (!is_array($dataArray)) {
+            Log::error('Failed to convert data to array', [
+                'original_type' => gettype($data),
+                'converted_type' => gettype($dataArray),
+            ]);
+            throw new \Exception('Failed to convert data to array for export');
+        }
 
         // Get column headers from the first row
         $headers = [];
         if (!empty($dataArray)) {
             $headers = array_keys($dataArray[0]);
+            Log::info('Headers extracted from data', [
+                'headers' => $headers,
+                'count' => count($headers),
+            ]);
+        } else {
+            Log::warning('No data to export, empty array provided');
         }
 
         // Create a temporary file
         $tempFile = tempnam(sys_get_temp_dir(), 'report_');
+        Log::info('Temporary file created', ['tempFile' => $tempFile]);
 
         if ($format === 'csv') {
             // Generate CSV file
