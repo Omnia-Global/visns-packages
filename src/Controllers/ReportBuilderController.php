@@ -1962,87 +1962,108 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
      */
     public function exportReport(Request $request)
     {
-        // Log the raw request data for debugging
-        Log::info('Export report request received', [
-            'request_data' => $request->all(),
-            'request_content_type' => $request->header('Content-Type'),
-            'request_method' => $request->method(),
-        ]);
-
-        // ULTRA SIMPLIFIED APPROACH: No try-catch, direct processing
-
-        // Get the query parameter
-        $query = $request->input('query');
-        if (empty($query) || !is_array($query)) {
-            Log::error('Invalid or missing query parameter', [
-                'query' => $query,
+        try {
+            // Log the raw request data for debugging
+            Log::info('Export report request received', [
+                'request_data' => $request->all(),
+                'request_content_type' => $request->header('Content-Type'),
+                'request_method' => $request->method(),
             ]);
-            return response()->json(
-                [
-                    'success' => false,
-                    'message' =>
-                        'The query parameter is required and must be an array',
-                ],
-                422
-            );
-        }
 
-        // Always use PDF format for now to test if that works
-        $format = 'pdf';
-        Log::info('Using hardcoded PDF format for testing');
-
-        // Get the report_id parameter
-        $reportId = $request->input('report_id');
-
-        // Get parameters if provided
-        $parameters = $request->input('parameters', []);
-        if (!is_array($parameters)) {
-            $parameters = [];
-        }
-
-        // Set up report name
-        $reportName = 'report';
-        if (!empty($reportId)) {
-            $report = ReportBuilder::find($reportId);
-            if ($report) {
-                $reportName = $report->label;
+            // Get the query parameter
+            $query = $request->input('query');
+            if (empty($query) || !is_array($query)) {
+                Log::error('Invalid or missing query parameter', [
+                    'query' => $query,
+                ]);
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' =>
+                            'The query parameter is required and must be an array',
+                    ],
+                    422
+                );
             }
-        }
 
-        // Execute query
-        Log::info('Building query for export', [
-            'report_name' => $reportName,
-        ]);
+            // Get the format parameter
+            $format = $request->input('format', 'pdf');
+            Log::info('Format requested', ['format' => $format]);
 
-        $result = $this->buildAndExecuteQuery($query, 100000, 0, $parameters);
+            // Get the report_id parameter
+            $reportId = $request->input('report_id');
 
-        // Check if we have data to export
-        if (empty($result['data']) || count($result['data']) === 0) {
-            Log::warning('No data to export', [
+            // Get parameters if provided
+            $parameters = $request->input('parameters', []);
+            if (!is_array($parameters)) {
+                $parameters = [];
+            }
+
+            // Set up report name
+            $reportName = 'report';
+            if (!empty($reportId)) {
+                $report = ReportBuilder::find($reportId);
+                if ($report) {
+                    $reportName = $report->label;
+                }
+            }
+
+            // Execute query
+            Log::info('Building query for export', [
                 'report_name' => $reportName,
             ]);
+
+            $result = $this->buildAndExecuteQuery(
+                $query,
+                100000,
+                0,
+                $parameters
+            );
+
+            // Check if we have data to export
+            if (empty($result['data']) || count($result['data']) === 0) {
+                Log::warning('No data to export', [
+                    'report_name' => $reportName,
+                ]);
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' =>
+                            'No data to export. The query returned no results.',
+                    ],
+                    404
+                );
+            }
+
+            // Format the date for the filename
+            $date = date('Ymd');
+            $filename = "{$date}_{$reportName}.{$format}";
+
+            Log::info('Generating export file', [
+                'filename' => $filename,
+                'format' => $format,
+                'row_count' => count($result['data']),
+            ]);
+
+            // Generate the export file based on format
+            return $this->generateExportFile(
+                $result['data'],
+                $filename,
+                $format
+            );
+        } catch (\Exception $e) {
+            Log::error('Error exporting report: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+
             return response()->json(
                 [
                     'success' => false,
-                    'message' =>
-                        'No data to export. The query returned no results.',
+                    'message' => 'Error exporting report',
+                    'error' => $e->getMessage(),
                 ],
-                404
+                500
             );
         }
-
-        // Format the date for the filename
-        $date = date('Ymd');
-        $filename = "{$date}_{$reportName}.{$format}";
-
-        Log::info('Generating export file', [
-            'filename' => $filename,
-            'format' => $format,
-            'row_count' => count($result['data']),
-        ]);
-
-        // Generate the export file based on format
-        return $this->generateExportFile($result['data'], $filename, $format);
     }
 
     /**
@@ -2348,9 +2369,28 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 : 'not countable',
         ]);
 
-        // Always use PDF format for now
-        $format = 'pdf';
-        Log::info('Using hardcoded PDF format in generateExportFile');
+        // Normalize format
+        if (is_string($format)) {
+            $format = strtolower(trim($format));
+        } else {
+            $format = 'pdf'; // Default to PDF
+        }
+
+        // Map formats
+        $formatMap = [
+            'pdf' => 'pdf',
+            'xlsx' => 'xlsx',
+            'excel' => 'xlsx',
+            'csv' => 'csv',
+        ];
+
+        if (isset($formatMap[$format])) {
+            $format = $formatMap[$format];
+        } else {
+            $format = 'pdf'; // Default to PDF for unknown formats
+        }
+
+        Log::info('Using format: ' . $format);
 
         // Convert data collection to array
         $dataArray = json_decode(json_encode($data), true);
@@ -2386,87 +2426,155 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         $tempFile = tempnam(sys_get_temp_dir(), 'report_');
         Log::info('Temporary file created', ['tempFile' => $tempFile]);
 
-        // SIMPLIFIED: Generate HTML file instead of PDF for testing
-        Log::info('Generating HTML file instead of PDF for testing');
+        if ($format === 'csv') {
+            // Generate CSV file
+            $handle = fopen($tempFile, 'w');
 
-        // Create HTML content
-        $html =
-            '<!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <title>' .
-            htmlspecialchars(str_replace('.pdf', '', $filename)) .
-            '</title>
-            <style>
-                body { font-family: Arial, sans-serif; margin: 20px; }
-                h1 { text-align: center; margin-bottom: 20px; }
-                table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-                th { background-color: #f2f2f2; font-weight: bold; text-align: left; }
-                th, td { border: 1px solid #ddd; padding: 8px; }
-                tr:nth-child(even) { background-color: #f9f9f9; }
-            </style>
-        </head>
-        <body>
-            <h1>' .
-            htmlspecialchars(str_replace('.pdf', '', $filename)) .
-            '</h1>
-            <table>
-                <thead>
-                    <tr>';
+            // Add headers
+            fputcsv($handle, $headers);
 
-        // Add table headers
-        foreach ($headers as $header) {
-            $html .=
-                '<th>' .
-                htmlspecialchars($this->formatColumnName($header)) .
-                '</th>';
-        }
-
-        $html .= '</tr>
-                </thead>
-                <tbody>';
-
-        // Add table rows
-        foreach ($dataArray as $dataRow) {
-            $html .= '<tr>';
-            foreach ($dataRow as $key => $value) {
-                // Handle null values
-                if (is_null($value)) {
-                    $value = '';
-                }
-
-                // Convert arrays to strings
-                if (is_array($value)) {
-                    $value = json_encode($value);
-                }
-
-                $html .= '<td>' . htmlspecialchars($value) . '</td>';
+            // Add data rows
+            foreach ($dataArray as $row) {
+                fputcsv($handle, $row);
             }
-            $html .= '</tr>';
+
+            fclose($handle);
+
+            // Return the file as a download
+            return response()
+                ->download($tempFile, $filename, [
+                    'Content-Type' => 'text/csv',
+                ])
+                ->deleteFileAfterSend(true);
+        } elseif ($format === 'xlsx') {
+            // Generate Excel file using PhpSpreadsheet
+            $spreadsheet = new Spreadsheet();
+            $sheet = $spreadsheet->getActiveSheet();
+
+            // Add headers (first row)
+            $column = 1;
+            foreach ($headers as $header) {
+                $sheet->setCellValueByColumnAndRow(
+                    $column++,
+                    1,
+                    $this->formatColumnName($header)
+                );
+            }
+
+            // Add data rows
+            $row = 2;
+            foreach ($dataArray as $dataRow) {
+                $column = 1;
+                foreach ($dataRow as $value) {
+                    // Handle null values
+                    if (is_null($value)) {
+                        $value = '';
+                    }
+
+                    // Convert arrays to strings
+                    if (is_array($value)) {
+                        $value = json_encode($value);
+                    }
+
+                    $sheet->setCellValueByColumnAndRow($column++, $row, $value);
+                }
+                $row++;
+            }
+
+            // Create Excel writer
+            $writer = new Xlsx($spreadsheet);
+            $writer->save($tempFile);
+
+            // Return the file as a download
+            return response()
+                ->download($tempFile, $filename, [
+                    'Content-Type' =>
+                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                ])
+                ->deleteFileAfterSend(true);
+        } else {
+            // Default to HTML for PDF (since we're not using mPDF in this simplified version)
+            Log::info('Generating HTML file for PDF format');
+
+            // Create HTML content
+            $html =
+                '<!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>' .
+                htmlspecialchars(str_replace('.pdf', '', $filename)) .
+                '</title>
+                <style>
+                    body { font-family: Arial, sans-serif; margin: 20px; }
+                    h1 { text-align: center; margin-bottom: 20px; }
+                    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+                    th { background-color: #f2f2f2; font-weight: bold; text-align: left; }
+                    th, td { border: 1px solid #ddd; padding: 8px; }
+                    tr:nth-child(even) { background-color: #f9f9f9; }
+                </style>
+            </head>
+            <body>
+                <h1>' .
+                htmlspecialchars(str_replace('.pdf', '', $filename)) .
+                '</h1>
+                <table>
+                    <thead>
+                        <tr>';
+
+            // Add table headers
+            foreach ($headers as $header) {
+                $html .=
+                    '<th>' .
+                    htmlspecialchars($this->formatColumnName($header)) .
+                    '</th>';
+            }
+
+            $html .= '</tr>
+                    </thead>
+                    <tbody>';
+
+            // Add table rows
+            foreach ($dataArray as $dataRow) {
+                $html .= '<tr>';
+                foreach ($dataRow as $key => $value) {
+                    // Handle null values
+                    if (is_null($value)) {
+                        $value = '';
+                    }
+
+                    // Convert arrays to strings
+                    if (is_array($value)) {
+                        $value = json_encode($value);
+                    }
+
+                    $html .= '<td>' . htmlspecialchars($value) . '</td>';
+                }
+                $html .= '</tr>';
+            }
+
+            $html .= '</tbody>
+                </table>
+            </body>
+            </html>';
+
+            // Write HTML to the temporary file
+            file_put_contents($tempFile, $html);
+
+            // Change the filename to .html
+            $filename = str_replace('.pdf', '.html', $filename);
+
+            Log::info('HTML file created successfully', [
+                'filesize' => filesize($tempFile),
+                'filename' => $filename,
+            ]);
+
+            // Return the file as a download
+            return response()
+                ->download($tempFile, $filename, [
+                    'Content-Type' => 'text/html',
+                ])
+                ->deleteFileAfterSend(true);
         }
-
-        $html .= '</tbody>
-            </table>
-        </body>
-        </html>';
-
-        // Write HTML to the temporary file
-        file_put_contents($tempFile, $html);
-
-        // Change the filename to .html
-        $filename = str_replace('.pdf', '.html', $filename);
-
-        Log::info('HTML file created successfully', [
-            'filesize' => filesize($tempFile),
-            'filename' => $filename,
-        ]);
-
-        // Return the file as a download
-        return response()
-            ->download($tempFile, $filename, [
-                'Content-Type' => 'text/html',
-            ])
-            ->deleteFileAfterSend(true);
     }
 }
