@@ -22,8 +22,12 @@ class SocialiteController extends \App\Http\Controllers\Controller
     public function redirectToProvider($provider)
     {
         // Validate the provider
-        if (!in_array($provider, ['google', 'microsoft', 'facebook', 'apple'])) {
-            return redirect(env('FRONTEND_URL', '/') . '/login?error=Invalid provider');
+        if (
+            !in_array($provider, ['google', 'microsoft', 'facebook', 'apple'])
+        ) {
+            return redirect(
+                env('FRONTEND_URL', '/') . '/login?error=Invalid provider'
+            );
         }
 
         return Socialite::driver($provider)->redirect();
@@ -54,7 +58,9 @@ class SocialiteController extends \App\Http\Controllers\Controller
                     $user = User::create([
                         'name' => $socialUser->getName(),
                         'email' => $socialUser->getEmail(),
-                        'username' => $this->generateUsername($socialUser->getNickname() ?? $socialUser->getName()),
+                        'username' => $this->generateUsername(
+                            $socialUser->getNickname() ?? $socialUser->getName()
+                        ),
                         'password' => Hash::make(Str::random(24)), // Random password for security
                         'provider' => $provider,
                         'provider_id' => $socialUser->getId(),
@@ -99,7 +105,9 @@ class SocialiteController extends \App\Http\Controllers\Controller
 
             // Redirect to login with error message
             $frontendUrl = env('FRONTEND_URL', '/');
-            return redirect("{$frontendUrl}/login?error=Authentication failed with {$provider}");
+            return redirect(
+                "{$frontendUrl}/login?error=Authentication failed with {$provider}"
+            );
         }
     }
 
@@ -131,7 +139,9 @@ class SocialiteController extends \App\Http\Controllers\Controller
         // Get available providers from config
         $providers = array_filter([
             'google' => config('services.google.client_id') ? true : false,
-            'microsoft' => config('services.microsoft.client_id') ? true : false,
+            'microsoft' => config('services.microsoft.client_id')
+                ? true
+                : false,
             'facebook' => config('services.facebook.client_id') ? true : false,
             'apple' => config('services.apple.client_id') ? true : false,
         ]);
@@ -155,7 +165,28 @@ class SocialiteController extends \App\Http\Controllers\Controller
      */
     public function getAuthStatus(Request $request): JsonResponse
     {
-        if (Auth::check()) {
+        // Check if the request has a bearer token
+        if ($request->bearerToken()) {
+            // For API requests with a token, we need to check if the token is valid
+            // The user should already be authenticated by Sanctum middleware if the token is valid
+            $user = $request->user();
+
+            if ($user) {
+                return response()->json([
+                    'authenticated' => true,
+                    'user' => [
+                        'id' => $user->id,
+                        'name' => $user->name,
+                        'email' => $user->email,
+                        'username' => $user->username,
+                        'provider' => $user->provider ?? null,
+                        'avatar' => $user->avatar ?? null,
+                    ],
+                ]);
+            }
+        }
+        // Fall back to session-based authentication check
+        elseif (Auth::check()) {
             $user = Auth::user();
             return response()->json([
                 'authenticated' => true,
@@ -164,8 +195,8 @@ class SocialiteController extends \App\Http\Controllers\Controller
                     'name' => $user->name,
                     'email' => $user->email,
                     'username' => $user->username,
-                    'provider' => $user->provider,
-                    'avatar' => $user->avatar,
+                    'provider' => $user->provider ?? null,
+                    'avatar' => $user->avatar ?? null,
                 ],
             ]);
         }
