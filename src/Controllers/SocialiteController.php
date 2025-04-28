@@ -165,44 +165,20 @@ class SocialiteController extends \App\Http\Controllers\Controller
      */
     public function getAuthStatus(Request $request): JsonResponse
     {
-        // Check if the request has a bearer token
-        if ($request->bearerToken()) {
-            // For API requests with a token, we need to check if the token is valid
-            // The user should already be authenticated by Sanctum middleware if the token is valid
-            $user = $request->user();
-
-            if ($user) {
-                return response()->json([
-                    'authenticated' => true,
-                    'user' => [
-                        'id' => $user->id,
-                        'name' => $user->name,
-                        'email' => $user->email,
-                        'username' => $user->username,
-                        'provider' => $user->provider ?? null,
-                        'avatar' => $user->avatar ?? null,
-                    ],
-                ]);
-            }
-        }
-        // Fall back to session-based authentication check
-        elseif (Auth::check()) {
-            $user = Auth::user();
-            return response()->json([
-                'authenticated' => true,
-                'user' => [
-                    'id' => $user->id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                    'username' => $user->username,
-                    'provider' => $user->provider ?? null,
-                    'avatar' => $user->avatar ?? null,
-                ],
-            ]);
-        }
+        // Since we've applied auth:sanctum middleware to this route,
+        // we can be sure that $request->user() will return the authenticated user
+        $user = $request->user();
 
         return response()->json([
-            'authenticated' => false,
+            'authenticated' => true,
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'username' => $user->username ?? null,
+                'provider' => $user->provider ?? null,
+                'avatar' => $user->avatar ?? null,
+            ],
         ]);
     }
 }

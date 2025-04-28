@@ -309,7 +309,10 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                     Route::controller(SocialiteController::class)->group(
                         function () {
                             Route::get('/auth/providers', 'getProviders'); // Get available OAuth providers
-                            Route::get('/auth/status', 'getAuthStatus'); // Check authentication status
+                            Route::middleware('auth:sanctum')->get(
+                                '/auth/status',
+                                'getAuthStatus'
+                            ); // Check authentication status
                         }
                     );
                 });
