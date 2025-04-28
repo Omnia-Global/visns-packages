@@ -295,6 +295,16 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                         }
                     );
 
+                    // User API routes
+                    Route::controller(UserController::class)->group(
+                        function () {
+                            Route::middleware('auth:sanctum')->get(
+                                '/profile',
+                                'profile'
+                            );
+                        }
+                    );
+
                     // Socialite API routes
                     Route::controller(SocialiteController::class)->group(
                         function () {
