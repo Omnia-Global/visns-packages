@@ -11,6 +11,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
+use Visnsstudio\VisnsPackages\Exceptions\JsonValidationException;
 
 use Carbon\Carbon;
 
@@ -18,6 +21,35 @@ class DynamicController extends \App\Http\Controllers\Controller
 {
     protected $model;
     protected $folder;
+
+    /**
+     * Validate the request data and return validated data.
+     * Throws JsonValidationException instead of ValidationException for API requests.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  array  $rules
+     * @param  array  $messages
+     * @param  array  $customAttributes
+     * @return array
+     *
+     * @throws \Visnsstudio\VisnsPackages\Exceptions\JsonValidationException
+     */
+    protected function validateRequest(
+        Request $request,
+        array $rules,
+        array $messages = [],
+        array $customAttributes = []
+    ) {
+        try {
+            return $request->validate($rules, $messages, $customAttributes);
+        } catch (ValidationException $e) {
+            throw new JsonValidationException(
+                $e->validator,
+                $e->response,
+                $e->errorBag
+            );
+        }
+    }
 
     public function __construct(Request $request)
     {
@@ -88,7 +120,7 @@ class DynamicController extends \App\Http\Controllers\Controller
     {
         $error = '';
 
-        $validated = $request->validate([
+        $validated = $this->validateRequest($request, [
             'list' => ['required'],
         ]);
 
@@ -103,7 +135,7 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     public function templateSort(Request $request, $id)
     {
-        $validated = $request->validate([
+        $validated = $this->validateRequest($request, [
             'detail' => ['required'],
         ]);
 
@@ -769,7 +801,8 @@ class DynamicController extends \App\Http\Controllers\Controller
         $error = '';
 
         // Validate the request based on the model's rules
-        $validatedData = $request->validate(
+        $validatedData = $this->validateRequest(
+            $request,
             $this->model->validationRules('store', $request->all())
         );
 
@@ -1131,7 +1164,8 @@ class DynamicController extends \App\Http\Controllers\Controller
         $requestData = $request->all() + ['id' => $id];
 
         // Validate the request based on the model's rules
-        $validatedData = $request->validate(
+        $validatedData = $this->validateRequest(
+            $request,
             $this->model->validationRules('update', $requestData)
         );
         // Deep merge validated data with the entire request data to preserve nested unvalidated data
@@ -1570,7 +1604,7 @@ class DynamicController extends \App\Http\Controllers\Controller
         // Find the resource
         $resource = $this->model::findOrFail($id);
 
-        $validated = $request->validate([
+        $validated = $this->validateRequest($request, [
             'key' => ['required'],
             'uuid' => ['required'],
             'extension' => ['required'],
