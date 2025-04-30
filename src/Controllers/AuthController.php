@@ -174,11 +174,26 @@ class AuthController extends \App\Http\Controllers\Controller
 
                     $user = $user->load('roles.permissions');
                 } else {
-                    // No valid remember token, require 2FA only in production
-                    $request
-                        ->session()
-                        ->put('auth.two_factor.user_id', $user->id);
-                    $requiresTwoFactor = env('APP_ENV') == 'production';
+                    // Check if we're in production
+                    if (env('APP_ENV') == 'production') {
+                        // In production, require 2FA
+                        $request
+                            ->session()
+                            ->put('auth.two_factor.user_id', $user->id);
+                        $requiresTwoFactor = true;
+                    } else {
+                        // In non-production, skip 2FA and log the user in
+                        Auth::login($user);
+
+                        if (!env('ALLOW_MULTIPLE_SESSIONS', false)) {
+                            Auth::logoutOtherDevices(
+                                $request->input('password')
+                            );
+                        }
+
+                        $user = $user->load('roles.permissions');
+                        $requiresTwoFactor = false;
+                    }
                 }
             } else {
                 // User doesn't have 2FA, proceed with normal login
@@ -390,6 +405,32 @@ class AuthController extends \App\Http\Controllers\Controller
      */
     public function twoFactorAuthenticate(Request $request)
     {
+        // If not in production, skip 2FA validation and return success
+        if (env('APP_ENV') != 'production') {
+            // Get the user ID from the session
+            $userId = $request->session()->get('auth.two_factor.user_id');
+
+            if ($userId) {
+                $user = User::find($userId);
+                if ($user) {
+                    // Complete the login process
+                    $this->completeLogin($user);
+                    return response()->json([
+                        'user' => $user->load('roles.permissions'),
+                    ]);
+                }
+            }
+
+            // If we can't find the user, return an error
+            return response()->json(
+                [
+                    'error' => 'Invalid two-factor authentication session.',
+                ],
+                200
+            );
+        }
+
+        // Normal 2FA validation for production
         $request->validate([
             'code' => 'required|string',
             'remember' => 'sometimes|boolean',
@@ -508,6 +549,29 @@ class AuthController extends \App\Http\Controllers\Controller
      */
     public function twoFactorAuthenticateApi(Request $request)
     {
+        // If not in production, skip 2FA validation and return success
+        if (env('APP_ENV') != 'production') {
+            $request->validate([
+                'user_id' => 'required|exists:users,id',
+            ]);
+
+            $user = User::find($request->user_id);
+
+            if (!$user) {
+                return response()->json(
+                    [
+                        'error' => 'User not found.',
+                    ],
+                    200
+                );
+            }
+
+            // Skip 2FA validation and create token
+            $token = $user->createToken('authToken');
+            return response()->json(['id' => $token->plainTextToken], 200);
+        }
+
+        // Normal 2FA validation for production
         $request->validate([
             'user_id' => 'required|exists:users,id',
             'code' => 'required|string',
