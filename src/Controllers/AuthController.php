@@ -174,11 +174,11 @@ class AuthController extends \App\Http\Controllers\Controller
 
                     $user = $user->load('roles.permissions');
                 } else {
-                    // No valid remember token, require 2FA
+                    // No valid remember token, require 2FA only in production
                     $request
                         ->session()
                         ->put('auth.two_factor.user_id', $user->id);
-                    $requiresTwoFactor = true;
+                    $requiresTwoFactor = env('APP_ENV') == 'production';
                 }
             } else {
                 // User doesn't have 2FA, proceed with normal login
@@ -350,14 +350,25 @@ class AuthController extends \App\Http\Controllers\Controller
                         200
                     );
                 } else {
-                    // For API, we'll return a special response indicating 2FA is required
-                    return response()->json(
-                        [
-                            'two_factor_required' => true,
-                            'user_id' => $user->id,
-                        ],
-                        200
-                    );
+                    // For API, check if we're in production before requiring 2FA
+                    if (env('APP_ENV') == 'production') {
+                        // Return a special response indicating 2FA is required
+                        return response()->json(
+                            [
+                                'two_factor_required' => true,
+                                'user_id' => $user->id,
+                            ],
+                            200
+                        );
+                    } else {
+                        // Skip 2FA in non-production environments
+                        Auth::login($user);
+                        $token = $user->createToken('authToken');
+                        return response()->json(
+                            ['id' => $token->plainTextToken],
+                            200
+                        );
+                    }
                 }
             }
 
