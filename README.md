@@ -30,7 +30,12 @@ A comprehensive Laravel package that provides enhanced authentication, file mana
         -   [Database Schema Exploration](#database-schema-exploration)
         -   [Report Configuration](#report-configuration)
         -   [Executing Reports](#executing-reports)
+        -   [Exporting Reports](#exporting-reports)
         -   [Saving and Managing Reports](#saving-and-managing-reports)
+    -   [PDF Generation](#pdf-generation)
+        -   [Generating PDFs from Views](#generating-pdfs-from-views)
+        -   [Generating PDFs from HTML](#generating-pdfs-from-html)
+        -   [Custom PDF Options](#custom-pdf-options)
     -   [Dynamic Controller](#dynamic-controller)
         -   [Basic Usage](#basic-usage)
         -   [Filtering](#filtering)
@@ -48,6 +53,7 @@ A comprehensive Laravel package that provides enhanced authentication, file mana
             -   [Permission Management Routes](#permission-management-routes)
             -   [Role Management Routes](#role-management-routes)
             -   [Report Builder Routes](#report-builder-routes)
+            -   [PDF Generation Routes](#pdf-generation-routes)
             -   [Social Authentication Routes](#social-authentication-routes)
             -   [API Routes](#api-routes)
     -   [License](#license)
@@ -118,8 +124,15 @@ php artisan migrate
     -   Database schema exploration
     -   Custom report creation with table joins and filters
     -   SQL query generation and execution
-    -   Export reports to CSV and Excel (XLSX) formats
+    -   Export reports to CSV, Excel (XLSX), and PDF formats
     -   Report saving and management
+
+-   **PDF Generation**
+
+    -   Generate PDFs from Laravel views
+    -   Generate PDFs from HTML content
+    -   Customizable paper size and orientation
+    -   Support for custom PDF options
 
 -   **Dynamic Controller**
 
@@ -455,7 +468,7 @@ The `RoleController` provides methods for managing roles:
 
 ## Report Builder
 
-The package includes a powerful report builder system that allows users to create custom reports by exploring the database schema, selecting tables and columns, configuring joins and filters, and executing SQL queries.
+The package includes a powerful report builder system that allows users to create custom reports by exploring the database schema, selecting tables and columns, configuring joins and filters, and executing SQL queries. Reports can be exported to CSV, Excel (XLSX), and PDF formats.
 
 ### Database Schema Exploration
 
@@ -604,6 +617,89 @@ The `ReportBuilderController` also provides methods for saving and managing repo
 -   `deleteReport` - Deletes a report
 
 Users can save their report configurations for later use and share them with other users by making them public.
+
+## PDF Generation
+
+The package includes a powerful PDF generation system using the Laravel-DomPDF package. This allows you to generate PDFs from Laravel views or HTML content with customizable options.
+
+### Generating PDFs from Views
+
+The `PDFController` provides a `generatePDF` method that allows you to generate a PDF from a Laravel view:
+
+```javascript
+fetch('/ajax/pdf/generate', {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+        view: 'pdf.invoice',
+        data: {
+            invoice: {
+                /* invoice data */
+            },
+            customer: {
+                /* customer data */
+            },
+        },
+        filename: 'invoice-123.pdf',
+        paper: 'a4',
+        orientation: 'portrait',
+        download: true,
+    }),
+});
+```
+
+### Generating PDFs from HTML
+
+The `PDFController` also provides a `generatePDFFromHTML` method that allows you to generate a PDF from raw HTML content:
+
+```javascript
+fetch('/ajax/pdf/generate-from-html', {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+        html: '<html><body><h1>Hello World</h1></body></html>',
+        filename: 'hello.pdf',
+        paper: 'a4',
+        orientation: 'portrait',
+        download: true,
+    }),
+});
+```
+
+### Custom PDF Options
+
+For more advanced use cases, the `PDFController` provides a `generateCustomPDF` method that allows you to specify custom options for the PDF generation:
+
+```javascript
+fetch('/ajax/pdf/generate-custom', {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+        view: 'pdf.report',
+        data: {
+            /* report data */
+        },
+        filename: 'report.pdf',
+        options: {
+            isRemoteEnabled: true,
+            isHtml5ParserEnabled: true,
+        },
+        download: true,
+    }),
+});
+```
+
+The same endpoints are also available via the API with authentication required:
+
+-   `POST /api/pdf/generate`
+-   `POST /api/pdf/generate-from-html`
+-   `POST /api/pdf/generate-custom`
 
 ## Dynamic Controller
 
@@ -870,6 +966,29 @@ Route::prefix('ajax')
 
         // Export report
         Route::post('/reportBuilder/export', 'exportReport');
+    });
+```
+
+#### PDF Generation Routes
+
+```php
+// PDF Generation routes
+Route::prefix('ajax/pdf')
+    ->controller(PDFController::class)
+    ->group(function () {
+        Route::post('/generate', 'generatePDF');
+        Route::post('/generate-from-html', 'generatePDFFromHTML');
+        Route::post('/generate-custom', 'generateCustomPDF');
+    });
+
+// PDF API routes
+Route::prefix('api/pdf')
+    ->controller(PDFController::class)
+    ->middleware('auth:sanctum')
+    ->group(function () {
+        Route::post('/generate', 'generatePDF');
+        Route::post('/generate-from-html', 'generatePDFFromHTML');
+        Route::post('/generate-custom', 'generateCustomPDF');
     });
 ```
 
