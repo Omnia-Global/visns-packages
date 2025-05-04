@@ -1803,7 +1803,21 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             }
         }
 
-        $query->select($selectColumns);
+        // Log the columns for debugging
+        Log::info('Columns to select', [
+            'selectColumns' => $selectColumns,
+            'columnCount' => count($selectColumns)
+        ]);
+
+        // Make sure we have at least one column to select
+        if (empty($selectColumns)) {
+            // If no columns were specified, select all columns from the main table
+            Log::warning('No columns specified, selecting all columns from main table');
+            $query->select("$mainTable.*");
+        } else {
+            // Select the specified columns
+            $query->select($selectColumns);
+        }
 
         // Log the filter structure for debugging
         Log::debug('Processing filters', [
@@ -2730,6 +2744,8 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
         return implode("\n", $result);
     }
+
+
 
     /**
      * Format a value for display based on its type and field name
