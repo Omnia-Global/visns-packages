@@ -285,6 +285,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                                 '/generate-custom',
                                 'generateCustomPDF'
                             );
+                            Route::post('/generate-quote', 'generateQuotePDF');
                         });
                 });
 
@@ -346,6 +347,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                                 '/generate-custom',
                                 'generateCustomPDF'
                             );
+                            Route::post('/generate-quote', 'generateQuotePDF');
                         });
                 });
         }

@@ -2831,8 +2831,8 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 ])
                 ->deleteFileAfterSend(true);
         } else {
-            // Generate PDF using Dompdf
-            Log::info('Generating PDF file using Dompdf');
+            // Generate PDF using Dompdf with enhanced styling
+            Log::info('Generating PDF file using Dompdf with enhanced styling');
 
             // Create HTML content
             $html =
@@ -2924,11 +2924,26 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 'filename' => $filename,
             ]);
 
-            // Generate PDF using Dompdf
-            $pdf = PDF::loadHTML($html);
+            // Set enhanced options for better PDF rendering
+            $options = [
+                'isHtml5ParserEnabled' => true,
+                'isRemoteEnabled' => true,
+                'isPhpEnabled' => true,
+                'defaultFont' => 'sans-serif',
+                'dpi' => 150,
+                'defaultPaperSize' => 'a4',
+                'defaultMediaType' => 'screen',
+                'defaultPaperOrientation' => 'landscape',
+                'isFontSubsettingEnabled' => true,
+                'isJavascriptEnabled' => true,
+                'debugKeepTemp' => true,
+                'debugCss' => true,
+            ];
 
-            // Set paper size and orientation
-            $pdf->setPaper('a4', 'landscape');
+            // Generate PDF using Dompdf with enhanced options
+            $pdf = PDF::loadHTML($html)
+                ->setOptions($options)
+                ->setPaper('a4', 'landscape');
 
             // Return the PDF as a download
             return $pdf->download($filename);
