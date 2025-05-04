@@ -12,6 +12,7 @@ use Visnsstudio\VisnsPackages\Controllers\PermissionController;
 use Visnsstudio\VisnsPackages\Controllers\RoleController;
 use Visnsstudio\VisnsPackages\Controllers\SocialiteController;
 use Visnsstudio\VisnsPackages\Controllers\ReportBuilderController;
+use Visnsstudio\VisnsPackages\Controllers\PDFController;
 use Visnsstudio\VisnsPackages\Middleware\AcceptJson;
 
 class VisnsPackagesServiceProvider extends ServiceProvider
@@ -270,6 +271,21 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                                 'getJsonFieldKeys'
                             );
                         });
+
+                    // PDF Generation routes
+                    Route::prefix('ajax/pdf')
+                        ->controller(PDFController::class)
+                        ->group(function () {
+                            Route::post('/generate', 'generatePDF');
+                            Route::post(
+                                '/generate-from-html',
+                                'generatePDFFromHTML'
+                            );
+                            Route::post(
+                                '/generate-custom',
+                                'generateCustomPDF'
+                            );
+                        });
                 });
 
             // Register API routes
@@ -315,6 +331,22 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                             ); // Check authentication status
                         }
                     );
+
+                    // PDF API routes
+                    Route::prefix('pdf')
+                        ->controller(PDFController::class)
+                        ->middleware('auth:sanctum')
+                        ->group(function () {
+                            Route::post('/generate', 'generatePDF');
+                            Route::post(
+                                '/generate-from-html',
+                                'generatePDFFromHTML'
+                            );
+                            Route::post(
+                                '/generate-custom',
+                                'generateCustomPDF'
+                            );
+                        });
                 });
         }
     }

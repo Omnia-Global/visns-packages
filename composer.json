@@ -22,7 +22,7 @@
         "bacon/bacon-qr-code": "^3.0",
         "pragmarx/google2fa": "^8.0",
         "phpoffice/phpspreadsheet": "^1.29",
-        "mpdf/mpdf": "^8.2"
+        "barryvdh/laravel-dompdf": "^2.0"
     },
     "extra": {
         "laravel": {

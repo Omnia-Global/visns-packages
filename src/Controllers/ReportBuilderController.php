@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Auth;
 use Visnsstudio\VisnsPackages\Models\ReportBuilder;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
-use Mpdf\Mpdf;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 class ReportBuilderController extends \App\Http\Controllers\Controller
 {
@@ -2831,8 +2831,8 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 ])
                 ->deleteFileAfterSend(true);
         } else {
-            // Default to HTML for PDF (since we're not using mPDF in this simplified version)
-            Log::info('Generating HTML file for PDF format');
+            // Generate PDF using Dompdf
+            Log::info('Generating PDF file using Dompdf');
 
             // Create HTML content
             $html =
@@ -2919,23 +2919,19 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             </body>
             </html>';
 
-            // Write HTML to the temporary file
-            file_put_contents($tempFile, $html);
-
-            // Change the filename to .html
-            $filename = str_replace('.pdf', '.html', $filename);
-
-            Log::info('HTML file created successfully', [
-                'filesize' => filesize($tempFile),
+            Log::info('HTML content generated for PDF', [
+                'content_length' => strlen($html),
                 'filename' => $filename,
             ]);
 
-            // Return the file as a download
-            return response()
-                ->download($tempFile, $filename, [
-                    'Content-Type' => 'text/html',
-                ])
-                ->deleteFileAfterSend(true);
+            // Generate PDF using Dompdf
+            $pdf = PDF::loadHTML($html);
+
+            // Set paper size and orientation
+            $pdf->setPaper('a4', 'landscape');
+
+            // Return the PDF as a download
+            return $pdf->download($filename);
         }
     }
 }
