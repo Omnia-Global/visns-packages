@@ -1419,6 +1419,13 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             // Get the query configuration
             $queryConfig = $validated['query'];
 
+            // Log the query configuration for debugging
+            Log::info('Received query configuration', [
+                'queryConfig' => $queryConfig,
+                'limit' => $limit,
+                'offset' => $offset
+            ]);
+
             // If report_id is provided, load the report configuration
             if (isset($validated['report_id'])) {
                 $report = ReportBuilder::findOrFail($validated['report_id']);
@@ -1449,6 +1456,13 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 $offset,
                 $parameters
             );
+
+            // Log the result for debugging
+            Log::info('Query execution result', [
+                'resultCount' => count($result['data']),
+                'total' => $result['total'],
+                'firstRowColumns' => count($result['data']) > 0 ? array_keys((array)$result['data'][0]) : []
+            ]);
 
             return response()->json([
                 'success' => true,
@@ -1754,8 +1768,25 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             ]);
 
             // Determine join method
+            // Normalize join type to lowercase and trim any extra spaces
+            $joinType = strtolower(trim($joinType));
+
+            // Remove the word "join" if it's included
+            $joinType = str_replace(' join', '', $joinType);
+
+            // Log the join type for debugging
+            Log::info("Processing join with type: '$joinType'", [
+                'originalJoinType' => $join['joinType'] ?? 'inner',
+                'normalizedJoinType' => $joinType,
+                'sourceTable' => $sourceTable,
+                'targetTable' => $targetTable,
+                'sourceColumn' => $sourceColumn,
+                'targetColumn' => $targetColumn
+            ]);
+
             switch ($joinType) {
                 case 'left':
+                    Log::info("Adding LEFT JOIN: $sourceTable.$sourceColumn = $targetTable.$targetColumn");
                     $query->leftJoin(
                         $targetTable,
                         "$sourceTable.$sourceColumn",
@@ -1764,7 +1795,20 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     );
                     break;
                 case 'right':
+                    Log::info("Adding RIGHT JOIN: $sourceTable.$sourceColumn = $targetTable.$targetColumn");
                     $query->rightJoin(
+                        $targetTable,
+                        "$sourceTable.$sourceColumn",
+                        '=',
+                        "$targetTable.$targetColumn"
+                    );
+                    break;
+                case 'full':
+                    // Full outer join is not directly supported in all databases
+                    // For MySQL, we can simulate it with a UNION of LEFT and RIGHT joins
+                    // But for simplicity, we'll use LEFT JOIN as a fallback
+                    Log::info("Adding LEFT JOIN (as fallback for FULL JOIN): $sourceTable.$sourceColumn = $targetTable.$targetColumn");
+                    $query->leftJoin(
                         $targetTable,
                         "$sourceTable.$sourceColumn",
                         '=',
@@ -1773,6 +1817,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     break;
                 case 'inner':
                 default:
+                    Log::info("Adding INNER JOIN: $sourceTable.$sourceColumn = $targetTable.$targetColumn");
                     $query->join(
                         $targetTable,
                         "$sourceTable.$sourceColumn",
@@ -1795,10 +1840,12 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             }
 
             if ($alias) {
+                // Use DB::raw to create a properly formatted column with alias
                 $selectColumns[] = DB::raw(
                     "$tableName.$columnName as `$alias`"
                 );
             } else {
+                // Use a simple string for the column
                 $selectColumns[] = "$tableName.$columnName";
             }
         }
@@ -1806,7 +1853,8 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         // Log the columns for debugging
         Log::info('Columns to select', [
             'selectColumns' => $selectColumns,
-            'columnCount' => count($selectColumns)
+            'columnCount' => count($selectColumns),
+            'originalColumns' => $columns
         ]);
 
         // Make sure we have at least one column to select
@@ -1815,8 +1863,134 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             Log::warning('No columns specified, selecting all columns from main table');
             $query->select("$mainTable.*");
         } else {
+            // Clear any existing select statements and start fresh
+            $query = DB::table($mainTable);
+
+            // Re-add all the joins
+            foreach ($joins as $join) {
+                $joinType = strtolower(trim($join['joinType'] ?? 'inner'));
+                $joinType = str_replace(' join', '', $joinType);
+                $targetTable = $join['targetTable'] ?? null;
+                $sourceTable = $join['sourceTable'] ?? $mainTable;
+                $sourceColumn = $join['sourceColumn'] ?? null;
+                $targetColumn = $join['targetColumn'] ?? null;
+
+                if (!$targetTable || !$sourceColumn || !$targetColumn) {
+                    continue; // Skip invalid joins
+                }
+
+                switch ($joinType) {
+                    case 'left':
+                        $query->leftJoin(
+                            $targetTable,
+                            "$sourceTable.$sourceColumn",
+                            '=',
+                            "$targetTable.$targetColumn"
+                        );
+                        break;
+                    case 'right':
+                        $query->rightJoin(
+                            $targetTable,
+                            "$sourceTable.$sourceColumn",
+                            '=',
+                            "$targetTable.$targetColumn"
+                        );
+                        break;
+                    case 'full':
+                        $query->leftJoin(
+                            $targetTable,
+                            "$sourceTable.$sourceColumn",
+                            '=',
+                            "$targetTable.$targetColumn"
+                        );
+                        break;
+                    case 'inner':
+                    default:
+                        $query->join(
+                            $targetTable,
+                            "$sourceTable.$sourceColumn",
+                            '=',
+                            "$targetTable.$targetColumn"
+                        );
+                        break;
+                }
+            }
+
             // Select the specified columns
+            Log::info('Selecting columns', ['columns' => $selectColumns]);
             $query->select($selectColumns);
+
+            // Re-add the filters
+            // Handle filters structure - it could be an array or an object with groups
+            $filterArray = [];
+            if (isset($filters['groups'])) {
+                // This is the new format with groups
+                foreach ($filters['groups'] as $group) {
+                    if (isset($group['filters']) && is_array($group['filters'])) {
+                        $filterArray = array_merge($filterArray, $group['filters']);
+                    }
+                }
+                Log::debug('Extracted filters from groups', [
+                    'filterArray' => $filterArray
+                ]);
+            } else {
+                // This is the old format - a simple array of filters
+                $filterArray = $filters;
+            }
+
+            // Add filters
+            foreach ($filterArray as $filter) {
+                $tableName = $filter['table'] ?? $mainTable;
+                $columnName = $filter['column'] ?? null;
+                $operator = $filter['operator'] ?? '=';
+                $value = $filter['value'] ?? null;
+                $logicalOperator = strtolower($filter['logicalOperator'] ?? 'and');
+
+                if (!$columnName) {
+                    continue; // Skip invalid filters
+                }
+
+                // Apply the filter
+                $columnRef = "$tableName.$columnName";
+
+                // Simple where clause
+                if (strtolower($operator) === 'like') {
+                    $query->where($columnRef, 'like', "%$value%");
+                } else if (strtolower($operator) === 'in' && is_array($value)) {
+                    $query->whereIn($columnRef, $value);
+                } else if (strtolower($operator) === 'not in' && is_array($value)) {
+                    $query->whereNotIn($columnRef, $value);
+                } else if (strtolower($operator) === 'between' && is_array($value) && count($value) === 2) {
+                    $query->whereBetween($columnRef, $value);
+                } else if (strtolower($operator) === 'not between' && is_array($value) && count($value) === 2) {
+                    $query->whereNotBetween($columnRef, $value);
+                } else if (strtolower($operator) === 'null') {
+                    $query->whereNull($columnRef);
+                } else if (strtolower($operator) === 'not null') {
+                    $query->whereNotNull($columnRef);
+                } else {
+                    $query->where($columnRef, $operator, $value);
+                }
+            }
+
+            // Re-add sorting
+            foreach ($sorting as $sort) {
+                $tableName = $sort['table'] ?? $mainTable;
+                $columnName = $sort['column'] ?? null;
+                $direction = strtolower($sort['direction'] ?? 'asc');
+
+                if (!$columnName) {
+                    continue; // Skip invalid sorting
+                }
+
+                $query->orderBy("$tableName.$columnName", $direction);
+            }
+
+            // Log the query after selecting columns
+            Log::info('Query after selecting columns and adding filters', [
+                'sql' => $query->toSql(),
+                'bindings' => $query->getBindings()
+            ]);
         }
 
         // Log the filter structure for debugging
@@ -2208,7 +2382,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         // to avoid duplicate counting
         if (count($joins) > 0) {
             try {
-                // Create a new query for counting to avoid issues with existing select and group by clauses
+                // Use the same query structure but with a count distinct
                 $distinctCountQuery = DB::table($mainTable);
 
                 // Add the same joins as the original query
@@ -2223,8 +2397,25 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                         continue; // Skip invalid joins
                     }
 
+                    // Normalize join type to lowercase and trim any extra spaces
+                    $joinType = strtolower(trim($joinType));
+
+                    // Remove the word "join" if it's included
+                    $joinType = str_replace(' join', '', $joinType);
+
+                    // Log the join type for debugging
+                    Log::info("Processing count query join with type: '$joinType'", [
+                        'originalJoinType' => $join['joinType'] ?? 'inner',
+                        'normalizedJoinType' => $joinType,
+                        'sourceTable' => $sourceTable,
+                        'targetTable' => $targetTable,
+                        'sourceColumn' => $sourceColumn,
+                        'targetColumn' => $targetColumn
+                    ]);
+
                     switch ($joinType) {
                         case 'left':
+                            Log::info("Adding LEFT JOIN to count query: $sourceTable.$sourceColumn = $targetTable.$targetColumn");
                             $distinctCountQuery->leftJoin(
                                 $targetTable,
                                 "$sourceTable.$sourceColumn",
@@ -2233,7 +2424,20 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                             );
                             break;
                         case 'right':
+                            Log::info("Adding RIGHT JOIN to count query: $sourceTable.$sourceColumn = $targetTable.$targetColumn");
                             $distinctCountQuery->rightJoin(
+                                $targetTable,
+                                "$sourceTable.$sourceColumn",
+                                '=',
+                                "$targetTable.$targetColumn"
+                            );
+                            break;
+                        case 'full':
+                            // Full outer join is not directly supported in all databases
+                            // For MySQL, we can simulate it with a UNION of LEFT and RIGHT joins
+                            // But for simplicity, we'll use LEFT JOIN as a fallback
+                            Log::info("Adding LEFT JOIN (as fallback for FULL JOIN) to count query: $sourceTable.$sourceColumn = $targetTable.$targetColumn");
+                            $distinctCountQuery->leftJoin(
                                 $targetTable,
                                 "$sourceTable.$sourceColumn",
                                 '=',
@@ -2242,6 +2446,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                             break;
                         case 'inner':
                         default:
+                            Log::info("Adding INNER JOIN to count query: $sourceTable.$sourceColumn = $targetTable.$targetColumn");
                             $distinctCountQuery->join(
                                 $targetTable,
                                 "$sourceTable.$sourceColumn",
@@ -2336,15 +2541,47 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             $sql = preg_replace('/\?/', $value, $sql, 1);
         }
 
+        // Log the final SQL query with all bindings replaced
+        Log::info('Final SQL query with bindings replaced', [
+            'sql' => $sql
+        ]);
+
         // Log the final SQL query for debugging
         Log::info('Executing SQL query', [
             'sql' => $sql,
             'bindings' => $bindings,
-            'joins' => $joins
+            'joins' => $joins,
+            'selectColumns' => $selectColumns,
+            'mainTable' => $mainTable,
+            'columnCount' => count($selectColumns)
         ]);
 
         // Execute the query
         $results = $query->get();
+
+        // Log the results for debugging
+        Log::info('Query results', [
+            'resultCount' => count($results),
+            'firstRowColumns' => count($results) > 0 ? array_keys((array)$results[0]) : [],
+            'selectedColumns' => $selectColumns,
+            'actualQuery' => $query->toSql()
+        ]);
+
+        // If we have results but the columns don't match what we expected, log a warning
+        if (count($results) > 0) {
+            $actualColumns = array_keys((array)$results[0]);
+            $expectedColumnCount = count($selectColumns);
+            $actualColumnCount = count($actualColumns);
+
+            if ($actualColumnCount != $expectedColumnCount) {
+                Log::warning('Column count mismatch', [
+                    'expectedColumnCount' => $expectedColumnCount,
+                    'actualColumnCount' => $actualColumnCount,
+                    'expectedColumns' => $selectColumns,
+                    'actualColumns' => $actualColumns
+                ]);
+            }
+        }
 
         return [
             'data' => $results,
