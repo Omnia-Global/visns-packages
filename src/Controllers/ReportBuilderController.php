@@ -1863,141 +1863,18 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             Log::warning('No columns specified, selecting all columns from main table');
             $query->select("$mainTable.*");
         } else {
-            // Clear any existing select statements and start fresh
-            $query = DB::table($mainTable);
-
-            // Re-add all the joins
-            foreach ($joins as $join) {
-                $joinType = strtolower(trim($join['joinType'] ?? 'inner'));
-                $joinType = str_replace(' join', '', $joinType);
-                $targetTable = $join['targetTable'] ?? null;
-                $sourceTable = $join['sourceTable'] ?? $mainTable;
-                $sourceColumn = $join['sourceColumn'] ?? null;
-                $targetColumn = $join['targetColumn'] ?? null;
-
-                if (!$targetTable || !$sourceColumn || !$targetColumn) {
-                    continue; // Skip invalid joins
-                }
-
-                switch ($joinType) {
-                    case 'left':
-                        $query->leftJoin(
-                            $targetTable,
-                            "$sourceTable.$sourceColumn",
-                            '=',
-                            "$targetTable.$targetColumn"
-                        );
-                        break;
-                    case 'right':
-                        $query->rightJoin(
-                            $targetTable,
-                            "$sourceTable.$sourceColumn",
-                            '=',
-                            "$targetTable.$targetColumn"
-                        );
-                        break;
-                    case 'full':
-                        $query->leftJoin(
-                            $targetTable,
-                            "$sourceTable.$sourceColumn",
-                            '=',
-                            "$targetTable.$targetColumn"
-                        );
-                        break;
-                    case 'inner':
-                    default:
-                        $query->join(
-                            $targetTable,
-                            "$sourceTable.$sourceColumn",
-                            '=',
-                            "$targetTable.$targetColumn"
-                        );
-                        break;
-                }
-            }
-
-            // Select the specified columns
+            // Select the specified columns directly on the existing query
             Log::info('Selecting columns', ['columns' => $selectColumns]);
             $query->select($selectColumns);
 
-            // Re-add the filters
-            // Handle filters structure - it could be an array or an object with groups
-            $filterArray = [];
-            if (isset($filters['groups'])) {
-                // This is the new format with groups
-                foreach ($filters['groups'] as $group) {
-                    if (isset($group['filters']) && is_array($group['filters'])) {
-                        $filterArray = array_merge($filterArray, $group['filters']);
-                    }
-                }
-                Log::debug('Extracted filters from groups', [
-                    'filterArray' => $filterArray
-                ]);
-            } else {
-                // This is the old format - a simple array of filters
-                $filterArray = $filters;
-            }
-
-            // Add filters
-            foreach ($filterArray as $filter) {
-                $tableName = $filter['table'] ?? $mainTable;
-                $columnName = $filter['column'] ?? null;
-                $operator = $filter['operator'] ?? '=';
-                $value = $filter['value'] ?? null;
-                $logicalOperator = strtolower($filter['logicalOperator'] ?? 'and');
-
-                if (!$columnName) {
-                    continue; // Skip invalid filters
-                }
-
-                // Apply the filter
-                $columnRef = "$tableName.$columnName";
-
-                // Simple where clause
-                if (strtolower($operator) === 'like') {
-                    $query->where($columnRef, 'like', "%$value%");
-                } else if (strtolower($operator) === 'in' && is_array($value)) {
-                    $query->whereIn($columnRef, $value);
-                } else if (strtolower($operator) === 'not in' && is_array($value)) {
-                    $query->whereNotIn($columnRef, $value);
-                } else if (strtolower($operator) === 'between' && is_array($value) && count($value) === 2) {
-                    $query->whereBetween($columnRef, $value);
-                } else if (strtolower($operator) === 'not between' && is_array($value) && count($value) === 2) {
-                    $query->whereNotBetween($columnRef, $value);
-                } else if (strtolower($operator) === 'null') {
-                    $query->whereNull($columnRef);
-                } else if (strtolower($operator) === 'not null') {
-                    $query->whereNotNull($columnRef);
-                } else {
-                    $query->where($columnRef, $operator, $value);
-                }
-            }
-
-            // Re-add sorting
-            foreach ($sorting as $sort) {
-                $tableName = $sort['table'] ?? $mainTable;
-                $columnName = $sort['column'] ?? null;
-                $direction = strtolower($sort['direction'] ?? 'asc');
-
-                if (!$columnName) {
-                    continue; // Skip invalid sorting
-                }
-
-                $query->orderBy("$tableName.$columnName", $direction);
-            }
-
             // Log the query after selecting columns
-            Log::info('Query after selecting columns and adding filters', [
+            Log::info('Query after selecting columns', [
                 'sql' => $query->toSql(),
                 'bindings' => $query->getBindings()
             ]);
         }
 
-        // Log the filter structure for debugging
-        Log::debug('Processing filters', [
-            'filters' => $filters
-        ]);
-
+        // Process filters
         // Handle filters structure - it could be an array or an object with groups
         $filterArray = [];
         if (isset($filters['groups'])) {
@@ -2015,6 +1892,12 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             $filterArray = $filters;
         }
 
+        // Log the filter structure for debugging
+        Log::debug('Processing filters', [
+            'filters' => $filters,
+            'filterArray' => $filterArray
+        ]);
+
         // Add filters
         foreach ($filterArray as $filter) {
             $tableName = $filter['table'] ?? $mainTable;
@@ -2027,337 +1910,27 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 continue; // Skip invalid filters
             }
 
-            // Check if this is a parameter reference
-            if (
-                is_string($value) &&
-                preg_match('/^\{([^\}]+)\}$/', $value, $matches)
-            ) {
-                $paramName = $matches[1];
-                if (isset($parameters[$paramName])) {
-                    $value = $parameters[$paramName];
-                }
-            }
-
             // Apply the filter
             $columnRef = "$tableName.$columnName";
 
-            // Check if this is a JSON field filter
-            $jsonKey = $filter['jsonKey'] ?? null;
-
-            // If we have a JSON key, we need to use JSON filtering
-            if ($jsonKey && !empty($jsonKey)) {
-                // Get database connection type
-                $connection = DB::connection()->getDriverName();
-
-                // Different JSON syntax for different database systems
-                if ($connection === 'mysql') {
-                    // MySQL uses -> for JSON path and ->> for extracting values as text
-                    // Convert dot notation to JSON path with proper quoting
-                    $jsonPath = '';
-                    $pathParts = explode('.', $jsonKey);
-
-                    foreach ($pathParts as $index => $part) {
-                        // For the last part, use ->> to extract as text for comparison
-                        if ($index === count($pathParts) - 1) {
-                            $jsonPath .= "->>'$.{$part}'";
-                        } else {
-                            $jsonPath .= "->'$.{$part}'";
-                        }
-                    }
-
-                    // Create the JSON column reference
-                    $jsonColumnRef = "$columnRef$jsonPath";
-
-                    if ($logicalOperator === 'or') {
-                        switch (strtolower($operator)) {
-                            case 'like':
-                                $query->orWhereRaw(
-                                    "LOWER($jsonColumnRef) LIKE ?",
-                                    ['%' . strtolower($value) . '%']
-                                );
-                                break;
-                            case 'not like':
-                                $query->orWhereRaw(
-                                    "LOWER($jsonColumnRef) NOT LIKE ?",
-                                    ['%' . strtolower($value) . '%']
-                                );
-                                break;
-                            case 'null':
-                                $query->orWhereRaw("$jsonColumnRef IS NULL");
-                                break;
-                            case 'not null':
-                                $query->orWhereRaw(
-                                    "$jsonColumnRef IS NOT NULL"
-                                );
-                                break;
-                            default:
-                                $query->orWhereRaw(
-                                    "$jsonColumnRef $operator ?",
-                                    [$value]
-                                );
-                                break;
-                        }
-                    } else {
-                        switch (strtolower($operator)) {
-                            case 'like':
-                                $query->whereRaw(
-                                    "LOWER($jsonColumnRef) LIKE ?",
-                                    ['%' . strtolower($value) . '%']
-                                );
-                                break;
-                            case 'not like':
-                                $query->whereRaw(
-                                    "LOWER($jsonColumnRef) NOT LIKE ?",
-                                    ['%' . strtolower($value) . '%']
-                                );
-                                break;
-                            case 'null':
-                                $query->whereRaw("$jsonColumnRef IS NULL");
-                                break;
-                            case 'not null':
-                                $query->whereRaw("$jsonColumnRef IS NOT NULL");
-                                break;
-                            default:
-                                $query->whereRaw("$jsonColumnRef $operator ?", [
-                                    $value,
-                                ]);
-                                break;
-                        }
-                    }
-                } elseif ($connection === 'pgsql') {
-                    // PostgreSQL uses -> for JSON objects and ->> for extracting text
-                    // Convert dot notation to JSON path
-                    $jsonPath = '';
-                    $pathParts = explode('.', $jsonKey);
-
-                    foreach ($pathParts as $index => $part) {
-                        // For the last part, use ->> to extract as text for comparison
-                        if ($index === count($pathParts) - 1) {
-                            $jsonPath .= "->>'$part'";
-                        } else {
-                            $jsonPath .= "->'$part'";
-                        }
-                    }
-
-                    // Create the JSON column reference
-                    $jsonColumnRef = "$columnRef$jsonPath";
-
-                    if ($logicalOperator === 'or') {
-                        switch (strtolower($operator)) {
-                            case 'like':
-                                $query->orWhere(
-                                    DB::raw("LOWER($jsonColumnRef)"),
-                                    'like',
-                                    '%' . strtolower($value) . '%'
-                                );
-                                break;
-                            case 'not like':
-                                $query->orWhere(
-                                    DB::raw("LOWER($jsonColumnRef)"),
-                                    'not like',
-                                    '%' . strtolower($value) . '%'
-                                );
-                                break;
-                            case 'null':
-                                $query->orWhereNull(DB::raw($jsonColumnRef));
-                                break;
-                            case 'not null':
-                                $query->orWhereNotNull(DB::raw($jsonColumnRef));
-                                break;
-                            default:
-                                $query->orWhere(
-                                    DB::raw($jsonColumnRef),
-                                    $operator,
-                                    $value
-                                );
-                                break;
-                        }
-                    } else {
-                        switch (strtolower($operator)) {
-                            case 'like':
-                                $query->where(
-                                    DB::raw("LOWER($jsonColumnRef)"),
-                                    'like',
-                                    '%' . strtolower($value) . '%'
-                                );
-                                break;
-                            case 'not like':
-                                $query->where(
-                                    DB::raw("LOWER($jsonColumnRef)"),
-                                    'not like',
-                                    '%' . strtolower($value) . '%'
-                                );
-                                break;
-                            case 'null':
-                                $query->whereNull(DB::raw($jsonColumnRef));
-                                break;
-                            case 'not null':
-                                $query->whereNotNull(DB::raw($jsonColumnRef));
-                                break;
-                            default:
-                                $query->where(
-                                    DB::raw($jsonColumnRef),
-                                    $operator,
-                                    $value
-                                );
-                                break;
-                        }
-                    }
-                } else {
-                    // SQLite and other databases - use JSON_EXTRACT function if available
-                    // This is a fallback and may not work for all databases
-                    $jsonPath = '$.' . $jsonKey;
-                    $jsonColumnRef = "JSON_EXTRACT($columnRef, '$jsonPath')";
-
-                    if ($logicalOperator === 'or') {
-                        switch (strtolower($operator)) {
-                            case 'like':
-                                $query->orWhereRaw(
-                                    "LOWER($jsonColumnRef) LIKE ?",
-                                    ['%' . strtolower($value) . '%']
-                                );
-                                break;
-                            case 'not like':
-                                $query->orWhereRaw(
-                                    "LOWER($jsonColumnRef) NOT LIKE ?",
-                                    ['%' . strtolower($value) . '%']
-                                );
-                                break;
-                            case 'null':
-                                $query->orWhereRaw("$jsonColumnRef IS NULL");
-                                break;
-                            case 'not null':
-                                $query->orWhereRaw(
-                                    "$jsonColumnRef IS NOT NULL"
-                                );
-                                break;
-                            default:
-                                $query->orWhereRaw(
-                                    "$jsonColumnRef $operator ?",
-                                    [$value]
-                                );
-                                break;
-                        }
-                    } else {
-                        switch (strtolower($operator)) {
-                            case 'like':
-                                $query->whereRaw(
-                                    "LOWER($jsonColumnRef) LIKE ?",
-                                    ['%' . strtolower($value) . '%']
-                                );
-                                break;
-                            case 'not like':
-                                $query->whereRaw(
-                                    "LOWER($jsonColumnRef) NOT LIKE ?",
-                                    ['%' . strtolower($value) . '%']
-                                );
-                                break;
-                            case 'null':
-                                $query->whereRaw("$jsonColumnRef IS NULL");
-                                break;
-                            case 'not null':
-                                $query->whereRaw("$jsonColumnRef IS NOT NULL");
-                                break;
-                            default:
-                                $query->whereRaw("$jsonColumnRef $operator ?", [
-                                    $value,
-                                ]);
-                                break;
-                        }
-                    }
-                }
+            // Simple where clause
+            if (strtolower($operator) === 'like') {
+                $query->where($columnRef, 'like', "%$value%");
+            } else if (strtolower($operator) === 'in' && is_array($value)) {
+                $query->whereIn($columnRef, $value);
+            } else if (strtolower($operator) === 'not in' && is_array($value)) {
+                $query->whereNotIn($columnRef, $value);
+            } else if (strtolower($operator) === 'between' && is_array($value) && count($value) === 2) {
+                $query->whereBetween($columnRef, $value);
+            } else if (strtolower($operator) === 'not between' && is_array($value) && count($value) === 2) {
+                $query->whereNotBetween($columnRef, $value);
+            } else if (strtolower($operator) === 'null') {
+                $query->whereNull($columnRef);
+            } else if (strtolower($operator) === 'not null') {
+                $query->whereNotNull($columnRef);
             } else {
-                // Regular column filtering (non-JSON)
-                if ($logicalOperator === 'or') {
-                    switch (strtolower($operator)) {
-                        case 'like':
-                            $query->orWhere($columnRef, 'like', "%$value%");
-                            break;
-                        case 'not like':
-                            $query->orWhere($columnRef, 'not like', "%$value%");
-                            break;
-                        case 'in':
-                            if (is_array($value)) {
-                                $query->orWhereIn($columnRef, $value);
-                            }
-                            break;
-                        case 'not in':
-                            if (is_array($value)) {
-                                $query->orWhereNotIn($columnRef, $value);
-                            }
-                            break;
-                        case 'between':
-                            if (is_array($value) && count($value) === 2) {
-                                $query->orWhereBetween($columnRef, $value);
-                            }
-                            break;
-                        case 'not between':
-                            if (is_array($value) && count($value) === 2) {
-                                $query->orWhereNotBetween($columnRef, $value);
-                            }
-                            break;
-                        case 'null':
-                            $query->orWhereNull($columnRef);
-                            break;
-                        case 'not null':
-                            $query->orWhereNotNull($columnRef);
-                            break;
-                        default:
-                            $query->orWhere($columnRef, $operator, $value);
-                            break;
-                    }
-                } else {
-                    switch (strtolower($operator)) {
-                        case 'like':
-                            $query->where($columnRef, 'like', "%$value%");
-                            break;
-                        case 'not like':
-                            $query->where($columnRef, 'not like', "%$value%");
-                            break;
-                        case 'in':
-                            if (is_array($value)) {
-                                $query->whereIn($columnRef, $value);
-                            }
-                            break;
-                        case 'not in':
-                            if (is_array($value)) {
-                                $query->whereNotIn($columnRef, $value);
-                            }
-                            break;
-                        case 'between':
-                            if (is_array($value) && count($value) === 2) {
-                                $query->whereBetween($columnRef, $value);
-                            }
-                            break;
-                        case 'not between':
-                            if (is_array($value) && count($value) === 2) {
-                                $query->whereNotBetween($columnRef, $value);
-                            }
-                            break;
-                        case 'null':
-                            $query->whereNull($columnRef);
-                            break;
-                        case 'not null':
-                            $query->whereNotNull($columnRef);
-                            break;
-                        default:
-                            $query->where($columnRef, $operator, $value);
-                            break;
-                    }
-                }
+                $query->where($columnRef, $operator, $value);
             }
-        }
-
-        // Add group by
-        foreach ($groupBy as $group) {
-            $tableName = $group['table'] ?? $mainTable;
-            $columnName = $group['column'] ?? null;
-
-            if (!$columnName) {
-                continue; // Skip invalid group by
-            }
-
-            $query->groupBy("$tableName.$columnName");
         }
 
         // Add sorting
