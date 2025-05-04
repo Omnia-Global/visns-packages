@@ -1485,6 +1485,13 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         int $offset = 0,
         array $parameters = []
     ) {
+        // Log the query configuration for debugging
+        Log::debug('Building query with configuration', [
+            'queryConfig' => $queryConfig,
+            'limit' => $limit,
+            'offset' => $offset
+        ]);
+
         // Extract configuration
         $mainTable = $queryConfig['mainTable'] ?? null;
         $columns = $queryConfig['columns'] ?? [];
@@ -1507,8 +1514,12 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         $query = DB::table($mainTable);
 
         // Add joins
-        foreach ($joins as $join) {
-            $joinType = strtolower($join['joinType'] ?? 'inner');
+        // Keep track of joined tables to handle chain joins
+        $joinedTables = [$mainTable];
+
+        // First pass: Analyze the joins to identify potential pivot tables and chain joins
+        $tableRelationships = [];
+        foreach ($joins as $index => $join) {
             $targetTable = $join['targetTable'] ?? null;
             $sourceColumn = $join['sourceColumn'] ?? null;
             $targetColumn = $join['targetColumn'] ?? null;
@@ -1517,12 +1528,128 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 continue; // Skip invalid joins
             }
 
+            // Build a map of potential relationships between tables
+            // This helps us identify which tables should be joined to which
+            if (!isset($tableRelationships[$targetTable])) {
+                $tableRelationships[$targetTable] = [];
+            }
+
+            // For each target table, keep track of columns that might be foreign keys
+            // and the tables they might reference
+            if (preg_match('/_id$/', $targetColumn)) {
+                $possibleReferencedTable = preg_replace('/_id$/', 's', $targetColumn);
+                if (!in_array($possibleReferencedTable, $tableRelationships[$targetTable])) {
+                    $tableRelationships[$targetTable][] = $possibleReferencedTable;
+                }
+            }
+
+            // Also track the explicit join relationship
+            if (!in_array($mainTable, $tableRelationships[$targetTable])) {
+                $tableRelationships[$targetTable][] = $mainTable;
+            }
+        }
+
+        // Second pass: Process the joins with the relationship information
+        foreach ($joins as $index => $join) {
+            $joinType = strtolower($join['joinType'] ?? 'inner');
+            $targetTable = $join['targetTable'] ?? null;
+            $sourceColumn = $join['sourceColumn'] ?? null;
+            $targetColumn = $join['targetColumn'] ?? null;
+            // Get the source table from the join configuration or use the main table as default
+            $sourceTable = $join['sourceTable'] ?? $mainTable;
+
+            if (!$targetTable || !$sourceColumn || !$targetColumn) {
+                continue; // Skip invalid joins
+            }
+
+            // Determine the most likely source table for this join
+
+            // Case 1: Special case for pivot tables (many-to-many relationships)
+            // If the target table looks like a pivot table (contains '_' in name)
+            // and the target column ends with '_id'
+            if (strpos($targetTable, '_') !== false && preg_match('/_id$/', $targetColumn)) {
+                // Extract the base table name from the column name
+                $referencedTable = preg_replace('/_id$/', 's', $targetColumn);
+
+                // If the referenced table is in our joined tables, use it as the source
+                if (in_array($referencedTable, $joinedTables)) {
+                    $sourceTable = $referencedTable;
+                }
+            }
+
+            // Case 2: If the source column is 'id' and target column ends with '_id'
+            // This is likely a foreign key relationship
+            else if ($sourceColumn === 'id' && preg_match('/_id$/', $targetColumn)) {
+                // The target column references the source table
+                $referencedTable = preg_replace('/_id$/', 's', $targetColumn);
+
+                // If the referenced table is in our joined tables, use it as the source
+                if (in_array($referencedTable, $joinedTables)) {
+                    $sourceTable = $referencedTable;
+                }
+            }
+
+            // Case 3: If the target column is 'id' and source column ends with '_id'
+            // This is likely a foreign key relationship in the reverse direction
+            else if ($targetColumn === 'id' && preg_match('/_id$/', $sourceColumn)) {
+                // The source column references the target table
+                $referencedTable = preg_replace('/_id$/', 's', $sourceColumn);
+
+                // If the referenced table matches the target table, this is a valid join
+                if ($referencedTable === $targetTable) {
+                    // Keep the current source table
+                }
+            }
+
+            // Special case for contact_contact_type to contact_types join
+            else if ($targetTable === 'contact_types' && $sourceColumn === 'contact_type_id') {
+                // This is a join from contact_contact_type to contact_types
+                $sourceTable = 'contact_contact_type';
+            }
+            // Special case for contacts to contact_contact_type join
+            else if ($targetTable === 'contact_contact_type' && $sourceColumn === 'id' && $targetColumn === 'contact_id') {
+                // This is a join from contacts to contact_contact_type
+                $sourceTable = 'contacts';
+            }
+            // Case 4: For chain joins, use the previous target table as the source
+            // if it makes sense based on the column names
+            else if ($index > 0) {
+                $prevJoin = $joins[$index - 1];
+                $prevTargetTable = $prevJoin['targetTable'] ?? null;
+
+                if (in_array($prevTargetTable, $joinedTables)) {
+                    // Check if the previous target table has a relationship with this target table
+                    if (isset($tableRelationships[$targetTable]) &&
+                        in_array($prevTargetTable, $tableRelationships[$targetTable])) {
+                        $sourceTable = $prevTargetTable;
+                    }
+                    // Or if the column names suggest a relationship
+                    else if ($sourceColumn === 'id' || preg_match('/_id$/', $sourceColumn)) {
+                        $sourceTable = $prevTargetTable;
+                    }
+                }
+            }
+
+            // Add the target table to our list of joined tables
+            $joinedTables[] = $targetTable;
+
+            // Log the join for debugging
+            Log::debug("Adding join", [
+                'index' => $index,
+                'joinType' => $joinType,
+                'sourceTable' => $sourceTable,
+                'sourceColumn' => $sourceColumn,
+                'targetTable' => $targetTable,
+                'targetColumn' => $targetColumn,
+                'joinedTables' => $joinedTables
+            ]);
+
             // Determine join method
             switch ($joinType) {
                 case 'left':
                     $query->leftJoin(
                         $targetTable,
-                        "$mainTable.$sourceColumn",
+                        "$sourceTable.$sourceColumn",
                         '=',
                         "$targetTable.$targetColumn"
                     );
@@ -1530,7 +1657,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 case 'right':
                     $query->rightJoin(
                         $targetTable,
-                        "$mainTable.$sourceColumn",
+                        "$sourceTable.$sourceColumn",
                         '=',
                         "$targetTable.$targetColumn"
                     );
@@ -1539,7 +1666,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 default:
                     $query->join(
                         $targetTable,
-                        "$mainTable.$sourceColumn",
+                        "$sourceTable.$sourceColumn",
                         '=',
                         "$targetTable.$targetColumn"
                     );
@@ -1943,6 +2070,12 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             $value = is_numeric($binding) ? $binding : "'$binding'";
             $sql = preg_replace('/\?/', $value, $sql, 1);
         }
+
+        // Log the final SQL query for debugging
+        Log::debug('Executing SQL query', [
+            'sql' => $sql,
+            'bindings' => $bindings
+        ]);
 
         // Execute the query
         $results = $query->get();
