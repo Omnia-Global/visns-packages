@@ -2193,18 +2193,117 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         // For queries with multiple joins, we should count distinct on the main table's primary key
         // to avoid duplicate counting
         if (count($joins) > 0) {
-            // Get the count using a subquery to ensure correct counting with joins
-            $countResult = DB::table(DB::raw("({$countQuery->toSql()}) as count_table"))
-                ->mergeBindings($countQuery->getQuery())
-                ->selectRaw('COUNT(DISTINCT count_table.id) as aggregate')
-                ->first();
+            try {
+                // Create a new query for counting to avoid issues with existing select and group by clauses
+                $distinctCountQuery = DB::table($mainTable);
 
-            $total = $countResult->aggregate ?? 0;
+                // Add the same joins as the original query
+                foreach ($joins as $join) {
+                    $joinType = strtolower($join['joinType'] ?? 'inner');
+                    $targetTable = $join['targetTable'] ?? null;
+                    $sourceTable = $join['sourceTable'] ?? $mainTable;
+                    $sourceColumn = $join['sourceColumn'] ?? null;
+                    $targetColumn = $join['targetColumn'] ?? null;
 
-            Log::debug('Count query with joins', [
-                'total' => $total,
-                'countSql' => $countQuery->toSql()
-            ]);
+                    if (!$targetTable || !$sourceColumn || !$targetColumn) {
+                        continue; // Skip invalid joins
+                    }
+
+                    switch ($joinType) {
+                        case 'left':
+                            $distinctCountQuery->leftJoin(
+                                $targetTable,
+                                "$sourceTable.$sourceColumn",
+                                '=',
+                                "$targetTable.$targetColumn"
+                            );
+                            break;
+                        case 'right':
+                            $distinctCountQuery->rightJoin(
+                                $targetTable,
+                                "$sourceTable.$sourceColumn",
+                                '=',
+                                "$targetTable.$targetColumn"
+                            );
+                            break;
+                        case 'inner':
+                        default:
+                            $distinctCountQuery->join(
+                                $targetTable,
+                                "$sourceTable.$sourceColumn",
+                                '=',
+                                "$targetTable.$targetColumn"
+                            );
+                            break;
+                    }
+                }
+
+                // Add the same where clauses as the original query
+                // Since we can't directly copy the where clauses, we'll use the same filter logic
+                // to add the where clauses to our count query
+                $filterArray = [];
+                if (isset($filters['groups'])) {
+                    // This is the new format with groups
+                    foreach ($filters['groups'] as $group) {
+                        if (isset($group['filters']) && is_array($group['filters'])) {
+                            $filterArray = array_merge($filterArray, $group['filters']);
+                        }
+                    }
+                } else {
+                    // This is the old format - a simple array of filters
+                    $filterArray = $filters;
+                }
+
+                // Add filters to the count query
+                foreach ($filterArray as $filter) {
+                    $tableName = $filter['table'] ?? $mainTable;
+                    $columnName = $filter['column'] ?? null;
+                    $operator = $filter['operator'] ?? '=';
+                    $value = $filter['value'] ?? null;
+
+                    if (!$columnName) {
+                        continue; // Skip invalid filters
+                    }
+
+                    // Apply the filter
+                    $columnRef = "$tableName.$columnName";
+
+                    // Simple where clause for the count query
+                    if (strtolower($operator) === 'like') {
+                        $distinctCountQuery->where($columnRef, 'like', "%$value%");
+                    } else {
+                        $distinctCountQuery->where($columnRef, $operator, $value);
+                    }
+                }
+
+                // Select count distinct on the main table's primary key
+                $distinctCountQuery->select(DB::raw("COUNT(DISTINCT $mainTable.id) as total_count"));
+
+                // Execute the count query
+                $countResult = $distinctCountQuery->first();
+                $total = $countResult->total_count ?? 0;
+
+                Log::debug('Count query with joins', [
+                    'total' => $total,
+                    'countSql' => $countQuery->toSql()
+                ]);
+            } catch (\Exception $e) {
+                // If there's an error with the distinct count, try a simpler approach
+                Log::warning('Error with distinct count, trying simpler approach: ' . $e->getMessage());
+
+                try {
+                    // Try a simpler approach - just count all rows and accept potential duplicates
+                    $total = $countQuery->count();
+
+                    Log::info('Used simple count as fallback', [
+                        'total' => $total
+                    ]);
+                } catch (\Exception $e2) {
+                    // If even the simple count fails, just return a default value
+                    Log::error('Error with simple count, using default value: ' . $e2->getMessage());
+                    $total = 0;
+                }
+            }
         } else {
             // Simple count for queries without joins
             $total = $countQuery->count();
