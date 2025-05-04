@@ -1508,7 +1508,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
         // Extract configuration
         $mainTable = $queryConfig['mainTable'] ?? null;
-        $columns = $queryConfig['columns'] ?? [];
+        $requestColumns = $queryConfig['columns'] ?? [];
         $joins = $queryConfig['joins'] ?? [];
         $filters = $queryConfig['filters'] ?? [];
         $sorting = $queryConfig['sorting'] ?? [];
@@ -1520,7 +1520,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         }
 
         // Validate columns
-        if (empty($columns)) {
+        if (empty($requestColumns)) {
             throw new \Exception('At least one column must be selected');
         }
 
@@ -1830,7 +1830,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
         // Add columns
         $selectColumns = [];
-        foreach ($columns as $column) {
+        foreach ($requestColumns as $column) {
             $tableName = $column['table'] ?? $mainTable;
             $columnName = $column['column'] ?? null;
             $alias = $column['alias'] ?? null;
@@ -1854,7 +1854,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         Log::info('Columns to select', [
             'selectColumns' => $selectColumns,
             'columnCount' => count($selectColumns),
-            'originalColumns' => $columns
+            'originalColumns' => $requestColumns
         ]);
 
         // Make sure we have at least one column to select
