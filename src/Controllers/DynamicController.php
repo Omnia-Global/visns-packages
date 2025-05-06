@@ -12,6 +12,7 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use Visnsstudio\VisnsPackages\Exceptions\JsonValidationException;
 
@@ -190,11 +191,6 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         if ($request->has('where') && $request->filled('where')) {
             foreach ($request->input('where') as $condition) {
-                // Skip if no id is provided
-                if (!isset($condition['id'])) {
-                    continue;
-                }
-
                 switch ($condition['id']) {
                     case 'role':
                         if ($this->folder == 'User') {
@@ -207,13 +203,9 @@ class DynamicController extends \App\Http\Controllers\Controller
                         }
                         break;
                     case 'whereHas':
-                        // Validate that the relationship method exists on the model
-                        if (method_exists($this->model, $condition['value'])) {
-                            $query->whereHas($condition['value']);
-                        }
+                        $query->whereHas($condition['value']);
                         break;
                     default:
-                        // For regular columns, validate if the column exists
                         $this->applyConditionBasedOnOperator(
                             $query,
                             $condition,
@@ -296,11 +288,6 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         if ($request->has('where') && $request->filled('where')) {
             foreach ($request->input('where') as $condition) {
-                // Skip if no id is provided
-                if (!isset($condition['id'])) {
-                    continue;
-                }
-
                 switch ($condition['id']) {
                     case 'role':
                         if ($this->folder == 'User') {
@@ -313,13 +300,9 @@ class DynamicController extends \App\Http\Controllers\Controller
                         }
                         break;
                     case 'whereHas':
-                        // Validate that the relationship method exists on the model
-                        if (method_exists($this->model, $condition['value'])) {
-                            $query->whereHas($condition['value']);
-                        }
+                        $query->whereHas($condition['value']);
                         break;
                     default:
-                        // For regular columns, validate if the column exists
                         $this->applyConditionBasedOnOperator(
                             $query,
                             $condition,
@@ -489,16 +472,8 @@ class DynamicController extends \App\Http\Controllers\Controller
         $value = $condition['value'] ?? null;
         $casts = $this->model->getCasts();
 
-        // Get the column name from the condition
-        $id = $condition['id'] ?? null;
-
-        if (!$id) {
-            return;
-        }
-
-        // Check if the column exists in the model's casts
-        if (isset($id) && isset($casts[$id])) {
-            $value = $this->castValue($value, $casts[$id]);
+        if (isset($condition['id']) && isset($casts[$condition['id']])) {
+            $value = $this->castValue($value, $casts[$condition['id']]);
         }
 
         $this->applyConditionBasedOnOperator($query, $condition, $value);
@@ -554,6 +529,46 @@ class DynamicController extends \App\Http\Controllers\Controller
         return $result;
     }
 
+    /**
+     * Check if a column exists in the model's table
+     *
+     * @param string $column The column name to check
+     * @return bool Whether the column exists
+     */
+    protected function isValidColumn($column)
+    {
+        // If model is not set, we can't validate
+        if (!$this->model) {
+            return true;
+        }
+
+        // Skip validation for JSON path expressions
+        if (strpos($column, '->') !== false) {
+            return true;
+        }
+
+        // Skip validation for raw SQL expressions
+        if ($column instanceof \Illuminate\Database\Query\Expression) {
+            return true;
+        }
+
+        // Skip validation for special cases
+        if (in_array($column, ['*', 'id'])) {
+            return true;
+        }
+
+        try {
+            // Check if the column exists in the table
+            return Schema::hasColumn($this->model->getTable(), $column);
+        } catch (\Exception $e) {
+            // If there's an error checking the column, log it and return true to avoid breaking functionality
+            Log::warning(
+                "Error checking if column {$column} exists: " . $e->getMessage()
+            );
+            return true;
+        }
+    }
+
     protected function applyConditionBasedOnOperator($query, $condition, $value)
     {
         $operator = $condition['operator'] ?? '=';
@@ -564,19 +579,11 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         // Special case: if only whereHas is provided (no id/value needed)
         if (empty($id) && !empty($whereHas)) {
-            $model = $query->getModel();
-
             if (is_string($whereHas)) {
-                // Validate that the relationship method exists on the model
-                if (method_exists($model, $whereHas)) {
-                    $query->whereHas($whereHas);
-                }
+                $query->whereHas($whereHas);
             } elseif (is_array($whereHas)) {
                 foreach ($whereHas as $relation) {
-                    // Validate that the relationship method exists on the model
-                    if (method_exists($model, $relation)) {
-                        $query->whereHas($relation);
-                    }
+                    $query->whereHas($relation);
                 }
             }
             return;
@@ -597,47 +604,16 @@ class DynamicController extends \App\Http\Controllers\Controller
         $jsonField = array_shift($fieldParts);
         $jsonPath = '$.' . implode('.', $fieldParts);
 
-        // Validate if the column exists in the table before applying the where clause
-        $tableName = $query->getModel()->getTable();
-        $isJsonQuery = !empty($fieldParts); // If there are parts after the first one, it's a JSON query
-        $model = $query->getModel();
+        // Skip column validation for whereHas conditions
+        $skipColumnValidation = !empty($whereHas);
 
-        // If this is a whereHas condition, skip column validation entirely
-        if (!empty($whereHas)) {
-            // For whereHas conditions, we'll let Laravel handle the validation
-            // as we're dealing with relationships rather than columns
-        }
-        // Check if we're dealing with a relationship field (contains '.')
-        elseif (strpos($id, '.') !== false) {
-            // This is a relationship field, so we need to validate the relationship exists
-            $relationParts = explode('.', $id);
-            $relationName = $relationParts[0];
-
-            // Check if the relationship method exists on the model
-            if (!method_exists($model, $relationName)) {
-                // Relationship doesn't exist, skip applying this condition
-                return;
-            }
-
-            // For relationship fields, we'll let Laravel handle the validation
-            // as it's more complex to validate columns on related models
-        }
-        // Only validate the column name if it's not a JSON path or a special case
-        elseif (
-            !$isJsonQuery &&
-            !in_array($id, ['role', 'async', 'whereHas'])
-        ) {
-            // Check if the column exists in the table
-            if (!Schema::hasColumn($tableName, $jsonField)) {
-                // Column doesn't exist, skip applying this condition
-                return;
-            }
-        }
-
-        // Also validate the orKey column if it's provided
-        if ($orKey && !Schema::hasColumn($tableName, $orKey)) {
-            // If orKey doesn't exist, set it to null to prevent using it in the query
-            $orKey = null;
+        // Validate column only if not skipping validation and not a relationship
+        if (!$skipColumnValidation && !$this->isValidColumn($jsonField)) {
+            // Column doesn't exist, so don't apply the condition
+            Log::info(
+                "Skipping where condition for invalid column: {$jsonField} in table: {$this->model->getTable()}"
+            );
+            return;
         }
 
         $applyCondition = function ($query) use (
@@ -732,18 +708,32 @@ class DynamicController extends \App\Http\Controllers\Controller
             $applyCondition
         ) {
             if ($orKey) {
-                // Create a nested where clause with OR condition
-                $q->where(function ($subQ) use (
-                    $orKey,
-                    $value,
-                    $applyCondition
-                ) {
-                    // Apply the original condition
-                    $applyCondition($subQ);
+                // Validate orKey column if provided
+                $isValidOrKey = $this->isValidColumn($orKey);
 
-                    // Apply the OR condition with the orKey field
-                    $subQ->orWhere($orKey, $value);
-                });
+                if (!$isValidOrKey) {
+                    Log::info(
+                        "Skipping orWhere condition for invalid column: {$orKey} in table: {$this->model->getTable()}"
+                    );
+                }
+
+                if ($isValidOrKey) {
+                    // Create a nested where clause with OR condition
+                    $q->where(function ($subQ) use (
+                        $orKey,
+                        $value,
+                        $applyCondition
+                    ) {
+                        // Apply the original condition
+                        $applyCondition($subQ);
+
+                        // Apply the OR condition with the orKey field
+                        $subQ->orWhere($orKey, $value);
+                    });
+                } else {
+                    // If orKey is invalid, just apply the main condition
+                    $applyCondition($q);
+                }
             } else {
                 // Apply the condition directly if no orKey
                 $applyCondition($q);
@@ -768,13 +758,6 @@ class DynamicController extends \App\Http\Controllers\Controller
                     );
                 }
 
-                // Validate that the relationship method exists on the model
-                $model = $query->getModel();
-                if (!method_exists($model, $relation)) {
-                    // If the relationship doesn't exist, skip this condition
-                    return $query;
-                }
-
                 $query->whereHas($relation, function ($subQuery) use (
                     $relations,
                     $conditionFunc,
@@ -782,6 +765,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                 ) {
                     if (empty($relations)) {
                         // No more nested relations, apply the condition
+                        // Note: We're not validating columns in related models
+                        // as it would require complex logic to determine the related model's table
                         $conditionFunc($subQuery);
                     } else {
                         // Recursively process the remaining relations
