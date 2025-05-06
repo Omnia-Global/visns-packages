@@ -207,7 +207,10 @@ class DynamicController extends \App\Http\Controllers\Controller
                         }
                         break;
                     case 'whereHas':
-                        $query->whereHas($condition['value']);
+                        // Validate that the relationship method exists on the model
+                        if (method_exists($this->model, $condition['value'])) {
+                            $query->whereHas($condition['value']);
+                        }
                         break;
                     default:
                         // For regular columns, validate if the column exists
@@ -310,7 +313,10 @@ class DynamicController extends \App\Http\Controllers\Controller
                         }
                         break;
                     case 'whereHas':
-                        $query->whereHas($condition['value']);
+                        // Validate that the relationship method exists on the model
+                        if (method_exists($this->model, $condition['value'])) {
+                            $query->whereHas($condition['value']);
+                        }
                         break;
                     default:
                         // For regular columns, validate if the column exists
@@ -558,11 +564,19 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         // Special case: if only whereHas is provided (no id/value needed)
         if (empty($id) && !empty($whereHas)) {
+            $model = $query->getModel();
+
             if (is_string($whereHas)) {
-                $query->whereHas($whereHas);
+                // Validate that the relationship method exists on the model
+                if (method_exists($model, $whereHas)) {
+                    $query->whereHas($whereHas);
+                }
             } elseif (is_array($whereHas)) {
                 foreach ($whereHas as $relation) {
-                    $query->whereHas($relation);
+                    // Validate that the relationship method exists on the model
+                    if (method_exists($model, $relation)) {
+                        $query->whereHas($relation);
+                    }
                 }
             }
             return;
@@ -586,9 +600,28 @@ class DynamicController extends \App\Http\Controllers\Controller
         // Validate if the column exists in the table before applying the where clause
         $tableName = $query->getModel()->getTable();
         $isJsonQuery = !empty($fieldParts); // If there are parts after the first one, it's a JSON query
+        $model = $query->getModel();
 
+        // Check if we're dealing with a relationship field (contains '.')
+        if (strpos($id, '.') !== false) {
+            // This is a relationship field, so we need to validate the relationship exists
+            $relationParts = explode('.', $id);
+            $relationName = $relationParts[0];
+
+            // Check if the relationship method exists on the model
+            if (!method_exists($model, $relationName)) {
+                // Relationship doesn't exist, skip applying this condition
+                return;
+            }
+
+            // For relationship fields, we'll let Laravel handle the validation
+            // as it's more complex to validate columns on related models
+        }
         // Only validate the column name if it's not a JSON path or a special case
-        if (!$isJsonQuery && !in_array($id, ['role', 'async', 'whereHas'])) {
+        elseif (
+            !$isJsonQuery &&
+            !in_array($id, ['role', 'async', 'whereHas'])
+        ) {
             // Check if the column exists in the table
             if (!Schema::hasColumn($tableName, $jsonField)) {
                 // Column doesn't exist, skip applying this condition
@@ -728,6 +761,13 @@ class DynamicController extends \App\Http\Controllers\Controller
                     throw new \InvalidArgumentException(
                         'Relation must be a string.'
                     );
+                }
+
+                // Validate that the relationship method exists on the model
+                $model = $query->getModel();
+                if (!method_exists($model, $relation)) {
+                    // If the relationship doesn't exist, skip this condition
+                    return $query;
                 }
 
                 $query->whereHas($relation, function ($subQuery) use (
