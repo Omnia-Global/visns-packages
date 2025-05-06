@@ -602,8 +602,13 @@ class DynamicController extends \App\Http\Controllers\Controller
         $isJsonQuery = !empty($fieldParts); // If there are parts after the first one, it's a JSON query
         $model = $query->getModel();
 
+        // If this is a whereHas condition, skip column validation entirely
+        if (!empty($whereHas)) {
+            // For whereHas conditions, we'll let Laravel handle the validation
+            // as we're dealing with relationships rather than columns
+        }
         // Check if we're dealing with a relationship field (contains '.')
-        if (strpos($id, '.') !== false) {
+        elseif (strpos($id, '.') !== false) {
             // This is a relationship field, so we need to validate the relationship exists
             $relationParts = explode('.', $id);
             $relationName = $relationParts[0];
