@@ -190,6 +190,11 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         if ($request->has('where') && $request->filled('where')) {
             foreach ($request->input('where') as $condition) {
+                // Skip if no id is provided
+                if (!isset($condition['id'])) {
+                    continue;
+                }
+
                 switch ($condition['id']) {
                     case 'role':
                         if ($this->folder == 'User') {
@@ -205,6 +210,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                         $query->whereHas($condition['value']);
                         break;
                     default:
+                        // For regular columns, validate if the column exists
                         $this->applyConditionBasedOnOperator(
                             $query,
                             $condition,
@@ -287,6 +293,11 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         if ($request->has('where') && $request->filled('where')) {
             foreach ($request->input('where') as $condition) {
+                // Skip if no id is provided
+                if (!isset($condition['id'])) {
+                    continue;
+                }
+
                 switch ($condition['id']) {
                     case 'role':
                         if ($this->folder == 'User') {
@@ -302,6 +313,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                         $query->whereHas($condition['value']);
                         break;
                     default:
+                        // For regular columns, validate if the column exists
                         $this->applyConditionBasedOnOperator(
                             $query,
                             $condition,
@@ -471,8 +483,16 @@ class DynamicController extends \App\Http\Controllers\Controller
         $value = $condition['value'] ?? null;
         $casts = $this->model->getCasts();
 
-        if (isset($condition['id']) && isset($casts[$condition['id']])) {
-            $value = $this->castValue($value, $casts[$condition['id']]);
+        // Get the column name from the condition
+        $id = $condition['id'] ?? null;
+
+        if (!$id) {
+            return;
+        }
+
+        // Check if the column exists in the model's casts
+        if (isset($id) && isset($casts[$id])) {
+            $value = $this->castValue($value, $casts[$id]);
         }
 
         $this->applyConditionBasedOnOperator($query, $condition, $value);
@@ -562,6 +582,25 @@ class DynamicController extends \App\Http\Controllers\Controller
         $fieldParts = explode('.', $id);
         $jsonField = array_shift($fieldParts);
         $jsonPath = '$.' . implode('.', $fieldParts);
+
+        // Validate if the column exists in the table before applying the where clause
+        $tableName = $query->getModel()->getTable();
+        $isJsonQuery = !empty($fieldParts); // If there are parts after the first one, it's a JSON query
+
+        // Only validate the column name if it's not a JSON path or a special case
+        if (!$isJsonQuery && !in_array($id, ['role', 'async', 'whereHas'])) {
+            // Check if the column exists in the table
+            if (!Schema::hasColumn($tableName, $jsonField)) {
+                // Column doesn't exist, skip applying this condition
+                return;
+            }
+        }
+
+        // Also validate the orKey column if it's provided
+        if ($orKey && !Schema::hasColumn($tableName, $orKey)) {
+            // If orKey doesn't exist, set it to null to prevent using it in the query
+            $orKey = null;
+        }
 
         $applyCondition = function ($query) use (
             $operator,
