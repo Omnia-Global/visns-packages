@@ -150,8 +150,13 @@ class AuthController extends \App\Http\Controllers\Controller
             )->first();
         }
 
-        // If user exists, check password
-        if (
+        // If user exists, check if disabled and then check password
+        if ($user && $user->disabled) {
+            $error =
+                'Your account has been disabled. Please contact the administrator.';
+            $request->session()->flash('errors');
+            $user = ''; // Reset user if account is disabled
+        } elseif (
             $user &&
             Hash::check($request->input('password'), $user->password)
         ) {
@@ -340,8 +345,16 @@ class AuthController extends \App\Http\Controllers\Controller
             )->first();
         }
 
-        // If user exists, check password
-        if (
+        // If user exists, check if disabled and then check password
+        if ($user && $user->disabled) {
+            return response()->json(
+                [
+                    'error' =>
+                        'Your account has been disabled. Please contact the administrator.',
+                ],
+                401
+            );
+        } elseif (
             $user &&
             Hash::check($request->input('password'), $user->password)
         ) {

@@ -22,6 +22,10 @@ A comprehensive Laravel package that provides enhanced authentication, file mana
         -   [Social Authentication](#social-authentication)
         -   [API Authentication](#api-authentication)
     -   [File Management](#file-management)
+    -   [User Model](#user-model)
+        -   [Using the Package User Model](#using-the-package-user-model)
+            -   [Option 1: Use the Package User Model Directly](#option-1-use-the-package-user-model-directly)
+            -   [Option 2: Use the UsePackageUser Trait](#option-2-use-the-usepackageuser-trait)
     -   [User Management](#user-management)
     -   [Role \& Permission Management](#role--permission-management)
         -   [Permission Management](#permission-management)
@@ -107,8 +111,10 @@ php artisan migrate
     -   File uploads and storage
     -   File metadata management
 
--   **User Management**
+-   **User Model & Management**
 
+    -   Standardized User model for all projects
+    -   User trait for extending functionality
     -   User profiles
     -   Two-factor authentication management
     -   Notification handling
@@ -152,6 +158,7 @@ This package includes migrations that add necessary fields to the users table fo
 -   `username` - Alternative login identifier
 -   `provider`, `provider_id`, `provider_token`, `provider_refresh_token` - For social authentication
 -   `two_factor_secret`, `two_factor_recovery_codes`, `two_factor_confirmed_at` - For two-factor authentication
+-   `disabled` - Boolean flag to disable user accounts and prevent login
 
 Update your User model's `$fillable` array to include these fields:
 
@@ -168,6 +175,13 @@ protected $fillable = [
     'two_factor_secret',
     'two_factor_recovery_codes',
     'two_factor_confirmed_at',
+    'disabled',
+];
+
+protected $casts = [
+    'email_verified_at' => 'datetime',
+    'two_factor_confirmed_at' => 'datetime',
+    'disabled' => 'boolean',
 ];
 ```
 
@@ -429,7 +443,112 @@ The `File` model provides methods for:
 -   Generating file URLs
 -   Managing file relationships
 
+## User Model
+
+The package provides a User model that can be used in your projects. This allows you to standardize your User model across multiple projects and makes it easier to update functionality in one place.
+
+### Using the Package User Model
+
+There are two ways to use the package's User model in your projects:
+
+#### Option 1: Use the Package User Model Directly
+
+You can configure your application to use the package's User model directly by setting the `user_model` configuration option in `config/visns-packages.php`:
+
+```php
+'user_model' => 'Visnsstudio\\VisnsPackages\\Models\\User',
+```
+
+Or by setting the `VISNS_USER_MODEL` environment variable:
+
+```
+VISNS_USER_MODEL=Visnsstudio\\VisnsPackages\\Models\\User
+```
+
+#### Option 2: Use the UsePackageUser Trait
+
+If you need to customize the User model in your project but still want to inherit functionality from the package's User model, you can use the `UsePackageUser` trait:
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Notifications\Notifiable;
+use Laravel\Sanctum\HasApiTokens;
+use Spatie\Permission\Traits\HasRoles;
+use OwenIt\Auditing\Contracts\Auditable;
+use Visnsstudio\VisnsPackages\Traits\UsePackageUser;
+
+class User extends Authenticatable implements Auditable
+{
+    use \OwenIt\Auditing\Auditable;
+    use HasApiTokens, HasFactory, Notifiable, HasRoles;
+    use UsePackageUser; // Add this trait to inherit package functionality
+
+    /**
+     * The attributes that are mass assignable.
+     *
+     * @var array
+     */
+    protected $fillable = [
+        'name',
+        'email',
+        'username',
+        'password',
+        'dashboard_settings',
+        'provider',
+        'provider_id',
+        'provider_token',
+        'provider_refresh_token',
+        'two_factor_secret',
+        'two_factor_recovery_codes',
+        'two_factor_confirmed_at',
+        'signature',
+        'disabled',
+    ];
+
+    // You can override or add methods as needed
+}
+```
+
+The `UsePackageUser` trait provides the following functionality:
+
+-   `loadableRelations()` - Returns the relations that should be loaded with the user
+-   `validationRules()` - Returns validation rules for the user model
+-   `settings()` attribute - Returns user settings based on environment variables
+-   `scopeCustomOrder()` - Scope for ordering users
+-   `scopeCustomSearch()` - Scope for searching users
+-   `scopeActive()` - Scope to filter only active (not disabled) users
+-   `scopeDisabled()` - Scope to filter only disabled users
+-   `twoFactorRememberTokens()` - Relationship to two-factor remember tokens
+
 ## User Management
+
+The package includes functionality to disable user accounts, which prevents users from logging in. When a user is disabled, they will receive an error message when attempting to log in.
+
+### Disabling Users
+
+You can disable a user by setting the `disabled` field to `true`:
+
+```php
+$user = User::find(1);
+$user->disabled = true;
+$user->save();
+```
+
+You can also use the provided scopes to filter users:
+
+```php
+// Get only active (not disabled) users
+$activeUsers = User::active()->get();
+
+// Get only disabled users
+$disabledUsers = User::disabled()->get();
+```
+
+### User Management API
 
 The `UserController` provides methods for managing user profiles and notifications:
 

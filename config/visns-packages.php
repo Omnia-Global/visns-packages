@@ -57,6 +57,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | User Model
+    |--------------------------------------------------------------------------
+    |
+    | This option allows you to specify the User model class to be used by the package.
+    | By default, it uses the App\Models\User model, but you can override this
+    | with your own custom User model if needed.
+    |
+    */
+    'user_model' => env('VISNS_USER_MODEL', 'App\\Models\\User'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Two-Factor Authentication App Name
     |--------------------------------------------------------------------------
     |
