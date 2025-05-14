@@ -927,7 +927,14 @@ class DynamicController extends \App\Http\Controllers\Controller
                 );
             } elseif ($type === 'boolean') {
                 if (isset($allData[$field])) {
-                    $allData[$field] = $allData[$field] === true ? 1 : 0;
+                    // Handle various boolean representations (true, 1, "1", "true", "yes", "on")
+                    $value = $allData[$field];
+                    $allData[$field] = filter_var(
+                        $value,
+                        FILTER_VALIDATE_BOOLEAN
+                    )
+                        ? 1
+                        : 0;
                 } else {
                     $allData[$field] = 0;
                 }
@@ -1288,7 +1295,11 @@ class DynamicController extends \App\Http\Controllers\Controller
                     strtotime($allData[$field])
                 );
             } elseif ($type === 'boolean' && isset($allData[$field])) {
-                $allData[$field] = $allData[$field] === true ? 1 : 0;
+                // Handle various boolean representations (true, 1, "1", "true", "yes", "on")
+                $value = $allData[$field];
+                $allData[$field] = filter_var($value, FILTER_VALIDATE_BOOLEAN)
+                    ? 1
+                    : 0;
             }
         }
 
