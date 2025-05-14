@@ -19,13 +19,11 @@ class AddDisabledToUsersTable extends Migration
                 // Check if the referenced column exists before using after()
                 if (Schema::hasColumn('users', 'email_verified_at')) {
                     $table
-                        ->boolean('disabled')
-                        ->default(false)
+                        ->integer('disabled')
+                        ->default(0)
                         ->after('email_verified_at');
                 } else {
-                    $table
-                        ->boolean('disabled')
-                        ->default(false);
+                    $table->integer('disabled')->default(0);
                 }
             }
         });

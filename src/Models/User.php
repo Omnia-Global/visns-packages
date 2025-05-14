@@ -59,7 +59,6 @@ class User extends Authenticatable implements Auditable
         'dashboard_settings' => 'array',
         'email_verified_at' => 'datetime',
         'two_factor_confirmed_at' => 'datetime',
-        'disabled' => 'boolean',
     ];
 
     /**
