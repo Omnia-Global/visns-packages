@@ -929,12 +929,24 @@ class DynamicController extends \App\Http\Controllers\Controller
                 if (isset($allData[$field])) {
                     // Handle various boolean representations (true, 1, "1", "true", "yes", "on")
                     $value = $allData[$field];
-                    $allData[$field] = filter_var(
-                        $value,
-                        FILTER_VALIDATE_BOOLEAN
-                    )
-                        ? 1
-                        : 0;
+                    // Explicitly check for string "1" and other common true values
+                    if (
+                        is_string($value) &&
+                        ($value === '1' ||
+                            strtolower($value) === 'true' ||
+                            strtolower($value) === 'yes' ||
+                            strtolower($value) === 'on')
+                    ) {
+                        $allData[$field] = 1;
+                    } else {
+                        // Use filter_var as a fallback for other cases
+                        $allData[$field] = filter_var(
+                            $value,
+                            FILTER_VALIDATE_BOOLEAN
+                        )
+                            ? 1
+                            : 0;
+                    }
                 } else {
                     $allData[$field] = 0;
                 }
@@ -1297,9 +1309,24 @@ class DynamicController extends \App\Http\Controllers\Controller
             } elseif ($type === 'boolean' && isset($allData[$field])) {
                 // Handle various boolean representations (true, 1, "1", "true", "yes", "on")
                 $value = $allData[$field];
-                $allData[$field] = filter_var($value, FILTER_VALIDATE_BOOLEAN)
-                    ? 1
-                    : 0;
+                // Explicitly check for string "1" and other common true values
+                if (
+                    is_string($value) &&
+                    ($value === '1' ||
+                        strtolower($value) === 'true' ||
+                        strtolower($value) === 'yes' ||
+                        strtolower($value) === 'on')
+                ) {
+                    $allData[$field] = 1;
+                } else {
+                    // Use filter_var as a fallback for other cases
+                    $allData[$field] = filter_var(
+                        $value,
+                        FILTER_VALIDATE_BOOLEAN
+                    )
+                        ? 1
+                        : 0;
+                }
             }
         }
 
