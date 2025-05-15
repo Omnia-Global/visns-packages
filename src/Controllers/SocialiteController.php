@@ -21,15 +21,8 @@ class SocialiteController extends \App\Http\Controllers\Controller
      */
     public function redirectToProvider($provider)
     {
-        // Map azure to microsoft if needed
-        if ($provider === 'azure') {
-            $provider = 'microsoft';
-        }
-
         // Validate the provider
-        if (
-            !in_array($provider, ['google', 'microsoft', 'facebook', 'apple'])
-        ) {
+        if (!in_array($provider, ['google', 'azure', 'facebook', 'apple'])) {
             return redirect(
                 env('FRONTEND_URL', '/') . '/login?error=Invalid provider'
             );
@@ -47,11 +40,6 @@ class SocialiteController extends \App\Http\Controllers\Controller
     public function handleProviderCallback($provider)
     {
         try {
-            // Map azure to microsoft if needed
-            if ($provider === 'azure') {
-                $provider = 'microsoft';
-            }
-
             $socialUser = Socialite::driver($provider)->user();
 
             // Check if the user already exists based on provider ID
@@ -149,9 +137,7 @@ class SocialiteController extends \App\Http\Controllers\Controller
         // Get available providers from config
         $providers = array_filter([
             'google' => config('services.google.client_id') ? true : false,
-            'microsoft' => config('services.microsoft.client_id')
-                ? true
-                : false,
+            'azure' => config('services.azure.client_id') ? true : false,
             'facebook' => config('services.facebook.client_id') ? true : false,
             'apple' => config('services.apple.client_id') ? true : false,
         ]);
@@ -160,8 +146,7 @@ class SocialiteController extends \App\Http\Controllers\Controller
             'providers' => array_keys(array_filter($providers)),
             'urls' => [
                 'google' => url('/auth/google'),
-                'microsoft' => url('/auth/microsoft'),
-                'azure' => url('/auth/microsoft'), // Add azure as an alias for microsoft
+                'azure' => url('/auth/azure'),
                 'facebook' => url('/auth/facebook'),
                 'apple' => url('/auth/apple'),
             ],
