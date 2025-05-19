@@ -1787,17 +1787,28 @@ class DynamicController extends \App\Http\Controllers\Controller
      */
     public function mergeModels(Request $request)
     {
-        $request->validate([
-            'target_id' =>
-                'required|exists:' . $this->model->getTable() . ',id',
-            'source_id' =>
-                'required|exists:' . $this->model->getTable() . ',id',
-        ]);
-
+        // Extract target_id and source_id, handling the case where target_id might be in target_id.value
         $targetId = $request->has('target_id.value')
             ? $request->input('target_id.value')
             : $request->input('target_id');
-        $sourceId = $request->input('source_id');
+        $sourceId = $request->has('source_id.value')
+            ? $request->input('source_id.value')
+            : $request->input('source_id');
+
+        // Validate the extracted IDs
+        $validator = Validator::make(
+            ['target_id' => $targetId, 'source_id' => $sourceId],
+            [
+                'target_id' =>
+                    'required|exists:' . $this->model->getTable() . ',id',
+                'source_id' =>
+                    'required|exists:' . $this->model->getTable() . ',id',
+            ]
+        );
+
+        if ($validator->fails()) {
+            throw new JsonValidationException($validator);
+        }
 
         // Find the target and source models
         $target = $this->model::findOrFail($targetId);
