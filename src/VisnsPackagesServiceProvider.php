@@ -301,10 +301,6 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                             Route::post('/logout', 'logout_api');
                         }
                     );
-                    Route::post(
-                        'ajax/{model}/merge',
-                        'Visnsstudio\\VisnsPackages\\Controllers\\DynamicController@mergeModels'
-                    );
                 });
 
             // Register API routes
@@ -367,12 +363,6 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                             );
                             Route::post('/generate-quote', 'generateQuotePDF');
                         });
-
-                    // Dynamic model merge API route
-                    Route::middleware('auth:sanctum')->post(
-                        '{model}/merge',
-                        'Visnsstudio\\VisnsPackages\\Controllers\\DynamicController@mergeModels'
-                    );
                 });
         }
     }
