@@ -288,9 +288,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                             Route::post('/generate-quote', 'generateQuotePDF');
                         });
 
-                    // Dynamic model merge route
-
-                    Route::controller(DynamicController::class)->group(
+                    Route::controller(AuthController::class)->group(
                         function () {
                             Route::post('/login', 'login_api');
                             Route::post('/register', 'register');
