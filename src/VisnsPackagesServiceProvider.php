@@ -289,8 +289,20 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                         });
 
                     // Dynamic model merge route
+
+                    Route::controller(DynamicController::class)->group(
+                        function () {
+                            Route::post('/login', 'login_api');
+                            Route::post('/register', 'register');
+                            Route::post(
+                                '/two-factor-challenge',
+                                'twoFactorAuthenticateApi'
+                            );
+                            Route::post('/logout', 'logout_api');
+                        }
+                    );
                     Route::post(
-                        'ajax/{model}/merge/{targetId}/{sourceId}',
+                        'ajax/{model}/merge',
                         'Visnsstudio\\VisnsPackages\\Controllers\\DynamicController@mergeModels'
                     );
                 });
@@ -358,7 +370,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
 
                     // Dynamic model merge API route
                     Route::middleware('auth:sanctum')->post(
-                        '{model}/merge/{targetId}/{sourceId}',
+                        '{model}/merge',
                         'Visnsstudio\\VisnsPackages\\Controllers\\DynamicController@mergeModels'
                     );
                 });

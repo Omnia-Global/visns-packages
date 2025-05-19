@@ -1771,13 +1771,32 @@ class DynamicController extends \App\Http\Controllers\Controller
      * This method finds two models by their IDs and merges the source model into the target model.
      * The target model is updated in the database, while the source model remains unchanged.
      *
-     * @param \Illuminate\Http\Request $request The request object containing merge options
-     * @param int $targetId The ID of the target model
-     * @param int $sourceId The ID of the source model
+     * Required request parameters:
+     * - target_id: The ID of the target model
+     * - source_id: The ID of the source model
+     *
+     * Optional request parameters:
+     * - relationships: Array of relationship names to merge
+     * - attributes: Array of specific attributes to merge (if empty, all attributes are merged)
+     * - exclude: Array of attributes to exclude from merging
+     * - overwriteWithNull: Whether to overwrite non-null values with null values (default: false)
+     * - mergeTimestamps: Whether to merge timestamp fields (default: false)
+     *
+     * @param \Illuminate\Http\Request $request The request object containing model IDs and merge options
      * @return \Illuminate\Http\JsonResponse
      */
-    public function mergeModels(Request $request, $targetId, $sourceId)
+    public function mergeModels(Request $request)
     {
+        $request->validate([
+            'target_id' =>
+                'required|exists:' . $this->model->getTable() . ',id',
+            'source_id' =>
+                'required|exists:' . $this->model->getTable() . ',id',
+        ]);
+
+        $targetId = $request->input('target_id');
+        $sourceId = $request->input('source_id');
+
         // Find the target and source models
         $target = $this->model::findOrFail($targetId);
         $source = $this->model::findOrFail($sourceId);

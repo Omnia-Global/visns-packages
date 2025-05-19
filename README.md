@@ -47,6 +47,11 @@ A comprehensive Laravel package that provides enhanced authentication, file mana
             -   [OR Conditions with orKey](#or-conditions-with-orkey)
             -   [Relationship Filtering with whereHas](#relationship-filtering-with-wherehas)
             -   [Combining OR Conditions with Relationships](#combining-or-conditions-with-relationships)
+        -   [Model Merging](#model-merging)
+            -   [Basic Merge](#basic-merge)
+            -   [Advanced Merge Options](#advanced-merge-options)
+            -   [Relationship Handling](#relationship-handling)
+            -   [API Access](#api-access)
     -   [Configuration](#configuration)
         -   [Environment Variables](#environment-variables)
         -   [Package Configuration](#package-configuration)
@@ -58,6 +63,7 @@ A comprehensive Laravel package that provides enhanced authentication, file mana
             -   [Role Management Routes](#role-management-routes)
             -   [Report Builder Routes](#report-builder-routes)
             -   [PDF Generation Routes](#pdf-generation-routes)
+            -   [Model Merge Routes](#model-merge-routes)
             -   [Social Authentication Routes](#social-authentication-routes)
             -   [API Routes](#api-routes)
     -   [License](#license)
@@ -829,9 +835,7 @@ The package includes a `DynamicController` that provides a flexible way to inter
 The `DynamicController` is accessed through URLs like:
 
 ```
-
 /ajax/{model_name}/{action}
-
 ```
 
 For example:
@@ -839,6 +843,7 @@ For example:
 -   `/ajax/users/table` - Get a paginated list of users
 -   `/ajax/products/dropdown` - Get products for a dropdown list
 -   `/ajax/orders/show/123` - Get a specific order by ID
+-   `/ajax/users/merge` - Merge two user models
 
 ### Filtering
 
@@ -895,12 +900,72 @@ This will filter users who have posts AND whose name is "John".
 You can combine `orKey` and `whereHas` to create complex filters:
 
 ```
-
 /ajax/users/table?where[0][id]=name&where[0][value]=John&where[0][orKey]=email&where[0][whereHas]=posts
-
 ```
 
 This will filter users who have posts AND (`name = 'John' OR email = 'John'`).
+
+### Model Merging
+
+The `DynamicController` provides a powerful model merging functionality that allows you to combine attributes and relationships from two models. This is useful for consolidating duplicate records, creating templates, or migrating data.
+
+#### Basic Merge
+
+To merge two models, send a POST request to:
+
+```
+/ajax/{model_name}/merge
+```
+
+With the following parameters:
+
+```json
+{
+    "target_id": 1,
+    "source_id": 2
+}
+```
+
+This will merge the attributes from the source model (ID 2) into the target model (ID 1). The target model will be updated in the database, while the source model remains unchanged.
+
+#### Advanced Merge Options
+
+You can customize the merge behavior with additional parameters:
+
+```json
+{
+    "target_id": 1,
+    "source_id": 2,
+    "relationships": ["profile", "roles"],
+    "attributes": ["name", "email", "settings"],
+    "exclude": ["id", "created_at", "updated_at", "deleted_at"],
+    "overwriteWithNull": false,
+    "mergeTimestamps": false
+}
+```
+
+-   `relationships`: Array of relationship names to merge
+-   `attributes`: Array of specific attributes to merge (if empty, all attributes are merged)
+-   `exclude`: Array of attributes to exclude from merging
+-   `overwriteWithNull`: Whether to overwrite non-null values with null values (default: false)
+-   `mergeTimestamps`: Whether to merge timestamp fields (default: false)
+
+#### Relationship Handling
+
+The merge function handles different types of relationships:
+
+-   **HasOne/BelongsTo**: The related model is cloned and attached to the target model
+-   **HasMany/BelongsToMany**: Each related model is cloned and attached to the target model
+
+#### API Access
+
+The merge functionality is also available via the API:
+
+```
+POST /api/{model_name}/merge
+```
+
+This endpoint requires authentication with a valid API token.
 
 ## Configuration
 
@@ -1111,6 +1176,22 @@ Route::prefix('api/pdf')
     });
 ```
 
+#### Model Merge Routes
+
+```php
+// Dynamic model merge route
+Route::post(
+    'ajax/{model}/merge',
+    'Visnsstudio\\VisnsPackages\\Controllers\\DynamicController@mergeModels'
+);
+
+// Dynamic model merge API route
+Route::middleware('auth:sanctum')->post(
+    'api/{model}/merge',
+    'Visnsstudio\\VisnsPackages\\Controllers\\DynamicController@mergeModels'
+);
+```
+
 #### Social Authentication Routes
 
 ```php
@@ -1136,6 +1217,12 @@ Route::post('/api/two-factor-challenge', [
     'twoFactorAuthenticateApi',
 ]);
 Route::post('/api/logout', [AuthController::class, 'logout_api']);
+
+// Dynamic model merge API route
+Route::middleware('auth:sanctum')->post(
+    '/api/{model}/merge',
+    'Visnsstudio\\VisnsPackages\\Controllers\\DynamicController@mergeModels'
+);
 ```
 
 You can disable automatic route registration by setting `register_routes` to `false` in the configuration file, or customize the middleware and prefix applied to these routes.
