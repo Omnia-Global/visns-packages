@@ -1764,4 +1764,240 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         return response()->json(['error' => ''], 200);
     }
+
+    /**
+     * Merge two models by their IDs.
+     *
+     * This method finds two models by their IDs and merges the source model into the target model.
+     * The target model is updated in the database, while the source model remains unchanged.
+     *
+     * @param \Illuminate\Http\Request $request The request object containing merge options
+     * @param int $targetId The ID of the target model
+     * @param int $sourceId The ID of the source model
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function mergeModels(Request $request, $targetId, $sourceId)
+    {
+        // Find the target and source models
+        $target = $this->model::findOrFail($targetId);
+        $source = $this->model::findOrFail($sourceId);
+
+        // Extract options from the request
+        $options = [
+            'relationships' => $request->input('relationships', []),
+            'attributes' => $request->input('attributes', []),
+            'exclude' => $request->input('exclude', [
+                'id',
+                'created_at',
+                'updated_at',
+                'deleted_at',
+            ]),
+            'overwriteWithNull' => $request->input('overwriteWithNull', false),
+            'mergeTimestamps' => $request->input('mergeTimestamps', false),
+        ];
+
+        try {
+            // Merge the models
+            $mergedModel = $this->merge($target, $source, $options);
+
+            // Save the merged model
+            $mergedModel->save();
+
+            // Handle relationships that need to be saved after the main model
+            if (!empty($options['relationships'])) {
+                foreach ($options['relationships'] as $relationship) {
+                    if (method_exists($mergedModel, $relationship)) {
+                        $relation = $mergedModel->$relationship();
+                        $relatedModel = $mergedModel->getRelation(
+                            $relationship
+                        );
+
+                        if (
+                            $relation instanceof
+                            \Illuminate\Database\Eloquent\Relations\HasOne
+                        ) {
+                            if ($relatedModel) {
+                                $relation->save($relatedModel);
+                            }
+                        } elseif (
+                            $relation instanceof
+                            \Illuminate\Database\Eloquent\Relations\BelongsTo
+                        ) {
+                            if ($relatedModel) {
+                                $relatedModel->save();
+                                $foreignKey = $relation->getForeignKeyName();
+                                $mergedModel->$foreignKey = $relatedModel->getKey();
+                                $mergedModel->save();
+                            }
+                        } elseif (
+                            $relation instanceof
+                            \Illuminate\Database\Eloquent\Relations\HasMany
+                        ) {
+                            if ($relatedModel && $relatedModel->count() > 0) {
+                                foreach ($relatedModel as $model) {
+                                    $relation->save($model);
+                                }
+                            }
+                        } elseif (
+                            $relation instanceof
+                            \Illuminate\Database\Eloquent\Relations\BelongsToMany
+                        ) {
+                            if ($relatedModel && $relatedModel->count() > 0) {
+                                $relation->sync(
+                                    $relatedModel->pluck('id')->toArray()
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Reload the model with its relationships
+            if (method_exists($this->model, 'loadableRelations')) {
+                $mergedModel->load($this->model->loadableRelations());
+            }
+
+            return response()->json(
+                [
+                    'data' => $mergedModel,
+                    'error' => '',
+                ],
+                200
+            );
+        } catch (\Exception $e) {
+            return response()->json(
+                [
+                    'data' => null,
+                    'error' => 'Error merging models: ' . $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
+
+    /**
+     * Merge attributes and relationships from a source model into a target model.
+     *
+     * This method merges the attributes from the source model into the target model,
+     * optionally merging specified relationships as well. It follows these rules:
+     * - Primary keys are preserved in the target model
+     * - Timestamps are preserved in the target model unless overridden
+     * - Relationships can be optionally merged
+     * - Null values in the source will not overwrite non-null values in the target by default
+     *
+     * @param \Illuminate\Database\Eloquent\Model $target The target model to merge into
+     * @param \Illuminate\Database\Eloquent\Model $source The source model to merge from
+     * @param array $options Additional options for the merge:
+     *                      - 'relationships' => array of relationship names to merge
+     *                      - 'attributes' => array of specific attributes to merge (if empty, all attributes are merged)
+     *                      - 'exclude' => array of attributes to exclude from merging
+     *                      - 'overwriteWithNull' => whether to overwrite non-null values with null values (default: false)
+     *                      - 'mergeTimestamps' => whether to merge timestamp fields (default: false)
+     * @return \Illuminate\Database\Eloquent\Model The merged target model (not saved)
+     */
+    public function merge($target, $source, array $options = [])
+    {
+        // Default options
+        $defaultOptions = [
+            'relationships' => [],
+            'attributes' => [],
+            'exclude' => ['id', 'created_at', 'updated_at', 'deleted_at'],
+            'overwriteWithNull' => false,
+            'mergeTimestamps' => false,
+        ];
+
+        // Merge provided options with defaults
+        $options = array_merge($defaultOptions, $options);
+
+        // If mergeTimestamps is true, remove timestamp fields from exclude list
+        if ($options['mergeTimestamps']) {
+            $options['exclude'] = array_diff($options['exclude'], [
+                'created_at',
+                'updated_at',
+            ]);
+        }
+
+        // Get all attributes from the source model
+        $sourceAttributes = $source->getAttributes();
+
+        // Determine which attributes to merge
+        $attributesToMerge = !empty($options['attributes'])
+            ? array_intersect(
+                array_keys($sourceAttributes),
+                $options['attributes']
+            )
+            : array_keys($sourceAttributes);
+
+        // Remove excluded attributes
+        $attributesToMerge = array_diff(
+            $attributesToMerge,
+            $options['exclude']
+        );
+
+        // Merge attributes
+        foreach ($attributesToMerge as $attribute) {
+            $sourceValue = $sourceAttributes[$attribute];
+
+            // Skip if the source value is null and we're not overwriting with nulls
+            if (
+                is_null($sourceValue) &&
+                !$options['overwriteWithNull'] &&
+                !is_null($target->$attribute)
+            ) {
+                continue;
+            }
+
+            $target->$attribute = $sourceValue;
+        }
+
+        // Merge relationships if specified
+        foreach ($options['relationships'] as $relationship) {
+            if (
+                method_exists($source, $relationship) &&
+                method_exists($target, $relationship)
+            ) {
+                $relation = $source->$relationship();
+
+                // Handle different relationship types
+                if (
+                    $relation instanceof
+                        \Illuminate\Database\Eloquent\Relations\HasOne ||
+                    $relation instanceof
+                        \Illuminate\Database\Eloquent\Relations\BelongsTo
+                ) {
+                    // For HasOne or BelongsTo, get the related model
+                    $relatedModel = $source->$relationship;
+
+                    if ($relatedModel) {
+                        // Clone the related model to avoid modifying the original
+                        $clonedModel = $relatedModel->replicate();
+
+                        // Set the relationship on the target after saving
+                        // Note: This will need to be handled after saving the target
+                        $target->setRelation($relationship, $clonedModel);
+                    }
+                } elseif (
+                    $relation instanceof
+                        \Illuminate\Database\Eloquent\Relations\HasMany ||
+                    $relation instanceof
+                        \Illuminate\Database\Eloquent\Relations\BelongsToMany
+                ) {
+                    // For HasMany or BelongsToMany, get the collection of related models
+                    $relatedModels = $source->$relationship;
+
+                    if ($relatedModels && $relatedModels->count() > 0) {
+                        // Clone each related model
+                        $clonedModels = $relatedModels->map(function ($model) {
+                            return $model->replicate();
+                        });
+
+                        // Set the relationship on the target
+                        $target->setRelation($relationship, $clonedModels);
+                    }
+                }
+            }
+        }
+
+        return $target;
+    }
 }

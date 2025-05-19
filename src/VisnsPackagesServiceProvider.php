@@ -287,6 +287,12 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                             );
                             Route::post('/generate-quote', 'generateQuotePDF');
                         });
+
+                    // Dynamic model merge route
+                    Route::post(
+                        'ajax/{model}/merge/{targetId}/{sourceId}',
+                        'Visnsstudio\\VisnsPackages\\Controllers\\DynamicController@mergeModels'
+                    );
                 });
 
             // Register API routes
@@ -349,6 +355,12 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                             );
                             Route::post('/generate-quote', 'generateQuotePDF');
                         });
+
+                    // Dynamic model merge API route
+                    Route::middleware('auth:sanctum')->post(
+                        '{model}/merge/{targetId}/{sourceId}',
+                        'Visnsstudio\\VisnsPackages\\Controllers\\DynamicController@mergeModels'
+                    );
                 });
         }
     }
