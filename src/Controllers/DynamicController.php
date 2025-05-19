@@ -1794,7 +1794,9 @@ class DynamicController extends \App\Http\Controllers\Controller
                 'required|exists:' . $this->model->getTable() . ',id',
         ]);
 
-        $targetId = $request->input('target_id');
+        $targetId = $request->has('target_id.value')
+            ? $request->input('target_id.value')
+            : $request->input('target_id');
         $sourceId = $request->input('source_id');
 
         // Find the target and source models
