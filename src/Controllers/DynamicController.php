@@ -2026,16 +2026,31 @@ class DynamicController extends \App\Http\Controllers\Controller
                         // Get existing relations on the target
                         $existingIds = $to->$method->pluck('id')->toArray();
 
+                        // Filter out any null or empty values
+                        $existingIds = array_filter($existingIds, function (
+                            $id
+                        ) {
+                            return !is_null($id) && $id !== '';
+                        });
+
                         // Get relations from the source
                         $newIds = $relatedModels->pluck('id')->toArray();
+
+                        // Filter out any null or empty values
+                        $newIds = array_filter($newIds, function ($id) {
+                            return !is_null($id) && $id !== '';
+                        });
 
                         // Merge and remove duplicates
                         $allIds = array_unique(
                             array_merge($existingIds, $newIds)
                         );
 
-                        // Sync to the target
-                        $toRelation->sync($allIds);
+                        // Only sync if we have valid IDs
+                        if (!empty($allIds)) {
+                            // Sync to the target
+                            $toRelation->sync($allIds);
+                        }
                     }
                 } elseif (
                     $fromRelation instanceof
