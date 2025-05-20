@@ -2088,18 +2088,40 @@ class DynamicController extends \App\Http\Controllers\Controller
                     \Illuminate\Database\Eloquent\Relations\BelongsToMany
                 ) {
                     // For BelongsToMany, get all pivot records and sync them to the target
-                    $relatedModels = $from
-                        ->$method()
-                        ->withPivot()
-                        ->get();
+                    $fromRelation = $from->$method();
+                    // Get the pivot table columns
+                    $pivotColumns = Schema::getColumnListing(
+                        $fromRelation->getTable()
+                    );
+                    // Remove the foreign key columns
+                    $pivotColumns = array_diff($pivotColumns, [
+                        $fromRelation->getForeignPivotKeyName(),
+                        $fromRelation->getRelatedPivotKeyName(),
+                        'created_at',
+                        'updated_at',
+                    ]);
+
+                    // Get related models with pivot data
+                    $relatedModels = $fromRelation->get();
 
                     if ($relatedModels && $relatedModels->count() > 0) {
                         try {
                             // Get existing relations on the target with their pivot data
-                            $existingRelations = $to
-                                ->$method()
-                                ->withPivot()
-                                ->get();
+                            $toRelation = $to->$method();
+                            // Get the pivot table columns
+                            $pivotColumns = Schema::getColumnListing(
+                                $toRelation->getTable()
+                            );
+                            // Remove the foreign key columns
+                            $pivotColumns = array_diff($pivotColumns, [
+                                $toRelation->getForeignPivotKeyName(),
+                                $toRelation->getRelatedPivotKeyName(),
+                                'created_at',
+                                'updated_at',
+                            ]);
+
+                            // Get existing relations
+                            $existingRelations = $toRelation->get();
 
                             // Create a sync array that includes pivot data
                             $syncData = [];
@@ -2366,10 +2388,21 @@ class DynamicController extends \App\Http\Controllers\Controller
                     \Illuminate\Database\Eloquent\Relations\BelongsToMany
                 ) {
                     // For BelongsToMany, get the collection of related models with pivot data
-                    $relatedModels = $source
-                        ->$relationship()
-                        ->withPivot()
-                        ->get();
+                    $belongsToManyRelation = $source->$relationship();
+                    // Get the pivot table columns
+                    $pivotColumns = Schema::getColumnListing(
+                        $belongsToManyRelation->getTable()
+                    );
+                    // Remove the foreign key columns
+                    $pivotColumns = array_diff($pivotColumns, [
+                        $belongsToManyRelation->getForeignPivotKeyName(),
+                        $belongsToManyRelation->getRelatedPivotKeyName(),
+                        'created_at',
+                        'updated_at',
+                    ]);
+
+                    // Get related models with pivot data
+                    $relatedModels = $belongsToManyRelation->get();
 
                     if ($relatedModels && $relatedModels->count() > 0) {
                         // Filter out models with null or empty IDs
