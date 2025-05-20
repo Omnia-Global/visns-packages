@@ -1902,9 +1902,76 @@ class DynamicController extends \App\Http\Controllers\Controller
                             \Illuminate\Database\Eloquent\Relations\BelongsToMany
                         ) {
                             if ($relatedModel && $relatedModel->count() > 0) {
-                                $relation->sync(
-                                    $relatedModel->pluck('id')->toArray()
-                                );
+                                try {
+                                    // Create a sync array that includes pivot data
+                                    $syncData = [];
+
+                                    // Add relations with their pivot data
+                                    foreach ($relatedModel as $model) {
+                                        $id = $model->id;
+                                        if (!is_null($id) && $id !== '') {
+                                            // Check if the model has a pivot attribute
+                                            if (isset($model->pivot)) {
+                                                $pivotData = $model->pivot->getAttributes();
+                                                // Remove keys that are automatically managed
+                                                unset(
+                                                    $pivotData[
+                                                        $relation->getForeignPivotKeyName()
+                                                    ]
+                                                );
+                                                unset(
+                                                    $pivotData[
+                                                        $relation->getRelatedPivotKeyName()
+                                                    ]
+                                                );
+                                                unset($pivotData['created_at']);
+                                                unset($pivotData['updated_at']);
+
+                                                $syncData[$id] = $pivotData;
+                                            } else {
+                                                // No pivot data, just sync the ID
+                                                $syncData[$id] = [];
+                                            }
+                                        }
+                                    }
+
+                                    // Only sync if we have valid IDs
+                                    if (!empty($syncData)) {
+                                        // Sync to the target with pivot data
+                                        $relation->sync($syncData);
+                                    }
+                                } catch (\Exception $e) {
+                                    // Log the error for debugging
+                                    Log::error(
+                                        'Error syncing BelongsToMany relationship in mergeModels: ' .
+                                            $e->getMessage()
+                                    );
+                                    Log::error(
+                                        'Relationship method: ' . $relationship
+                                    );
+
+                                    // Try a simpler approach as fallback
+                                    try {
+                                        // Get IDs only
+                                        $ids = $relatedModel
+                                            ->pluck('id')
+                                            ->toArray();
+                                        $ids = array_filter($ids, function (
+                                            $id
+                                        ) {
+                                            return !is_null($id) && $id !== '';
+                                        });
+
+                                        if (!empty($ids)) {
+                                            $relation->sync($ids);
+                                        }
+                                    } catch (\Exception $innerE) {
+                                        Log::error(
+                                            'Fallback sync also failed: ' .
+                                                $innerE->getMessage()
+                                        );
+                                    }
+                                }
                             }
                         }
                     }
@@ -2021,35 +2088,100 @@ class DynamicController extends \App\Http\Controllers\Controller
                     \Illuminate\Database\Eloquent\Relations\BelongsToMany
                 ) {
                     // For BelongsToMany, get all pivot records and sync them to the target
-                    $relatedModels = $from->$method;
+                    $relatedModels = $from
+                        ->$method()
+                        ->withPivot()
+                        ->get();
+
                     if ($relatedModels && $relatedModels->count() > 0) {
-                        // Get existing relations on the target
-                        $existingIds = $to->$method->pluck('id')->toArray();
+                        try {
+                            // Get existing relations on the target with their pivot data
+                            $existingRelations = $to
+                                ->$method()
+                                ->withPivot()
+                                ->get();
 
-                        // Filter out any null or empty values
-                        $existingIds = array_filter($existingIds, function (
-                            $id
-                        ) {
-                            return !is_null($id) && $id !== '';
-                        });
+                            // Create a sync array that includes pivot data
+                            $syncData = [];
 
-                        // Get relations from the source
-                        $newIds = $relatedModels->pluck('id')->toArray();
+                            // Add existing relations first
+                            foreach ($existingRelations as $relation) {
+                                $id = $relation->id;
+                                if (!is_null($id) && $id !== '') {
+                                    $pivotData = $relation->pivot->getAttributes();
+                                    // Remove keys that are automatically managed
+                                    unset(
+                                        $pivotData[
+                                            $fromRelation->getForeignPivotKeyName()
+                                        ]
+                                    );
+                                    unset(
+                                        $pivotData[
+                                            $fromRelation->getRelatedPivotKeyName()
+                                        ]
+                                    );
+                                    unset($pivotData['created_at']);
+                                    unset($pivotData['updated_at']);
 
-                        // Filter out any null or empty values
-                        $newIds = array_filter($newIds, function ($id) {
-                            return !is_null($id) && $id !== '';
-                        });
+                                    $syncData[$id] = $pivotData;
+                                }
+                            }
 
-                        // Merge and remove duplicates
-                        $allIds = array_unique(
-                            array_merge($existingIds, $newIds)
-                        );
+                            // Add relations from the source model, overriding if they already exist
+                            foreach ($relatedModels as $relation) {
+                                $id = $relation->id;
+                                if (!is_null($id) && $id !== '') {
+                                    $pivotData = $relation->pivot->getAttributes();
+                                    // Remove keys that are automatically managed
+                                    unset(
+                                        $pivotData[
+                                            $fromRelation->getForeignPivotKeyName()
+                                        ]
+                                    );
+                                    unset(
+                                        $pivotData[
+                                            $fromRelation->getRelatedPivotKeyName()
+                                        ]
+                                    );
+                                    unset($pivotData['created_at']);
+                                    unset($pivotData['updated_at']);
 
-                        // Only sync if we have valid IDs
-                        if (!empty($allIds)) {
-                            // Sync to the target
-                            $toRelation->sync($allIds);
+                                    $syncData[$id] = $pivotData;
+                                }
+                            }
+
+                            // Only sync if we have valid IDs
+                            if (!empty($syncData)) {
+                                // Sync to the target with pivot data
+                                $toRelation->sync($syncData);
+                            }
+                        } catch (\Exception $e) {
+                            // Log the error for debugging
+                            Log::error(
+                                'Error syncing BelongsToMany relationship: ' .
+                                    $e->getMessage()
+                            );
+                            Log::error('Relationship method: ' . $method);
+
+                            // Try a simpler approach as fallback
+                            try {
+                                // Get IDs only
+                                $newIds = $relatedModels
+                                    ->pluck('id')
+                                    ->toArray();
+                                $newIds = array_filter($newIds, function ($id) {
+                                    return !is_null($id) && $id !== '';
+                                });
+
+                                if (!empty($newIds)) {
+                                    $toRelation->sync($newIds);
+                                }
+                            } catch (\Exception $innerE) {
+                                Log::error(
+                                    'Fallback sync also failed: ' .
+                                        $innerE->getMessage()
+                                );
+                            }
                         }
                     }
                 } elseif (
@@ -2215,11 +2347,9 @@ class DynamicController extends \App\Http\Controllers\Controller
                     }
                 } elseif (
                     $relation instanceof
-                        \Illuminate\Database\Eloquent\Relations\HasMany ||
-                    $relation instanceof
-                        \Illuminate\Database\Eloquent\Relations\BelongsToMany
+                    \Illuminate\Database\Eloquent\Relations\HasMany
                 ) {
-                    // For HasMany or BelongsToMany, get the collection of related models
+                    // For HasMany, get the collection of related models
                     $relatedModels = $source->$relationship;
 
                     if ($relatedModels && $relatedModels->count() > 0) {
@@ -2230,6 +2360,30 @@ class DynamicController extends \App\Http\Controllers\Controller
 
                         // Set the relationship on the target
                         $target->setRelation($relationship, $clonedModels);
+                    }
+                } elseif (
+                    $relation instanceof
+                    \Illuminate\Database\Eloquent\Relations\BelongsToMany
+                ) {
+                    // For BelongsToMany, get the collection of related models with pivot data
+                    $relatedModels = $source
+                        ->$relationship()
+                        ->withPivot()
+                        ->get();
+
+                    if ($relatedModels && $relatedModels->count() > 0) {
+                        // Filter out models with null or empty IDs
+                        $validModels = $relatedModels->filter(function (
+                            $model
+                        ) {
+                            return !is_null($model->id) && $model->id !== '';
+                        });
+
+                        // Only set the relationship if we have valid models
+                        if ($validModels->count() > 0) {
+                            // We'll handle the actual sync after saving the model
+                            $target->setRelation($relationship, $validModels);
+                        }
                     }
                 }
             }
