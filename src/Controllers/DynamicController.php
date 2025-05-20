@@ -1978,8 +1978,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                 }
             }
 
-            // Move all relationships from target to source
-            $this->moveRelationships($target, $mergedModel);
+            // Duplicate relationships from target to source instead of moving them
+            $this->duplicateRelationships($target, $mergedModel);
 
             // Soft delete the target model if it uses SoftDeletes trait
             if (
@@ -2299,6 +2299,237 @@ class DynamicController extends \App\Http\Controllers\Controller
                     $relatedModel->save();
                 }
             }
+        }
+    }
+
+    /**
+     * Duplicate relationships from one model to another.
+     * This method focuses on duplicating relationships rather than moving them,
+     * which is simpler and less error-prone.
+     *
+     * @param \Illuminate\Database\Eloquent\Model $from The model to duplicate relationships from
+     * @param \Illuminate\Database\Eloquent\Model $to The model to duplicate relationships to
+     * @return void
+     */
+    private function duplicateRelationships($from, $to)
+    {
+        try {
+            // Focus only on BelongsToMany relationships which are the most common
+            // and the ones causing issues with the "contact_types" relationship
+
+            // Handle contact_types relationship specifically if it exists
+            if (
+                method_exists($from, 'contact_types') &&
+                method_exists($to, 'contact_types')
+            ) {
+                try {
+                    // Get the relationship instances
+                    $fromRelation = $from->contact_types();
+
+                    // Get the related IDs from the source model
+                    $contactTypeIds = $from
+                        ->contact_types()
+                        ->pluck('contact_type_id')
+                        ->filter()
+                        ->toArray();
+
+                    // If we have IDs, attach them to the target model
+                    if (!empty($contactTypeIds)) {
+                        $to->contact_types()->attach($contactTypeIds);
+                        Log::info(
+                            'Successfully duplicated contact_types relationship with IDs: ' .
+                                implode(', ', $contactTypeIds)
+                        );
+                    }
+                } catch (\Exception $e) {
+                    Log::warning(
+                        'Error duplicating contact_types relationship: ' .
+                            $e->getMessage()
+                    );
+                }
+            }
+
+            // Handle contacts_industries relationship if it exists
+            if (
+                method_exists($from, 'contacts_industries') &&
+                method_exists($to, 'contacts_industries')
+            ) {
+                try {
+                    // Get the relationship instances
+                    $fromRelation = $from->contacts_industries();
+
+                    // Get the related IDs from the source model
+                    $industryIds = $from
+                        ->contacts_industries()
+                        ->pluck('industry_id')
+                        ->filter()
+                        ->toArray();
+
+                    // If we have IDs, attach them to the target model
+                    if (!empty($industryIds)) {
+                        $to->contacts_industries()->attach($industryIds);
+                        Log::info(
+                            'Successfully duplicated contacts_industries relationship with IDs: ' .
+                                implode(', ', $industryIds)
+                        );
+                    }
+                } catch (\Exception $e) {
+                    Log::warning(
+                        'Error duplicating contacts_industries relationship: ' .
+                            $e->getMessage()
+                    );
+                }
+            }
+
+            // Handle tags relationship if it exists
+            if (method_exists($from, 'tags') && method_exists($to, 'tags')) {
+                try {
+                    // Get the relationship instances
+                    $fromRelation = $from->tags();
+
+                    // Get the related IDs from the source model
+                    $tagIds = $from
+                        ->tags()
+                        ->pluck('tag_id')
+                        ->filter()
+                        ->toArray();
+
+                    // If we have IDs, attach them to the target model
+                    if (!empty($tagIds)) {
+                        $to->tags()->attach($tagIds);
+                        Log::info(
+                            'Successfully duplicated tags relationship with IDs: ' .
+                                implode(', ', $tagIds)
+                        );
+                    }
+                } catch (\Exception $e) {
+                    Log::warning(
+                        'Error duplicating tags relationship: ' .
+                            $e->getMessage()
+                    );
+                }
+            }
+
+            // For other BelongsToMany relationships, try a more generic approach
+            // Get all relationship methods from the model
+            if (method_exists($from, 'loadableRelations')) {
+                $relationMethods = $from->loadableRelations();
+
+                // Clean up relationship names (remove everything after ':' and skip relations with dots)
+                $relationMethods = array_filter(
+                    array_map(function ($relation) {
+                        // Remove everything after ':' if it exists
+                        $relation =
+                            strpos($relation, ':') !== false
+                                ? explode(':', $relation)[0]
+                                : $relation;
+
+                        // Skip relations with dots
+                        return strpos($relation, '.') === false
+                            ? $relation
+                            : null;
+                    }, $relationMethods)
+                );
+
+                // Skip the relationships we've already handled specifically
+                $relationMethods = array_diff($relationMethods, [
+                    'contact_types',
+                    'contacts_industries',
+                    'tags',
+                ]);
+
+                foreach ($relationMethods as $method) {
+                    // Skip if the method doesn't exist on either model
+                    if (
+                        !method_exists($from, $method) ||
+                        !method_exists($to, $method)
+                    ) {
+                        continue;
+                    }
+
+                    try {
+                        $fromRelation = $from->$method();
+
+                        // Only handle BelongsToMany relationships
+                        if (
+                            $fromRelation instanceof
+                            \Illuminate\Database\Eloquent\Relations\BelongsToMany
+                        ) {
+                            // Get the pivot table and key names
+                            $pivotTable = $fromRelation->getTable();
+                            $foreignPivotKey = $fromRelation->getForeignPivotKeyName();
+                            $relatedPivotKey = $fromRelation->getRelatedPivotKeyName();
+
+                            // Get existing relationships directly from the pivot table
+                            $existingPivots = DB::table($pivotTable)
+                                ->where($foreignPivotKey, $from->getKey())
+                                ->get();
+
+                            if ($existingPivots->count() > 0) {
+                                // Prepare data for insertion
+                                $newPivots = $existingPivots
+                                    ->map(function ($pivot) use (
+                                        $to,
+                                        $foreignPivotKey,
+                                        $relatedPivotKey
+                                    ) {
+                                        $pivotData = (array) $pivot;
+                                        $pivotData[
+                                            $foreignPivotKey
+                                        ] = $to->getKey();
+
+                                        // Remove auto-increment ID if it exists
+                                        if (isset($pivotData['id'])) {
+                                            unset($pivotData['id']);
+                                        }
+
+                                        return $pivotData;
+                                    })
+                                    ->toArray();
+
+                                // Insert the new relationships
+                                foreach ($newPivots as $pivotData) {
+                                    try {
+                                        // Check if the relationship already exists
+                                        $exists = DB::table($pivotTable)
+                                            ->where(
+                                                $foreignPivotKey,
+                                                $to->getKey()
+                                            )
+                                            ->where(
+                                                $relatedPivotKey,
+                                                $pivotData[$relatedPivotKey]
+                                            )
+                                            ->exists();
+
+                                        if (!$exists) {
+                                            DB::table($pivotTable)->insert(
+                                                $pivotData
+                                            );
+                                        }
+                                    } catch (\Exception $e) {
+                                        Log::warning(
+                                            "Error inserting pivot data for $method: " .
+                                                $e->getMessage()
+                                        );
+                                    }
+                                }
+
+                                Log::info(
+                                    "Successfully duplicated $method relationship"
+                                );
+                            }
+                        }
+                    } catch (\Exception $e) {
+                        Log::warning(
+                            "Error processing relationship $method: " .
+                                $e->getMessage()
+                        );
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            Log::error('Error in duplicateRelationships: ' . $e->getMessage());
         }
     }
 
