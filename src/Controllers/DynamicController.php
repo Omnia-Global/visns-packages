@@ -1831,6 +1831,7 @@ class DynamicController extends \App\Http\Controllers\Controller
             'prioritizeSource' => true, // Always prioritize source model attributes
         ];
 
+        // Wrap everything in a try-catch block
         try {
             // Get all loadable relationships if not specified
             if (
@@ -1865,112 +1866,143 @@ class DynamicController extends \App\Http\Controllers\Controller
             // Handle relationships that need to be saved after the main model
             if (!empty($options['relationships'])) {
                 foreach ($options['relationships'] as $relationship) {
-                    if (method_exists($mergedModel, $relationship)) {
+                    // Skip if the relationship method doesn't exist
+                    if (!method_exists($mergedModel, $relationship)) {
+                        Log::warning(
+                            "Relationship method '$relationship' does not exist on the model. Skipping."
+                        );
+                        continue;
+                    }
+
+                    try {
+                        // Special handling for contact_types relationship
+                        if ($relationship === 'contact_types') {
+                            Log::info(
+                                'Special handling for contact_types relationship in the loop'
+                            );
+                            continue; // Skip normal processing for contact_types
+                        }
+
+                        // Get the relationship instance
                         $relation = $mergedModel->$relationship();
+
+                        // Check if the relationship is loaded
+                        if (!$mergedModel->relationLoaded($relationship)) {
+                            Log::warning(
+                                "Relationship '$relationship' is not loaded. Skipping."
+                            );
+                            continue;
+                        }
+
+                        // Get the related model(s)
                         $relatedModel = $mergedModel->getRelation(
                             $relationship
                         );
+                    } catch (\Exception $e) {
+                        Log::warning(
+                            "Error processing relationship '$relationship': " .
+                                $e->getMessage()
+                        );
+                        continue;
+                    }
 
-                        if (
-                            $relation instanceof
-                            \Illuminate\Database\Eloquent\Relations\HasOne
-                        ) {
-                            if ($relatedModel) {
-                                $relation->save($relatedModel);
+                    if (
+                        $relation instanceof
+                        \Illuminate\Database\Eloquent\Relations\HasOne
+                    ) {
+                        if ($relatedModel) {
+                            $relation->save($relatedModel);
+                        }
+                    } elseif (
+                        $relation instanceof
+                        \Illuminate\Database\Eloquent\Relations\BelongsTo
+                    ) {
+                        if ($relatedModel) {
+                            $relatedModel->save();
+                            $foreignKey = $relation->getForeignKeyName();
+                            $mergedModel->$foreignKey = $relatedModel->getKey();
+                            $mergedModel->save();
+                        }
+                    } elseif (
+                        $relation instanceof
+                        \Illuminate\Database\Eloquent\Relations\HasMany
+                    ) {
+                        if ($relatedModel && $relatedModel->count() > 0) {
+                            foreach ($relatedModel as $model) {
+                                $relation->save($model);
                             }
-                        } elseif (
-                            $relation instanceof
-                            \Illuminate\Database\Eloquent\Relations\BelongsTo
-                        ) {
-                            if ($relatedModel) {
-                                $relatedModel->save();
-                                $foreignKey = $relation->getForeignKeyName();
-                                $mergedModel->$foreignKey = $relatedModel->getKey();
-                                $mergedModel->save();
-                            }
-                        } elseif (
-                            $relation instanceof
-                            \Illuminate\Database\Eloquent\Relations\HasMany
-                        ) {
-                            if ($relatedModel && $relatedModel->count() > 0) {
+                        }
+                    } elseif (
+                        $relation instanceof
+                        \Illuminate\Database\Eloquent\Relations\BelongsToMany
+                    ) {
+                        if ($relatedModel && $relatedModel->count() > 0) {
+                            try {
+                                // Create a sync array that includes pivot data
+                                $syncData = [];
+
+                                // Add relations with their pivot data
                                 foreach ($relatedModel as $model) {
-                                    $relation->save($model);
+                                    $id = $model->id;
+                                    if (!is_null($id) && $id !== '') {
+                                        // Check if the model has a pivot attribute
+                                        if (isset($model->pivot)) {
+                                            $pivotData = $model->pivot->getAttributes();
+                                            // Remove keys that are automatically managed
+                                            unset(
+                                                $pivotData[
+                                                    $relation->getForeignPivotKeyName()
+                                                ]
+                                            );
+                                            unset(
+                                                $pivotData[
+                                                    $relation->getRelatedPivotKeyName()
+                                                ]
+                                            );
+                                            unset($pivotData['created_at']);
+                                            unset($pivotData['updated_at']);
+
+                                            $syncData[$id] = $pivotData;
+                                        } else {
+                                            // No pivot data, just sync the ID
+                                            $syncData[$id] = [];
+                                        }
+                                    }
                                 }
-                            }
-                        } elseif (
-                            $relation instanceof
-                            \Illuminate\Database\Eloquent\Relations\BelongsToMany
-                        ) {
-                            if ($relatedModel && $relatedModel->count() > 0) {
+
+                                // Only sync if we have valid IDs
+                                if (!empty($syncData)) {
+                                    // Sync to the target with pivot data
+                                    $relation->sync($syncData);
+                                }
+                            } catch (\Exception $e) {
+                                // Log the error for debugging
+                                Log::error(
+                                    'Error syncing BelongsToMany relationship in mergeModels: ' .
+                                        $e->getMessage()
+                                );
+                                Log::error(
+                                    'Relationship method: ' . $relationship
+                                );
+
+                                // Try a simpler approach as fallback
                                 try {
-                                    // Create a sync array that includes pivot data
-                                    $syncData = [];
+                                    // Get IDs only
+                                    $ids = $relatedModel
+                                        ->pluck('id')
+                                        ->toArray();
+                                    $ids = array_filter($ids, function ($id) {
+                                        return !is_null($id) && $id !== '';
+                                    });
 
-                                    // Add relations with their pivot data
-                                    foreach ($relatedModel as $model) {
-                                        $id = $model->id;
-                                        if (!is_null($id) && $id !== '') {
-                                            // Check if the model has a pivot attribute
-                                            if (isset($model->pivot)) {
-                                                $pivotData = $model->pivot->getAttributes();
-                                                // Remove keys that are automatically managed
-                                                unset(
-                                                    $pivotData[
-                                                        $relation->getForeignPivotKeyName()
-                                                    ]
-                                                );
-                                                unset(
-                                                    $pivotData[
-                                                        $relation->getRelatedPivotKeyName()
-                                                    ]
-                                                );
-                                                unset($pivotData['created_at']);
-                                                unset($pivotData['updated_at']);
-
-                                                $syncData[$id] = $pivotData;
-                                            } else {
-                                                // No pivot data, just sync the ID
-                                                $syncData[$id] = [];
-                                            }
-                                        }
+                                    if (!empty($ids)) {
+                                        $relation->sync($ids);
                                     }
-
-                                    // Only sync if we have valid IDs
-                                    if (!empty($syncData)) {
-                                        // Sync to the target with pivot data
-                                        $relation->sync($syncData);
-                                    }
-                                } catch (\Exception $e) {
-                                    // Log the error for debugging
+                                } catch (\Exception $innerE) {
                                     Log::error(
-                                        'Error syncing BelongsToMany relationship in mergeModels: ' .
-                                            $e->getMessage()
+                                        'Fallback sync also failed: ' .
+                                            $innerE->getMessage()
                                     );
-                                    Log::error(
-                                        'Relationship method: ' . $relationship
-                                    );
-
-                                    // Try a simpler approach as fallback
-                                    try {
-                                        // Get IDs only
-                                        $ids = $relatedModel
-                                            ->pluck('id')
-                                            ->toArray();
-                                        $ids = array_filter($ids, function (
-                                            $id
-                                        ) {
-                                            return !is_null($id) && $id !== '';
-                                        });
-
-                                        if (!empty($ids)) {
-                                            $relation->sync($ids);
-                                        }
-                                    } catch (\Exception $innerE) {
-                                        Log::error(
-                                            'Fallback sync also failed: ' .
-                                                $innerE->getMessage()
-                                        );
-                                    }
                                 }
                             }
                         }
@@ -1979,7 +2011,16 @@ class DynamicController extends \App\Http\Controllers\Controller
             }
 
             // Duplicate relationships from target to source instead of moving them
-            $this->duplicateRelationships($target, $mergedModel);
+            try {
+                $this->duplicateRelationships($target, $mergedModel);
+            } catch (\Exception $e) {
+                Log::error(
+                    'Error in duplicateRelationships: ' . $e->getMessage()
+                );
+                // Continue execution even if duplicateRelationships fails
+            }
+
+            // Note: contact_types relationship is now handled in the duplicateRelationships method
 
             // Soft delete the target model if it uses SoftDeletes trait
             if (
@@ -2022,287 +2063,6 @@ class DynamicController extends \App\Http\Controllers\Controller
     }
 
     /**
-     * Move all relationships from one model to another.
-     *
-     * @param \Illuminate\Database\Eloquent\Model $from The model to move relationships from
-     * @param \Illuminate\Database\Eloquent\Model $to The model to move relationships to
-     * @return void
-     */
-    private function moveRelationships($from, $to)
-    {
-        // Get all relationship methods from the model
-        $relationMethods = [];
-
-        // If the model has loadableRelations method, use it to get relationships
-        if (method_exists($from, 'loadableRelations')) {
-            $relationMethods = $from->loadableRelations();
-
-            // Clean up relationship names (remove everything after ':' and skip relations with dots)
-            $relationMethods = array_filter(
-                array_map(function ($relation) {
-                    // Remove everything after ':' if it exists
-                    $relation =
-                        strpos($relation, ':') !== false
-                            ? explode(':', $relation)[0]
-                            : $relation;
-
-                    // Skip relations with dots
-                    return strpos($relation, '.') === false ? $relation : null;
-                }, $relationMethods)
-            );
-        }
-
-        // Process each relationship
-        foreach ($relationMethods as $method) {
-            // Skip if the method doesn't exist on either model
-            if (
-                !method_exists($from, $method) ||
-                !method_exists($to, $method)
-            ) {
-                Log::warning(
-                    "Relationship method '$method' does not exist on both models. Skipping."
-                );
-                continue;
-            }
-
-            try {
-                // Try to get the relationship instances
-                $fromRelation = $from->$method();
-                $toRelation = $to->$method();
-
-                // Skip if either relation is not a valid relation
-                if (
-                    !(
-                        $fromRelation instanceof
-                        \Illuminate\Database\Eloquent\Relations\Relation
-                    ) ||
-                    !(
-                        $toRelation instanceof
-                        \Illuminate\Database\Eloquent\Relations\Relation
-                    )
-                ) {
-                    Log::warning(
-                        "'$method' is not a valid relationship on both models. Skipping."
-                    );
-                    continue;
-                }
-
-                // Try to load the related models to verify the relationship works
-                try {
-                    // For BelongsToMany, we need to check if the pivot table exists
-                    if (
-                        $fromRelation instanceof
-                        \Illuminate\Database\Eloquent\Relations\BelongsToMany
-                    ) {
-                        $pivotTable = $fromRelation->getTable();
-                        if (!Schema::hasTable($pivotTable)) {
-                            Log::warning(
-                                "Pivot table '$pivotTable' for relationship '$method' does not exist. Skipping."
-                            );
-                            continue;
-                        }
-                    }
-
-                    // Try to get related models
-                    $relatedModels = $from->$method;
-                } catch (\Exception $e) {
-                    Log::warning(
-                        "Error loading related models for '$method': " .
-                            $e->getMessage()
-                    );
-                    continue;
-                }
-            } catch (\Exception $e) {
-                Log::warning(
-                    "Error accessing relationship '$method': " .
-                        $e->getMessage()
-                );
-                continue;
-            }
-
-            // Handle different relationship types
-            if (
-                $fromRelation instanceof
-                \Illuminate\Database\Eloquent\Relations\HasOne
-            ) {
-                // For HasOne, get the related model and update its foreign key
-                $relatedModel = $from->$method;
-                if ($relatedModel) {
-                    $foreignKey = $fromRelation->getForeignKeyName();
-                    $relatedModel->$foreignKey = $to->getKey();
-                    $relatedModel->save();
-                }
-            } elseif (
-                $fromRelation instanceof
-                \Illuminate\Database\Eloquent\Relations\HasMany
-            ) {
-                // For HasMany, update foreign keys for all related models
-                $relatedModels = $from->$method;
-                if ($relatedModels && $relatedModels->count() > 0) {
-                    $foreignKey = $fromRelation->getForeignKeyName();
-                    foreach ($relatedModels as $model) {
-                        $model->$foreignKey = $to->getKey();
-                        $model->save();
-                    }
-                }
-            } elseif (
-                $fromRelation instanceof
-                \Illuminate\Database\Eloquent\Relations\BelongsToMany
-            ) {
-                // For BelongsToMany, get all pivot records and sync them to the target
-                $fromRelation = $from->$method();
-                // Get the pivot table columns
-                $pivotColumns = Schema::getColumnListing(
-                    $fromRelation->getTable()
-                );
-                // Remove the foreign key columns
-                $pivotColumns = array_diff($pivotColumns, [
-                    $fromRelation->getForeignPivotKeyName(),
-                    $fromRelation->getRelatedPivotKeyName(),
-                    'created_at',
-                    'updated_at',
-                ]);
-
-                // Get related models with pivot data
-                $relatedModels = $fromRelation->get();
-
-                if ($relatedModels && $relatedModels->count() > 0) {
-                    try {
-                        // Get existing relations on the target with their pivot data
-                        $toRelation = $to->$method();
-                        // Get the pivot table columns
-                        $pivotColumns = Schema::getColumnListing(
-                            $toRelation->getTable()
-                        );
-                        // Remove the foreign key columns
-                        $pivotColumns = array_diff($pivotColumns, [
-                            $toRelation->getForeignPivotKeyName(),
-                            $toRelation->getRelatedPivotKeyName(),
-                            'created_at',
-                            'updated_at',
-                        ]);
-
-                        // Get existing relations
-                        $existingRelations = $toRelation->get();
-
-                        // Create a sync array that includes pivot data
-                        $syncData = [];
-
-                        // Add existing relations first
-                        foreach ($existingRelations as $relation) {
-                            $id = $relation->id;
-                            if (!is_null($id) && $id !== '') {
-                                $pivotData = $relation->pivot->getAttributes();
-                                // Remove keys that are automatically managed
-                                unset(
-                                    $pivotData[
-                                        $fromRelation->getForeignPivotKeyName()
-                                    ]
-                                );
-                                unset(
-                                    $pivotData[
-                                        $fromRelation->getRelatedPivotKeyName()
-                                    ]
-                                );
-                                unset($pivotData['created_at']);
-                                unset($pivotData['updated_at']);
-
-                                $syncData[$id] = $pivotData;
-                            }
-                        }
-
-                        // Add relations from the source model, overriding if they already exist
-                        foreach ($relatedModels as $relation) {
-                            $id = $relation->id;
-                            if (!is_null($id) && $id !== '') {
-                                $pivotData = $relation->pivot->getAttributes();
-                                // Remove keys that are automatically managed
-                                unset(
-                                    $pivotData[
-                                        $fromRelation->getForeignPivotKeyName()
-                                    ]
-                                );
-                                unset(
-                                    $pivotData[
-                                        $fromRelation->getRelatedPivotKeyName()
-                                    ]
-                                );
-                                unset($pivotData['created_at']);
-                                unset($pivotData['updated_at']);
-
-                                $syncData[$id] = $pivotData;
-                            }
-                        }
-
-                        // Only sync if we have valid IDs
-                        if (!empty($syncData)) {
-                            // Sync to the target with pivot data
-                            $toRelation->sync($syncData);
-                        }
-                    } catch (\Exception $e) {
-                        // Log the error for debugging
-                        Log::error(
-                            'Error syncing BelongsToMany relationship: ' .
-                                $e->getMessage()
-                        );
-                        Log::error('Relationship method: ' . $method);
-
-                        // Try a simpler approach as fallback
-                        try {
-                            // Get IDs only
-                            $newIds = $relatedModels->pluck('id')->toArray();
-                            $newIds = array_filter($newIds, function ($id) {
-                                return !is_null($id) && $id !== '';
-                            });
-
-                            if (!empty($newIds)) {
-                                $toRelation->sync($newIds);
-                            }
-                        } catch (\Exception $innerE) {
-                            Log::error(
-                                'Fallback sync also failed: ' .
-                                    $innerE->getMessage()
-                            );
-                        }
-                    }
-                }
-            } elseif (
-                $fromRelation instanceof
-                \Illuminate\Database\Eloquent\Relations\MorphMany
-            ) {
-                // For MorphMany, update morph type and ID for all related models
-                $relatedModels = $from->$method;
-                if ($relatedModels && $relatedModels->count() > 0) {
-                    $morphType = $fromRelation->getMorphType();
-                    $foreignKey = $fromRelation->getForeignKeyName();
-                    foreach ($relatedModels as $model) {
-                        $model->$morphType = get_class($to);
-                        $model->$foreignKey = $to->getKey();
-                        $model->save();
-                    }
-                }
-            } elseif (
-                $fromRelation instanceof
-                \Illuminate\Database\Eloquent\Relations\MorphOne
-            ) {
-                // For MorphOne, update morph type and ID for the related model
-                $relatedModel = $from->$method;
-                if ($relatedModel) {
-                    // Delete existing relation on target if it exists
-                    $to->$method()->delete();
-
-                    // Update the morph type and ID
-                    $morphType = $fromRelation->getMorphType();
-                    $foreignKey = $fromRelation->getForeignKeyName();
-                    $relatedModel->$morphType = get_class($to);
-                    $relatedModel->$foreignKey = $to->getKey();
-                    $relatedModel->save();
-                }
-            }
-        }
-    }
-
-    /**
      * Duplicate relationships from one model to another.
      * This method focuses on duplicating relationships rather than moving them,
      * which is simpler and less error-prone.
@@ -2314,106 +2074,26 @@ class DynamicController extends \App\Http\Controllers\Controller
     private function duplicateRelationships($from, $to)
     {
         try {
-            // Focus only on BelongsToMany relationships which are the most common
-            // and the ones causing issues with the "contact_types" relationship
+            // Log the models we're working with for debugging
+            Log::info(
+                'Duplicating relationships from model ID: ' .
+                    $from->getKey() .
+                    ' to model ID: ' .
+                    $to->getKey()
+            );
+            Log::info('From model class: ' . get_class($from));
+            Log::info('To model class: ' . get_class($to));
 
-            // Handle contact_types relationship specifically if it exists
-            if (
-                method_exists($from, 'contact_types') &&
-                method_exists($to, 'contact_types')
-            ) {
-                try {
-                    // Get the relationship instances
-                    $fromRelation = $from->contact_types();
-
-                    // Get the related IDs from the source model
-                    $contactTypeIds = $from
-                        ->contact_types()
-                        ->pluck('contact_type_id')
-                        ->filter()
-                        ->toArray();
-
-                    // If we have IDs, attach them to the target model
-                    if (!empty($contactTypeIds)) {
-                        $to->contact_types()->attach($contactTypeIds);
-                        Log::info(
-                            'Successfully duplicated contact_types relationship with IDs: ' .
-                                implode(', ', $contactTypeIds)
-                        );
-                    }
-                } catch (\Exception $e) {
-                    Log::warning(
-                        'Error duplicating contact_types relationship: ' .
-                            $e->getMessage()
-                    );
-                }
-            }
-
-            // Handle contacts_industries relationship if it exists
-            if (
-                method_exists($from, 'contacts_industries') &&
-                method_exists($to, 'contacts_industries')
-            ) {
-                try {
-                    // Get the relationship instances
-                    $fromRelation = $from->contacts_industries();
-
-                    // Get the related IDs from the source model
-                    $industryIds = $from
-                        ->contacts_industries()
-                        ->pluck('industry_id')
-                        ->filter()
-                        ->toArray();
-
-                    // If we have IDs, attach them to the target model
-                    if (!empty($industryIds)) {
-                        $to->contacts_industries()->attach($industryIds);
-                        Log::info(
-                            'Successfully duplicated contacts_industries relationship with IDs: ' .
-                                implode(', ', $industryIds)
-                        );
-                    }
-                } catch (\Exception $e) {
-                    Log::warning(
-                        'Error duplicating contacts_industries relationship: ' .
-                            $e->getMessage()
-                    );
-                }
-            }
-
-            // Handle tags relationship if it exists
-            if (method_exists($from, 'tags') && method_exists($to, 'tags')) {
-                try {
-                    // Get the relationship instances
-                    $fromRelation = $from->tags();
-
-                    // Get the related IDs from the source model
-                    $tagIds = $from
-                        ->tags()
-                        ->pluck('tag_id')
-                        ->filter()
-                        ->toArray();
-
-                    // If we have IDs, attach them to the target model
-                    if (!empty($tagIds)) {
-                        $to->tags()->attach($tagIds);
-                        Log::info(
-                            'Successfully duplicated tags relationship with IDs: ' .
-                                implode(', ', $tagIds)
-                        );
-                    }
-                } catch (\Exception $e) {
-                    Log::warning(
-                        'Error duplicating tags relationship: ' .
-                            $e->getMessage()
-                    );
-                }
-            }
-
-            // For other BelongsToMany relationships, try a more generic approach
             // Get all relationship methods from the model
+            $relationMethods = [];
+
+            // If the model has loadableRelations method, use it to get relationships
             if (method_exists($from, 'loadableRelations')) {
                 $relationMethods = $from->loadableRelations();
+                Log::info(
+                    'Found loadableRelations: ' .
+                        implode(', ', $relationMethods)
+                );
 
                 // Clean up relationship names (remove everything after ':' and skip relations with dots)
                 $relationMethods = array_filter(
@@ -2431,101 +2111,202 @@ class DynamicController extends \App\Http\Controllers\Controller
                     }, $relationMethods)
                 );
 
-                // Skip the relationships we've already handled specifically
-                $relationMethods = array_diff($relationMethods, [
-                    'contact_types',
-                    'contacts_industries',
-                    'tags',
-                ]);
+                Log::info(
+                    'After cleaning, relationships to process: ' .
+                        implode(', ', $relationMethods)
+                );
+            } else {
+                Log::warning(
+                    'Model does not have loadableRelations method. No relationships will be duplicated.'
+                );
+            }
 
-                foreach ($relationMethods as $method) {
-                    // Skip if the method doesn't exist on either model
-                    if (
-                        !method_exists($from, $method) ||
-                        !method_exists($to, $method)
-                    ) {
-                        continue;
-                    }
+            // Special handling for contact_types relationship
+            if (
+                method_exists($from, 'contact_types') &&
+                method_exists($to, 'contact_types')
+            ) {
+                try {
+                    Log::info(
+                        'Special handling for contact_types relationship in duplicateRelationships'
+                    );
 
-                    try {
-                        $fromRelation = $from->$method();
+                    // Use direct DB query to get the contact_type_id values from the pivot table
+                    $contactTypeIds = DB::table('contact_contact_type')
+                        ->where('contact_id', $from->id)
+                        ->pluck('contact_type_id')
+                        ->filter()
+                        ->toArray();
 
-                        // Only handle BelongsToMany relationships
-                        if (
-                            $fromRelation instanceof
-                            \Illuminate\Database\Eloquent\Relations\BelongsToMany
-                        ) {
-                            // Get the pivot table and key names
-                            $pivotTable = $fromRelation->getTable();
-                            $foreignPivotKey = $fromRelation->getForeignPivotKeyName();
-                            $relatedPivotKey = $fromRelation->getRelatedPivotKeyName();
+                    Log::info(
+                        'Found contact_type_ids: ' .
+                            implode(', ', $contactTypeIds ?: [])
+                    );
 
-                            // Get existing relationships directly from the pivot table
-                            $existingPivots = DB::table($pivotTable)
-                                ->where($foreignPivotKey, $from->getKey())
-                                ->get();
+                    // If we have IDs, attach them to the target model
+                    if (!empty($contactTypeIds)) {
+                        foreach ($contactTypeIds as $contactTypeId) {
+                            // Check if the relationship already exists
+                            $exists = DB::table('contact_contact_type')
+                                ->where('contact_id', $to->id)
+                                ->where('contact_type_id', $contactTypeId)
+                                ->exists();
 
-                            if ($existingPivots->count() > 0) {
-                                // Prepare data for insertion
-                                $newPivots = $existingPivots
-                                    ->map(function ($pivot) use (
-                                        $to,
-                                        $foreignPivotKey,
-                                        $relatedPivotKey
-                                    ) {
-                                        $pivotData = (array) $pivot;
-                                        $pivotData[
-                                            $foreignPivotKey
-                                        ] = $to->getKey();
-
-                                        // Remove auto-increment ID if it exists
-                                        if (isset($pivotData['id'])) {
-                                            unset($pivotData['id']);
-                                        }
-
-                                        return $pivotData;
-                                    })
-                                    ->toArray();
-
-                                // Insert the new relationships
-                                foreach ($newPivots as $pivotData) {
-                                    try {
-                                        // Check if the relationship already exists
-                                        $exists = DB::table($pivotTable)
-                                            ->where(
-                                                $foreignPivotKey,
-                                                $to->getKey()
-                                            )
-                                            ->where(
-                                                $relatedPivotKey,
-                                                $pivotData[$relatedPivotKey]
-                                            )
-                                            ->exists();
-
-                                        if (!$exists) {
-                                            DB::table($pivotTable)->insert(
-                                                $pivotData
-                                            );
-                                        }
-                                    } catch (\Exception $e) {
-                                        Log::warning(
-                                            "Error inserting pivot data for $method: " .
-                                                $e->getMessage()
-                                        );
-                                    }
-                                }
+                            if (!$exists) {
+                                DB::table('contact_contact_type')->insert([
+                                    'contact_id' => $to->id,
+                                    'contact_type_id' => $contactTypeId,
+                                    'created_at' => now(),
+                                    'updated_at' => now(),
+                                ]);
 
                                 Log::info(
-                                    "Successfully duplicated $method relationship"
+                                    "Added contact_type_id: $contactTypeId to target model"
                                 );
                             }
                         }
-                    } catch (\Exception $e) {
-                        Log::warning(
-                            "Error processing relationship $method: " .
-                                $e->getMessage()
-                        );
                     }
+                } catch (\Exception $e) {
+                    Log::error(
+                        'Error handling contact_types relationship: ' .
+                            $e->getMessage()
+                    );
+                }
+
+                // Remove contact_types from the methods to process
+                $relationMethods = array_diff($relationMethods, [
+                    'contact_types',
+                ]);
+            }
+
+            // Process each relationship
+            foreach ($relationMethods as $method) {
+                // Skip if the method doesn't exist on either model
+                if (
+                    !method_exists($from, $method) ||
+                    !method_exists($to, $method)
+                ) {
+                    Log::warning(
+                        "Relationship method '$method' does not exist on both models. Skipping."
+                    );
+                    continue;
+                }
+
+                try {
+                    // Get the relationship instance
+                    $fromRelation = $from->$method();
+
+                    // Only handle BelongsToMany relationships
+                    if (
+                        $fromRelation instanceof
+                        \Illuminate\Database\Eloquent\Relations\BelongsToMany
+                    ) {
+                        // Get the pivot table and key names
+                        $pivotTable = $fromRelation->getTable();
+                        $foreignPivotKey = $fromRelation->getForeignPivotKeyName();
+                        $relatedPivotKey = $fromRelation->getRelatedPivotKeyName();
+
+                        // Log the relationship details for debugging
+                        Log::info(
+                            "Processing BelongsToMany relationship: $method"
+                        );
+                        Log::info("Pivot table: $pivotTable");
+                        Log::info("Foreign pivot key: $foreignPivotKey");
+                        Log::info("Related pivot key: $relatedPivotKey");
+
+                        // Get existing relationships directly from the pivot table
+                        $existingPivots = DB::table($pivotTable)
+                            ->where($foreignPivotKey, $from->getKey())
+                            ->get();
+
+                        Log::info(
+                            'Found ' .
+                                $existingPivots->count() .
+                                ' existing relationships'
+                        );
+
+                        if ($existingPivots->count() > 0) {
+                            // For each existing relationship, create a new one for the target model
+                            foreach ($existingPivots as $pivot) {
+                                try {
+                                    // Convert to array
+                                    $pivotData = (array) $pivot;
+
+                                    // Get the related ID
+                                    $relatedId = $pivotData[$relatedPivotKey];
+
+                                    // Check if the relationship already exists
+                                    $exists = DB::table($pivotTable)
+                                        ->where($foreignPivotKey, $to->getKey())
+                                        ->where($relatedPivotKey, $relatedId)
+                                        ->exists();
+
+                                    if (!$exists) {
+                                        // Create a new pivot record
+                                        $newPivotData = [
+                                            $foreignPivotKey => $to->getKey(),
+                                            $relatedPivotKey => $relatedId,
+                                        ];
+
+                                        // Add timestamps if the pivot table has them
+                                        if (
+                                            Schema::hasColumn(
+                                                $pivotTable,
+                                                'created_at'
+                                            )
+                                        ) {
+                                            $newPivotData['created_at'] = now();
+                                        }
+                                        if (
+                                            Schema::hasColumn(
+                                                $pivotTable,
+                                                'updated_at'
+                                            )
+                                        ) {
+                                            $newPivotData['updated_at'] = now();
+                                        }
+
+                                        // Copy any additional pivot columns
+                                        $pivotColumns = Schema::getColumnListing(
+                                            $pivotTable
+                                        );
+                                        foreach ($pivotColumns as $column) {
+                                            // Skip the keys we've already handled
+                                            if (
+                                                $column !== $foreignPivotKey &&
+                                                $column !== $relatedPivotKey &&
+                                                $column !== 'created_at' &&
+                                                $column !== 'updated_at' &&
+                                                $column !== 'id'
+                                            ) {
+                                                $newPivotData[$column] =
+                                                    $pivotData[$column] ?? null;
+                                            }
+                                        }
+
+                                        // Insert the new relationship
+                                        DB::table($pivotTable)->insert(
+                                            $newPivotData
+                                        );
+
+                                        Log::info(
+                                            "Duplicated relationship: $method with $relatedPivotKey = $relatedId"
+                                        );
+                                    }
+                                } catch (\Exception $e) {
+                                    Log::warning(
+                                        "Error duplicating pivot for $method: " .
+                                            $e->getMessage()
+                                    );
+                                }
+                            }
+                        }
+                    }
+                } catch (\Exception $e) {
+                    Log::warning(
+                        "Error processing relationship $method: " .
+                            $e->getMessage()
+                    );
                 }
             }
         } catch (\Exception $e) {
