@@ -1768,12 +1768,14 @@ class DynamicController extends \App\Http\Controllers\Controller
     /**
      * Merge two models by their IDs.
      *
-     * This method finds two models by their IDs and merges the source model into the target model.
-     * The target model is updated in the database, while the source model remains unchanged.
+     * This method finds two models by their IDs and merges the target model into the source model.
+     * The source model is updated in the database, while the target model is soft deleted.
+     * All relationships from the target model are moved to the source model.
+     * The source model's attributes are prioritized, only missing data will be filled from the target.
      *
      * Required request parameters:
-     * - target_id: The ID of the target model
-     * - source_id: The ID of the source model
+     * - target_id: The ID of the target model (will be merged INTO source and then soft deleted)
+     * - source_id: The ID of the source model (will be kept and updated)
      *
      * Optional request parameters:
      * - relationships: Array of relationship names to merge
@@ -1826,13 +1828,38 @@ class DynamicController extends \App\Http\Controllers\Controller
             ]),
             'overwriteWithNull' => $request->input('overwriteWithNull', false),
             'mergeTimestamps' => $request->input('mergeTimestamps', false),
+            'prioritizeSource' => true, // Always prioritize source model attributes
         ];
 
         try {
-            // Merge the models
-            $mergedModel = $this->merge($target, $source, $options);
+            // Get all loadable relationships if not specified
+            if (
+                empty($options['relationships']) &&
+                method_exists($this->model, 'loadableRelations')
+            ) {
+                $options['relationships'] = $this->model->loadableRelations();
 
-            // Save the merged model
+                // Clean up relationship names (remove everything after ':' and skip relations with dots)
+                $options['relationships'] = array_filter(
+                    array_map(function ($relation) {
+                        // Remove everything after ':' if it exists
+                        $relation =
+                            strpos($relation, ':') !== false
+                                ? explode(':', $relation)[0]
+                                : $relation;
+
+                        // Skip relations with dots
+                        return strpos($relation, '.') === false
+                            ? $relation
+                            : null;
+                    }, $options['relationships'])
+                );
+            }
+
+            // Merge the target model INTO the source model (note the reversed order)
+            $mergedModel = $this->merge($source, $target, $options);
+
+            // Save the merged model (source)
             $mergedModel->save();
 
             // Handle relationships that need to be saved after the main model
@@ -1884,6 +1911,26 @@ class DynamicController extends \App\Http\Controllers\Controller
                 }
             }
 
+            // Move all relationships from target to source
+            $this->moveRelationships($target, $mergedModel);
+
+            // Soft delete the target model if it uses SoftDeletes trait
+            if (
+                in_array(
+                    'Illuminate\Database\Eloquent\SoftDeletes',
+                    class_uses_recursive($target)
+                )
+            ) {
+                $target->delete(); // This will soft delete
+            } else {
+                // If the model doesn't use SoftDeletes, we'll check if it has a 'deleted_at' column
+                // and manually set it if it exists
+                if (Schema::hasColumn($target->getTable(), 'deleted_at')) {
+                    $target->deleted_at = now();
+                    $target->save();
+                }
+            }
+
             // Reload the model with its relationships
             if (method_exists($this->model, 'loadableRelations')) {
                 $mergedModel->load($this->model->loadableRelations());
@@ -1908,6 +1955,126 @@ class DynamicController extends \App\Http\Controllers\Controller
     }
 
     /**
+     * Move all relationships from one model to another.
+     *
+     * @param \Illuminate\Database\Eloquent\Model $from The model to move relationships from
+     * @param \Illuminate\Database\Eloquent\Model $to The model to move relationships to
+     * @return void
+     */
+    private function moveRelationships($from, $to)
+    {
+        // Get all relationship methods from the model
+        $relationMethods = [];
+
+        // If the model has loadableRelations method, use it to get relationships
+        if (method_exists($from, 'loadableRelations')) {
+            $relationMethods = $from->loadableRelations();
+
+            // Clean up relationship names (remove everything after ':' and skip relations with dots)
+            $relationMethods = array_filter(
+                array_map(function ($relation) {
+                    // Remove everything after ':' if it exists
+                    $relation =
+                        strpos($relation, ':') !== false
+                            ? explode(':', $relation)[0]
+                            : $relation;
+
+                    // Skip relations with dots
+                    return strpos($relation, '.') === false ? $relation : null;
+                }, $relationMethods)
+            );
+        }
+
+        // Process each relationship
+        foreach ($relationMethods as $method) {
+            if (method_exists($from, $method) && method_exists($to, $method)) {
+                $fromRelation = $from->$method();
+                $toRelation = $to->$method();
+
+                // Handle different relationship types
+                if (
+                    $fromRelation instanceof
+                    \Illuminate\Database\Eloquent\Relations\HasOne
+                ) {
+                    // For HasOne, get the related model and update its foreign key
+                    $relatedModel = $from->$method;
+                    if ($relatedModel) {
+                        $foreignKey = $fromRelation->getForeignKeyName();
+                        $relatedModel->$foreignKey = $to->getKey();
+                        $relatedModel->save();
+                    }
+                } elseif (
+                    $fromRelation instanceof
+                    \Illuminate\Database\Eloquent\Relations\HasMany
+                ) {
+                    // For HasMany, update foreign keys for all related models
+                    $relatedModels = $from->$method;
+                    if ($relatedModels && $relatedModels->count() > 0) {
+                        $foreignKey = $fromRelation->getForeignKeyName();
+                        foreach ($relatedModels as $model) {
+                            $model->$foreignKey = $to->getKey();
+                            $model->save();
+                        }
+                    }
+                } elseif (
+                    $fromRelation instanceof
+                    \Illuminate\Database\Eloquent\Relations\BelongsToMany
+                ) {
+                    // For BelongsToMany, get all pivot records and sync them to the target
+                    $relatedModels = $from->$method;
+                    if ($relatedModels && $relatedModels->count() > 0) {
+                        // Get existing relations on the target
+                        $existingIds = $to->$method->pluck('id')->toArray();
+
+                        // Get relations from the source
+                        $newIds = $relatedModels->pluck('id')->toArray();
+
+                        // Merge and remove duplicates
+                        $allIds = array_unique(
+                            array_merge($existingIds, $newIds)
+                        );
+
+                        // Sync to the target
+                        $toRelation->sync($allIds);
+                    }
+                } elseif (
+                    $fromRelation instanceof
+                    \Illuminate\Database\Eloquent\Relations\MorphMany
+                ) {
+                    // For MorphMany, update morph type and ID for all related models
+                    $relatedModels = $from->$method;
+                    if ($relatedModels && $relatedModels->count() > 0) {
+                        $morphType = $fromRelation->getMorphType();
+                        $foreignKey = $fromRelation->getForeignKeyName();
+                        foreach ($relatedModels as $model) {
+                            $model->$morphType = get_class($to);
+                            $model->$foreignKey = $to->getKey();
+                            $model->save();
+                        }
+                    }
+                } elseif (
+                    $fromRelation instanceof
+                    \Illuminate\Database\Eloquent\Relations\MorphOne
+                ) {
+                    // For MorphOne, update morph type and ID for the related model
+                    $relatedModel = $from->$method;
+                    if ($relatedModel) {
+                        // Delete existing relation on target if it exists
+                        $to->$method()->delete();
+
+                        // Update the morph type and ID
+                        $morphType = $fromRelation->getMorphType();
+                        $foreignKey = $fromRelation->getForeignKeyName();
+                        $relatedModel->$morphType = get_class($to);
+                        $relatedModel->$foreignKey = $to->getKey();
+                        $relatedModel->save();
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * Merge attributes and relationships from a source model into a target model.
      *
      * This method merges the attributes from the source model into the target model,
@@ -1915,7 +2082,8 @@ class DynamicController extends \App\Http\Controllers\Controller
      * - Primary keys are preserved in the target model
      * - Timestamps are preserved in the target model unless overridden
      * - Relationships can be optionally merged
-     * - Null values in the source will not overwrite non-null values in the target by default
+     * - By default, source model attributes are prioritized, only missing data in source will be filled from target
+     * - When prioritizeSource is false, target model attributes are prioritized (original behavior)
      *
      * @param \Illuminate\Database\Eloquent\Model $target The target model to merge into
      * @param \Illuminate\Database\Eloquent\Model $source The source model to merge from
@@ -1925,6 +2093,7 @@ class DynamicController extends \App\Http\Controllers\Controller
      *                      - 'exclude' => array of attributes to exclude from merging
      *                      - 'overwriteWithNull' => whether to overwrite non-null values with null values (default: false)
      *                      - 'mergeTimestamps' => whether to merge timestamp fields (default: false)
+     *                      - 'prioritizeSource' => whether to prioritize source model attributes (default: false)
      * @return \Illuminate\Database\Eloquent\Model The merged target model (not saved)
      */
     public function merge($target, $source, array $options = [])
@@ -1936,6 +2105,7 @@ class DynamicController extends \App\Http\Controllers\Controller
             'exclude' => ['id', 'created_at', 'updated_at', 'deleted_at'],
             'overwriteWithNull' => false,
             'mergeTimestamps' => false,
+            'prioritizeSource' => false, // Default to original behavior
         ];
 
         // Merge provided options with defaults
@@ -1949,8 +2119,9 @@ class DynamicController extends \App\Http\Controllers\Controller
             ]);
         }
 
-        // Get all attributes from the source model
+        // Get all attributes from both models
         $sourceAttributes = $source->getAttributes();
+        $targetAttributes = $target->getAttributes();
 
         // Determine which attributes to merge
         $attributesToMerge = !empty($options['attributes'])
@@ -1966,20 +2137,39 @@ class DynamicController extends \App\Http\Controllers\Controller
             $options['exclude']
         );
 
-        // Merge attributes
-        foreach ($attributesToMerge as $attribute) {
-            $sourceValue = $sourceAttributes[$attribute];
+        // Merge attributes based on prioritization
+        if ($options['prioritizeSource']) {
+            // Prioritize source model - only fill missing data in source from target
+            foreach ($attributesToMerge as $attribute) {
+                $sourceValue = $sourceAttributes[$attribute];
+                $targetValue = $targetAttributes[$attribute] ?? null;
 
-            // Skip if the source value is null and we're not overwriting with nulls
-            if (
-                is_null($sourceValue) &&
-                !$options['overwriteWithNull'] &&
-                !is_null($target->$attribute)
-            ) {
-                continue;
+                // If source value is null or empty and target has a value, use target value
+                if (
+                    (is_null($sourceValue) || $sourceValue === '') &&
+                    !is_null($targetValue) &&
+                    $targetValue !== ''
+                ) {
+                    $target->$attribute = $targetValue;
+                }
+                // Otherwise keep the source value
             }
+        } else {
+            // Original behavior - merge source into target
+            foreach ($attributesToMerge as $attribute) {
+                $sourceValue = $sourceAttributes[$attribute];
 
-            $target->$attribute = $sourceValue;
+                // Skip if the source value is null and we're not overwriting with nulls
+                if (
+                    is_null($sourceValue) &&
+                    !$options['overwriteWithNull'] &&
+                    !is_null($target->$attribute)
+                ) {
+                    continue;
+                }
+
+                $target->$attribute = $sourceValue;
+            }
         }
 
         // Merge relationships if specified
