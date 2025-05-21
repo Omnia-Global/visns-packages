@@ -14,7 +14,7 @@ use Laravel\Fortify\Fortify;
 
 use App\Mail\GenericMail;
 
-use App\Models\User;
+use Visnsstudio\VisnsPackages\Models\User;
 use Visnsstudio\VisnsPackages\Models\TwoFactorRememberToken;
 
 use Carbon\Carbon;

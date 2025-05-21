@@ -9,7 +9,7 @@ use Illuminate\Support\Str;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use App\Models\Role;
-use App\Models\User;
+use Visnsstudio\VisnsPackages\Models\User;
 
 class SocialiteController extends \App\Http\Controllers\Controller
 {
