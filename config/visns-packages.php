@@ -79,4 +79,16 @@ return [
     |
     */
     '2fa_app_name' => env('APP_NAME', 'Omnia Global Framework'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Additional User Loadable Relations
+    |--------------------------------------------------------------------------
+    |
+    | This option allows you to specify additional relations that should be
+    | loaded with the User model. These will be merged with the default
+    | loadable relations defined in the User model.
+    |
+    */
+    'user_additional_loadable_relations' => [],
 ];

@@ -10,6 +10,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
+use Illuminate\Support\Facades\Config;
 
 use Spatie\Permission\Traits\HasRoles;
 
@@ -68,7 +69,16 @@ class User extends Authenticatable implements Auditable
      */
     public function loadableRelations()
     {
-        return ['roles.permissions'];
+        $defaultRelations = ['roles.permissions'];
+
+        // Get additional relations from config
+        $additionalRelations = Config::get(
+            'visns-packages.user_additional_loadable_relations',
+            []
+        );
+
+        // Merge default and additional relations
+        return array_merge($defaultRelations, $additionalRelations);
     }
 
     /**

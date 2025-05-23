@@ -530,6 +530,14 @@ The `UsePackageUser` trait provides the following functionality:
 -   `scopeDisabled()` - Scope to filter only disabled users
 -   `twoFactorRememberTokens()` - Relationship to two-factor remember tokens
 
+You can extend the default loadable relations by adding additional relations to the `user_additional_loadable_relations` configuration option in `config/visns-packages.php`:
+
+```php
+'user_additional_loadable_relations' => ['profile', 'settings', 'customRelation'],
+```
+
+This will merge these additional relations with the default `roles.permissions` relation.
+
 ## User Management
 
 The package includes functionality to disable user accounts, which prevents users from logging in. When a user is disabled, they will receive an error message when attempting to log in.
@@ -1000,8 +1008,20 @@ return [
     // The prefix to apply to all package routes (leave empty for no prefix)
     'routes_prefix' => '',
 
+    // The middleware to apply to the package API routes
+    'api_middleware' => ['api', 'accept-json'],
+
+    // The prefix to apply to all package API routes (default is 'api')
+    'api_prefix' => 'api',
+
+    // The User model class to be used by the package
+    'user_model' => env('VISNS_USER_MODEL', 'App\\Models\\User'),
+
     // The name that appears in authenticator apps for 2FA
-    '2fa_app_name' => 'Your App Name',
+    '2fa_app_name' => env('APP_NAME', 'Your App Name'),
+
+    // Additional relations to load with the User model
+    'user_additional_loadable_relations' => [],
 ];
 ```
 

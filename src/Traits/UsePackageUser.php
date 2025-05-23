@@ -3,6 +3,7 @@
 namespace Visnsstudio\VisnsPackages\Traits;
 
 use Illuminate\Database\Eloquent\Casts\Attribute;
+use Illuminate\Support\Facades\Config;
 
 /**
  * Trait UsePackageUser
@@ -19,7 +20,16 @@ trait UsePackageUser
      */
     public function loadableRelations()
     {
-        return ['roles.permissions'];
+        $defaultRelations = ['roles.permissions'];
+
+        // Get additional relations from config
+        $additionalRelations = Config::get(
+            'visns-packages.user_additional_loadable_relations',
+            []
+        );
+
+        // Merge default and additional relations
+        return array_merge($defaultRelations, $additionalRelations);
     }
 
     /**
