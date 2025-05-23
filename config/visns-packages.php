@@ -91,4 +91,43 @@ return [
     |
     */
     'user_additional_loadable_relations' => [],
+
+    /*
+    |--------------------------------------------------------------------------
+    | User Dynamic Relationships
+    |--------------------------------------------------------------------------
+    |
+    | This option allows you to define additional relationships for the User model.
+    | Each key is the relationship name, and the value is an array with:
+    | - type: The relationship type (hasOne, hasMany, belongsTo, belongsToMany, etc.)
+    | - model: The related model class
+    | - foreign_key: (Optional) The foreign key
+    | - local_key: (Optional) The local key
+    | - pivot_table: (Required for belongsToMany) The pivot table name
+    | - pivot_foreign_key: (Optional for belongsToMany) The pivot foreign key
+    | - pivot_related_key: (Optional for belongsToMany) The pivot related key
+    |
+    */
+    'user_dynamic_relationships' => [
+        // Example:
+        // 'profile' => [
+        //     'type' => 'hasOne',
+        //     'model' => 'App\\Models\\Profile',
+        //     'foreign_key' => 'user_id',
+        //     'local_key' => 'id',
+        // ],
+        // 'posts' => [
+        //     'type' => 'hasMany',
+        //     'model' => 'App\\Models\\Post',
+        //     'foreign_key' => 'user_id',
+        //     'local_key' => 'id',
+        // ],
+        // 'tags' => [
+        //     'type' => 'belongsToMany',
+        //     'model' => 'App\\Models\\Tag',
+        //     'pivot_table' => 'user_tag',
+        //     'pivot_foreign_key' => 'user_id',
+        //     'pivot_related_key' => 'tag_id',
+        // ],
+    ],
 ];

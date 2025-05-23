@@ -26,7 +26,10 @@ A comprehensive Laravel package that provides enhanced authentication, file mana
         -   [Using the Package User Model](#using-the-package-user-model)
             -   [Option 1: Use the Package User Model Directly](#option-1-use-the-package-user-model-directly)
             -   [Option 2: Use the UsePackageUser Trait](#option-2-use-the-usepackageuser-trait)
+            -   [Dynamic Relationships](#dynamic-relationships)
     -   [User Management](#user-management)
+        -   [Disabling Users](#disabling-users)
+        -   [User Management API](#user-management-api)
     -   [Role \& Permission Management](#role--permission-management)
         -   [Permission Management](#permission-management)
         -   [Role Management](#role-management)
@@ -538,6 +541,50 @@ You can extend the default loadable relations by adding additional relations to 
 
 This will merge these additional relations with the default `roles.permissions` relation.
 
+#### Dynamic Relationships
+
+You can also define dynamic relationships for the User model in the configuration file. This allows you to add relationships to the User model without having to create a custom User model class. The package will automatically create the relationship methods based on the configuration.
+
+To define dynamic relationships, add them to the `user_dynamic_relationships` configuration option in `config/visns-packages.php`:
+
+```php
+'user_dynamic_relationships' => [
+    'profile' => [
+        'type' => 'hasOne',
+        'model' => 'App\\Models\\Profile',
+        'foreign_key' => 'user_id',
+        'local_key' => 'id',
+    ],
+    'posts' => [
+        'type' => 'hasMany',
+        'model' => 'App\\Models\\Post',
+        'foreign_key' => 'user_id',
+        'local_key' => 'id',
+    ],
+    'tags' => [
+        'type' => 'belongsToMany',
+        'model' => 'App\\Models\\Tag',
+        'pivot_table' => 'user_tag',
+        'pivot_foreign_key' => 'user_id',
+        'pivot_related_key' => 'tag_id',
+    ],
+],
+```
+
+The package supports all Laravel relationship types:
+
+-   `hasOne`
+-   `hasMany`
+-   `belongsTo`
+-   `belongsToMany`
+-   `morphOne`
+-   `morphMany`
+-   `morphToMany`
+
+Each relationship type requires different parameters. See the Laravel documentation for more information on the parameters for each relationship type.
+
+These dynamic relationships will be automatically added to the `loadableRelations` array, so they will be loaded when using the `load()` method on the User model.
+
 ## User Management
 
 The package includes functionality to disable user accounts, which prevents users from logging in. When a user is disabled, they will receive an error message when attempting to log in.
@@ -1022,6 +1069,17 @@ return [
 
     // Additional relations to load with the User model
     'user_additional_loadable_relations' => [],
+
+    // Dynamic relationships for the User model
+    'user_dynamic_relationships' => [
+        // Example:
+        // 'profile' => [
+        //     'type' => 'hasOne',
+        //     'model' => 'App\\Models\\Profile',
+        //     'foreign_key' => 'user_id',
+        //     'local_key' => 'id',
+        // ],
+    ],
 ];
 ```
 

@@ -28,8 +28,17 @@ trait UsePackageUser
             []
         );
 
-        // Merge default and additional relations
-        return array_merge($defaultRelations, $additionalRelations);
+        // Get dynamic relationships from config
+        $dynamicRelationships = array_keys(
+            Config::get('visns-packages.user_dynamic_relationships', [])
+        );
+
+        // Merge default, additional, and dynamic relations
+        return array_merge(
+            $defaultRelations,
+            $additionalRelations,
+            $dynamicRelationships
+        );
     }
 
     /**
@@ -153,6 +162,103 @@ trait UsePackageUser
     {
         return $this->hasMany(
             \Visnsstudio\VisnsPackages\Models\TwoFactorRememberToken::class
+        );
+    }
+
+    /**
+     * Handle dynamic method calls to create relationships defined in config.
+     *
+     * @param string $method
+     * @param array $parameters
+     * @return mixed
+     */
+    public function __call($method, $parameters)
+    {
+        // Check if the method is defined in the dynamic relationships config
+        $dynamicRelationships = Config::get(
+            'visns-packages.user_dynamic_relationships',
+            []
+        );
+
+        if (array_key_exists($method, $dynamicRelationships)) {
+            $relationConfig = $dynamicRelationships[$method];
+            $type = $relationConfig['type'] ?? null;
+            $model = $relationConfig['model'] ?? null;
+
+            if ($type && $model) {
+                switch ($type) {
+                    case 'hasOne':
+                        return $this->hasOne(
+                            $model,
+                            $relationConfig['foreign_key'] ?? null,
+                            $relationConfig['local_key'] ?? null
+                        );
+
+                    case 'hasMany':
+                        return $this->hasMany(
+                            $model,
+                            $relationConfig['foreign_key'] ?? null,
+                            $relationConfig['local_key'] ?? null
+                        );
+
+                    case 'belongsTo':
+                        return $this->belongsTo(
+                            $model,
+                            $relationConfig['foreign_key'] ?? null,
+                            $relationConfig['owner_key'] ?? null,
+                            $relationConfig['relation'] ?? null
+                        );
+
+                    case 'belongsToMany':
+                        return $this->belongsToMany(
+                            $model,
+                            $relationConfig['pivot_table'] ?? null,
+                            $relationConfig['pivot_foreign_key'] ?? null,
+                            $relationConfig['pivot_related_key'] ?? null,
+                            $relationConfig['parent_key'] ?? null,
+                            $relationConfig['related_key'] ?? null
+                        );
+
+                    case 'morphOne':
+                        return $this->morphOne(
+                            $model,
+                            $relationConfig['name'] ?? null,
+                            $relationConfig['type'] ?? null,
+                            $relationConfig['id'] ?? null,
+                            $relationConfig['local_key'] ?? null
+                        );
+
+                    case 'morphMany':
+                        return $this->morphMany(
+                            $model,
+                            $relationConfig['name'] ?? null,
+                            $relationConfig['type'] ?? null,
+                            $relationConfig['id'] ?? null,
+                            $relationConfig['local_key'] ?? null
+                        );
+
+                    case 'morphToMany':
+                        return $this->morphToMany(
+                            $model,
+                            $relationConfig['name'] ?? null,
+                            $relationConfig['table'] ?? null,
+                            $relationConfig['foreign_pivot_key'] ?? null,
+                            $relationConfig['related_pivot_key'] ?? null,
+                            $relationConfig['parent_key'] ?? null,
+                            $relationConfig['related_key'] ?? null,
+                            $relationConfig['inverse'] ?? false
+                        );
+                }
+            }
+        }
+
+        // If not a dynamic relationship, call the parent method
+        if (method_exists(get_parent_class($this), '__call')) {
+            return parent::__call($method, $parameters);
+        }
+
+        throw new \BadMethodCallException(
+            sprintf('Call to undefined method %s::%s()', static::class, $method)
         );
     }
 }

@@ -53,7 +53,7 @@ class AuthController extends \App\Http\Controllers\Controller
                 $url = env('APP_URL') . '/verify/' . $token;
             }
 
-            if ($to != '') {
+            if ($to != '' && filter_var($to, FILTER_VALIDATE_EMAIL)) {
                 $content =
                     '<p>Click on the following <a href="' .
                     $url .
