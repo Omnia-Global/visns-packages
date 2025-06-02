@@ -209,7 +209,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                         $this->applyConditionBasedOnOperator(
                             $query,
                             $condition,
-                            $condition['value'] || ''
+                            $condition['value'] ?? ''
                         );
                         break;
                 }
