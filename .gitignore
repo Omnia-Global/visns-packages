@@ -1,3 +1,40 @@
 /vendor/
 /node_modules/
 yarn.lock
+
+# Laravel specific
+.env
+.env.backup
+.env.production
+.phpunit.result.cache
+Homestead.json
+Homestead.yaml
+auth.json
+npm-debug.log
+yarn-error.log
+
+# Build files (Vite/Laravel Mix)
+/public/build/
+/public/hot
+/public/storage
+/storage/*.key
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+/storage/logs/
+*.log

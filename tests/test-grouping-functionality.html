@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DataGrid Grouping Functionality Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+            margin-bottom: 30px;
+        }
+        
+        .test-section {
+            margin-bottom: 40px;
+            padding: 20px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            background-color: #fafafa;
+        }
+        
+        .test-section h2 {
+            color: #34495e;
+            margin-top: 0;
+            margin-bottom: 15px;
+        }
+        
+        .feature-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .feature-list li {
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            align-items: center;
+        }
+        
+        .feature-list li:last-child {
+            border-bottom: none;
+        }
+        
+        .status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-right: 10px;
+            min-width: 80px;
+            text-align: center;
+        }
+        
+        .status.implemented {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        
+        .status.fixed {
+            background-color: #cce5ff;
+            color: #004085;
+        }
+        
+        .code-block {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 15px 0;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 14px;
+            overflow-x: auto;
+        }
+        
+        .implementation-details {
+            background-color: #e8f4fd;
+            border-left: 4px solid #3498db;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        
+        .warning {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        
+        .success {
+            background-color: #d1ecf1;
+            border-left: 4px solid #17a2b8;
+            padding: 15px;
+            margin: 15px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>DataGrid Grouping Functionality Test Results</h1>
+        
+        <div class="test-section">
+            <h2>🎯 Implementation Summary</h2>
+            <p>This document outlines the implementation and testing of three key grouping features for the DataGrid component:</p>
+            
+            <ul class="feature-list">
+                <li>
+                    <span class="status fixed">FIXED</span>
+                    <strong>Missing expand/collapse icons</strong> - Added CSS styles to ensure SVG icons are visible
+                </li>
+                <li>
+                    <span class="status implemented">IMPLEMENTED</span>
+                    <strong>Default collapsed state</strong> - Added defaultCollapsed: true prop
+                </li>
+                <li>
+                    <span class="status implemented">IMPLEMENTED</span>
+                    <strong>Group-level checkbox selection</strong> - Added custom group selection functionality
+                </li>
+            </ul>
+        </div>
+
+        <div class="test-section">
+            <h2>🔧 Technical Implementation</h2>
+            
+            <h3>1. Expand/Collapse Icons Fix</h3>
+            <div class="implementation-details">
+                <strong>Problem:</strong> SVG expand/collapse icons were present in DOM but not visible to users.
+                <br><br>
+                <strong>Solution:</strong> Added comprehensive CSS rules to ensure icon visibility:
+            </div>
+            
+            <div class="code-block">
+/* Group expand/collapse icon fixes */
+.InovuaReactDataGrid__group-expand-icon,
+.InovuaReactDataGrid__group-collapse-icon {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 20px !important;
+    height: 20px !important;
+    background-color: var(--primary-color, #3b82f6) !important;
+    /* ... additional styling */
+}
+            </div>
+
+            <h3>2. Default Collapsed State</h3>
+            <div class="implementation-details">
+                <strong>Implementation:</strong> Added defaultCollapsed: true to ReactDataGrid props when grouping is enabled.
+            </div>
+            
+            <div class="code-block">
+{...{ajaxSetting && ajaxSetting.groupBy
+    ? { 
+        defaultGroupBy: ajaxSetting.groupBy,
+        defaultCollapsed: true,  // ← New prop
+        // ... other grouping props
+    }
+    : {})}
+            </div>
+
+            <h3>3. Group-Level Checkbox Selection</h3>
+            <div class="implementation-details">
+                <strong>Implementation:</strong> Added custom renderGroupTitle function with group selection logic.
+            </div>
+            
+            <div class="code-block">
+// New functions added to DataGrid component:
+const handleGroupSelectionChange = useCallback((groupValue, isChecked) => {
+    // Select/deselect all rows in the specified group
+});
+
+const isGroupSelected = useCallback((groupValue) => {
+    // Check if all rows in group are selected
+});
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h2>📋 Testing Checklist</h2>
+            
+            <h3>Manual Testing Steps:</h3>
+            <ol>
+                <li><strong>Enable Grouping:</strong> Configure ajaxSetting.groupBy with a field name (e.g., ['department'])</li>
+                <li><strong>Verify Default Collapsed:</strong> Confirm groups start in collapsed state</li>
+                <li><strong>Test Expand/Collapse Icons:</strong> Click icons to expand/collapse groups</li>
+                <li><strong>Test Group Selection:</strong> Use group-level checkboxes to select all items in a group</li>
+                <li><strong>Verify Individual Selection:</strong> Ensure individual row selection still works</li>
+            </ol>
+            
+            <h3>Expected Behavior:</h3>
+            <ul class="feature-list">
+                <li>✅ Groups appear collapsed by default</li>
+                <li>✅ Expand/collapse icons are clearly visible</li>
+                <li>✅ Group headers show item counts</li>
+                <li>✅ Group checkboxes select/deselect all items in group</li>
+                <li>✅ Individual row selection remains functional</li>
+            </ul>
+        </div>
+
+        <div class="test-section">
+            <h2>⚙️ Configuration Example</h2>
+            
+            <div class="code-block">
+// Example ajaxSetting configuration for grouping:
+const ajaxSetting = {
+    url: '/api/data',
+    method: 'POST',
+    groupBy: ['department'], // Enable grouping by department field
+    // ... other settings
+};
+
+// The DataGrid will automatically:
+// 1. Apply defaultGroupBy: ['department']
+// 2. Set defaultCollapsed: true
+// 3. Add group selection functionality
+// 4. Style expand/collapse icons properly
+            </div>
+        </div>
+
+        <div class="success">
+            <h3>✅ Implementation Complete</h3>
+            <p>All three grouping issues have been addressed:</p>
+            <ul>
+                <li><strong>Expand/collapse icons:</strong> Now visible with proper styling</li>
+                <li><strong>Default collapsed state:</strong> Groups start collapsed</li>
+                <li><strong>Group selection:</strong> Checkbox functionality for group-level selection</li>
+            </ul>
+            <p>The implementation is backward compatible and only activates when groupBy is configured in ajaxSetting.</p>
+        </div>
+
+        <div class="warning">
+            <h3>⚠️ Testing Notes</h3>
+            <ul>
+                <li>Test with different data sets to ensure group selection works correctly</li>
+                <li>Verify that the expand/collapse icons work across different browsers</li>
+                <li>Check that group selection doesn't interfere with existing selection logic</li>
+                <li>Ensure the styling matches the application's design system</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>
