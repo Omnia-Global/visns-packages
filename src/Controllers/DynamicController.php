@@ -710,6 +710,9 @@ class DynamicController extends \App\Http\Controllers\Controller
                 case 'is_null':
                     $query->whereNull($jsonField);
                     break;
+                case 'not_null':
+                    $query->whereNotNull($jsonField);
+                    break;
                 case 'lt':
                     if ($type === 'date') {
                         $query->whereDate($jsonField, '<', $value);

@@ -16,7 +16,7 @@ class CustomerStageRelationshipsTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        
+
         // Create a priority for job goods
         Priority::factory()->create(['id' => 1]);
     }
@@ -27,7 +27,10 @@ class CustomerStageRelationshipsTest extends TestCase
         $customer = Customer::factory()->create();
         $job = Job::factory()->create(['customer_id' => $customer->id]);
 
-        $this->assertInstanceOf(\Illuminate\Database\Eloquent\Collection::class, $customer->jobs);
+        $this->assertInstanceOf(
+            \Illuminate\Database\Eloquent\Collection::class,
+            $customer->jobs
+        );
         $this->assertEquals(1, $customer->jobs->count());
         $this->assertEquals($job->id, $customer->jobs->first()->id);
     }
@@ -39,10 +42,13 @@ class CustomerStageRelationshipsTest extends TestCase
         $job = Job::factory()->create(['customer_id' => $customer->id]);
         $jobGood = JobGood::factory()->create([
             'job_id' => $job->id,
-            'priority_id' => 1
+            'priority_id' => 1,
         ]);
 
-        $this->assertInstanceOf(\Illuminate\Database\Eloquent\Collection::class, $customer->jobGoods);
+        $this->assertInstanceOf(
+            \Illuminate\Database\Eloquent\Collection::class,
+            $customer->jobGoods
+        );
         $this->assertEquals(1, $customer->jobGoods->count());
         $this->assertEquals($jobGood->id, $customer->jobGoods->first()->id);
     }
@@ -52,29 +58,35 @@ class CustomerStageRelationshipsTest extends TestCase
     {
         $customer = Customer::factory()->create();
         $job = Job::factory()->create(['customer_id' => $customer->id]);
-        
+
         // Create job goods at different stages
         $pendingReceivables = JobGood::factory()->create([
             'job_id' => $job->id,
             'priority_id' => 1,
-            'receivables_status' => 0
+            'receivables_status' => 0,
         ]);
-        
+
         $completedReceivables = JobGood::factory()->create([
             'job_id' => $job->id,
             'priority_id' => 1,
-            'receivables_status' => 1
+            'receivables_status' => 1,
         ]);
 
-        // Test pending receivables
+        // Test pending receivables (first stage, no prerequisites)
         $pendingJobGoods = $customer->jobGoodsAtReceivablesStage;
         $this->assertEquals(1, $pendingJobGoods->count());
-        $this->assertEquals($pendingReceivables->id, $pendingJobGoods->first()->id);
+        $this->assertEquals(
+            $pendingReceivables->id,
+            $pendingJobGoods->first()->id
+        );
 
         // Test completed receivables
         $completedJobGoods = $customer->jobGoodsWithCompletedReceivables;
         $this->assertEquals(1, $completedJobGoods->count());
-        $this->assertEquals($completedReceivables->id, $completedJobGoods->first()->id);
+        $this->assertEquals(
+            $completedReceivables->id,
+            $completedJobGoods->first()->id
+        );
     }
 
     /** @test */
@@ -82,23 +94,32 @@ class CustomerStageRelationshipsTest extends TestCase
     {
         $customer = Customer::factory()->create();
         $job = Job::factory()->create(['customer_id' => $customer->id]);
-        
+
         $pendingPickling = JobGood::factory()->create([
             'job_id' => $job->id,
             'priority_id' => 1,
-            'pickling_status' => 0
+            'pickling_status' => 0,
         ]);
-        
+
         $completedPickling = JobGood::factory()->create([
             'job_id' => $job->id,
             'priority_id' => 1,
-            'pickling_status' => 1
+            'pickling_status' => 1,
         ]);
 
         $this->assertEquals(1, $customer->jobGoodsAtPicklingStage->count());
-        $this->assertEquals(1, $customer->jobGoodsWithCompletedPickling->count());
-        $this->assertEquals($pendingPickling->id, $customer->jobGoodsAtPicklingStage->first()->id);
-        $this->assertEquals($completedPickling->id, $customer->jobGoodsWithCompletedPickling->first()->id);
+        $this->assertEquals(
+            1,
+            $customer->jobGoodsWithCompletedPickling->count()
+        );
+        $this->assertEquals(
+            $pendingPickling->id,
+            $customer->jobGoodsAtPicklingStage->first()->id
+        );
+        $this->assertEquals(
+            $completedPickling->id,
+            $customer->jobGoodsWithCompletedPickling->first()->id
+        );
     }
 
     /** @test */
@@ -106,21 +127,24 @@ class CustomerStageRelationshipsTest extends TestCase
     {
         $customer = Customer::factory()->create();
         $job = Job::factory()->create(['customer_id' => $customer->id]);
-        
+
         $pendingGalvanizing = JobGood::factory()->create([
             'job_id' => $job->id,
             'priority_id' => 1,
-            'galvanizing_status' => 0
+            'galvanizing_status' => 0,
         ]);
-        
+
         $completedGalvanizing = JobGood::factory()->create([
             'job_id' => $job->id,
             'priority_id' => 1,
-            'galvanizing_status' => 1
+            'galvanizing_status' => 1,
         ]);
 
         $this->assertEquals(1, $customer->jobGoodsAtGalvanizingStage->count());
-        $this->assertEquals(1, $customer->jobGoodsWithCompletedGalvanizing->count());
+        $this->assertEquals(
+            1,
+            $customer->jobGoodsWithCompletedGalvanizing->count()
+        );
     }
 
     /** @test */
@@ -128,21 +152,24 @@ class CustomerStageRelationshipsTest extends TestCase
     {
         $customer = Customer::factory()->create();
         $job = Job::factory()->create(['customer_id' => $customer->id]);
-        
+
         $pendingDespatch = JobGood::factory()->create([
             'job_id' => $job->id,
             'priority_id' => 1,
-            'despatch_status' => 0
+            'despatch_status' => 0,
         ]);
-        
+
         $completedDespatch = JobGood::factory()->create([
             'job_id' => $job->id,
             'priority_id' => 1,
-            'despatch_status' => 1
+            'despatch_status' => 1,
         ]);
 
         $this->assertEquals(1, $customer->jobGoodsAtDespatchStage->count());
-        $this->assertEquals(1, $customer->jobGoodsWithCompletedDespatch->count());
+        $this->assertEquals(
+            1,
+            $customer->jobGoodsWithCompletedDespatch->count()
+        );
     }
 
     /** @test */
@@ -150,33 +177,40 @@ class CustomerStageRelationshipsTest extends TestCase
     {
         $customer1 = Customer::factory()->create();
         $customer2 = Customer::factory()->create();
-        
+
         $job1 = Job::factory()->create(['customer_id' => $customer1->id]);
         $job2 = Job::factory()->create(['customer_id' => $customer2->id]);
-        
+
         // Customer 1 has job goods at pickling stage
         JobGood::factory()->create([
             'job_id' => $job1->id,
             'priority_id' => 1,
-            'pickling_status' => 0
+            'pickling_status' => 0,
         ]);
-        
+
         // Customer 2 has completed pickling
         JobGood::factory()->create([
             'job_id' => $job2->id,
             'priority_id' => 1,
-            'pickling_status' => 1
+            'pickling_status' => 1,
         ]);
 
         // Test whereHas with pending pickling
-        $customersAtPickling = Customer::whereHas('jobGoodsAtPicklingStage')->get();
+        $customersAtPickling = Customer::whereHas(
+            'jobGoodsAtPicklingStage'
+        )->get();
         $this->assertEquals(1, $customersAtPickling->count());
         $this->assertEquals($customer1->id, $customersAtPickling->first()->id);
 
         // Test whereHas with completed pickling
-        $customersWithCompletedPickling = Customer::whereHas('jobGoodsWithCompletedPickling')->get();
+        $customersWithCompletedPickling = Customer::whereHas(
+            'jobGoodsWithCompletedPickling'
+        )->get();
         $this->assertEquals(1, $customersWithCompletedPickling->count());
-        $this->assertEquals($customer2->id, $customersWithCompletedPickling->first()->id);
+        $this->assertEquals(
+            $customer2->id,
+            $customersWithCompletedPickling->first()->id
+        );
     }
 
     /** @test */
@@ -184,26 +218,101 @@ class CustomerStageRelationshipsTest extends TestCase
     {
         $customer = Customer::factory()->create();
         $job = Job::factory()->create(['customer_id' => $customer->id]);
-        
+
         // Create multiple job goods at different stages
-        JobGood::factory()->count(3)->create([
-            'job_id' => $job->id,
-            'priority_id' => 1,
-            'pickling_status' => 0
-        ]);
-        
-        JobGood::factory()->count(2)->create([
-            'job_id' => $job->id,
-            'priority_id' => 1,
-            'galvanizing_status' => 0
-        ]);
+        JobGood::factory()
+            ->count(3)
+            ->create([
+                'job_id' => $job->id,
+                'priority_id' => 1,
+                'pickling_status' => 0,
+            ]);
+
+        JobGood::factory()
+            ->count(2)
+            ->create([
+                'job_id' => $job->id,
+                'priority_id' => 1,
+                'galvanizing_status' => 0,
+            ]);
 
         $customerWithCounts = Customer::withCount([
             'jobGoodsAtPicklingStage',
-            'jobGoodsAtGalvanizingStage'
+            'jobGoodsAtGalvanizingStage',
         ])->find($customer->id);
 
-        $this->assertEquals(3, $customerWithCounts->job_goods_at_pickling_stage_count);
-        $this->assertEquals(2, $customerWithCounts->job_goods_at_galvanizing_stage_count);
+        $this->assertEquals(
+            3,
+            $customerWithCounts->job_goods_at_pickling_stage_count
+        );
+        $this->assertEquals(
+            2,
+            $customerWithCounts->job_goods_at_galvanizing_stage_count
+        );
+    }
+
+    /** @test */
+    public function stage_progression_logic_works_correctly()
+    {
+        $customer = Customer::factory()->create();
+        $job = Job::factory()->create(['customer_id' => $customer->id]);
+
+        // Job good at receivables stage (first stage, no prerequisites)
+        $atReceivables = JobGood::factory()->create([
+            'job_id' => $job->id,
+            'priority_id' => 1,
+            'receivables_status' => 0,
+        ]);
+
+        // Job good at production stage (receivables completed)
+        $atProduction = JobGood::factory()->create([
+            'job_id' => $job->id,
+            'priority_id' => 1,
+            'receivables_status' => 1,
+            'production_status' => 0,
+        ]);
+
+        // Job good at pickling stage (receivables, production, jigging completed)
+        $atPickling = JobGood::factory()->create([
+            'job_id' => $job->id,
+            'priority_id' => 1,
+            'receivables_status' => 1,
+            'production_status' => 1,
+            'jigging_status' => 1,
+            'pickling_status' => 0,
+        ]);
+
+        // Job good NOT ready for pickling (missing prerequisites)
+        $notReadyForPickling = JobGood::factory()->create([
+            'job_id' => $job->id,
+            'priority_id' => 1,
+            'receivables_status' => 0, // Missing prerequisite
+            'production_status' => 0, // Missing prerequisite
+            'jigging_status' => 0, // Missing prerequisite
+            'pickling_status' => 0,
+        ]);
+
+        // Test stage progression logic
+        $this->assertEquals(1, $customer->jobGoodsAtReceivablesStage->count());
+        $this->assertEquals(1, $customer->jobGoodsAtProductionStage->count());
+        $this->assertEquals(1, $customer->jobGoodsAtPicklingStage->count());
+
+        // Verify the correct job goods are returned
+        $this->assertEquals(
+            $atReceivables->id,
+            $customer->jobGoodsAtReceivablesStage->first()->id
+        );
+        $this->assertEquals(
+            $atProduction->id,
+            $customer->jobGoodsAtProductionStage->first()->id
+        );
+        $this->assertEquals(
+            $atPickling->id,
+            $customer->jobGoodsAtPicklingStage->first()->id
+        );
+
+        // Job good without prerequisites should not appear in any stage except receivables
+        $this->assertEquals(0, $customer->jobGoodsAtJiggingStage->count());
+        $this->assertEquals(0, $customer->jobGoodsAtGalvanizingStage->count());
     }
 }
