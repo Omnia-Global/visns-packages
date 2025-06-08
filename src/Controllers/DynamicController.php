@@ -17,6 +17,7 @@ use Illuminate\Validation\ValidationException;
 use Visnsstudio\VisnsPackages\Exceptions\JsonValidationException;
 
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 
 class DynamicController extends \App\Http\Controllers\Controller
 {
@@ -198,7 +199,16 @@ class DynamicController extends \App\Http\Controllers\Controller
                         }
                         break;
                     case 'async':
-                        if (method_exists($this->model, 'scopeCustomSearch')) {
+                        if ($this->shouldUseMeilisearch($this->model)) {
+                            try {
+                                $this->applyMeilisearchFilter($query, $condition['value']);
+                            } catch (\Exception $e) {
+                                Log::warning('Meilisearch search failed in dropdown, falling back to custom search: ' . $e->getMessage());
+                                if (method_exists($this->model, 'scopeCustomSearch')) {
+                                    $query->customSearch($condition['value']);
+                                }
+                            }
+                        } elseif (method_exists($this->model, 'scopeCustomSearch')) {
                             $query->customSearch($condition['value']);
                         }
                         break;
@@ -295,7 +305,16 @@ class DynamicController extends \App\Http\Controllers\Controller
                         }
                         break;
                     case 'async':
-                        if (method_exists($this->model, 'scopeCustomSearch')) {
+                        if ($this->shouldUseMeilisearch($this->model)) {
+                            try {
+                                $this->applyMeilisearchFilter($query, $condition['value']);
+                            } catch (\Exception $e) {
+                                Log::warning('Meilisearch search failed in dropdown, falling back to custom search: ' . $e->getMessage());
+                                if (method_exists($this->model, 'scopeCustomSearch')) {
+                                    $query->customSearch($condition['value']);
+                                }
+                            }
+                        } elseif (method_exists($this->model, 'scopeCustomSearch')) {
                             $query->customSearch($condition['value']);
                         }
                         break;
@@ -418,7 +437,6 @@ class DynamicController extends \App\Http\Controllers\Controller
         $this->applyRelationships($query);
         $this->applyCustomOrderAndSearch($query, $request);
         $this->applyFilters($query, $request);
-
         return $this->paginateAndRespond($query, $request->input('take', 10));
     }
 
@@ -453,8 +471,23 @@ class DynamicController extends \App\Http\Controllers\Controller
                 $request->input('sort')
             );
         }
-        if (method_exists($this->model, 'scopeCustomSearch')) {
-            $query->customSearch($request->input('search'));
+
+        // Enhanced search logic with Meilisearch support
+        $searchTerm = $request->input('search');
+        if ($searchTerm) {
+            if ($this->shouldUseMeilisearch($this->model)) {
+                try {
+                    $this->applyMeilisearchFilter($query, $searchTerm);
+                } catch (\Exception $e) {
+                    // Log the error and fallback to custom search
+                    Log::warning('Meilisearch search failed, falling back to custom search: ' . $e->getMessage());
+                    if (method_exists($this->model, 'scopeCustomSearch')) {
+                        $query->customSearch($searchTerm);
+                    }
+                }
+            } elseif (method_exists($this->model, 'scopeCustomSearch')) {
+                $query->customSearch($searchTerm);
+            }
         }
     }
 
@@ -2494,5 +2527,89 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
 
         return $target;
+    }
+
+    /**
+     * Check if Meilisearch should be used for searching
+     *
+     * @param Model $model The model to check
+     * @return bool
+     */
+    protected function shouldUseMeilisearch($model)
+    {
+        // Check if force disabled via configuration
+        if (config('visns-packages.search.force_disable_meilisearch', false)) {
+            return false;
+        }
+
+        // Check if Scout is installed
+        if (!class_exists('Laravel\Scout\Scout')) {
+            return false;
+        }
+
+        // Check if Scout driver is 'meilisearch'
+        if (config('scout.driver') !== 'meilisearch') {
+            return false;
+        }
+
+        // Check if model uses Searchable trait
+        if (!in_array('Laravel\Scout\Searchable', class_uses_recursive($model))) {
+            return false;
+        }
+
+        // Check Meilisearch server health (with caching)
+        if (!$this->isMeilisearchHealthy()) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Check if Meilisearch server is healthy
+     *
+     * @return bool
+     */
+    protected function isMeilisearchHealthy()
+    {
+        return Cache::remember('meilisearch_health', 60, function () {
+            try {
+                // Check if MeiliSearch client is available
+                if (!class_exists('\MeiliSearch\Client')) {
+                    return false;
+                }
+
+                $client = app(\MeiliSearch\Client::class);
+                $client->health();
+                return true;
+            } catch (\Exception $e) {
+                Log::warning('Meilisearch health check failed: ' . $e->getMessage());
+                return false;
+            }
+        });
+    }
+
+    /**
+     * Apply Meilisearch filter to the query
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @param string $searchTerm
+     * @return void
+     */
+    protected function applyMeilisearchFilter($query, $searchTerm)
+    {
+        // Get the model class
+        $modelClass = get_class($this->model);
+
+        // Perform search using Scout
+        $searchResults = $modelClass::search($searchTerm)->keys();
+
+        if ($searchResults->isEmpty()) {
+            // No results, apply impossible condition
+            $query->whereRaw('1 = 0');
+        } else {
+            // Filter by found IDs while preserving other query conditions
+            $query->whereIn($this->model->getKeyName(), $searchResults->toArray());
+        }
     }
 }

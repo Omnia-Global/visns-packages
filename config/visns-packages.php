@@ -130,4 +130,26 @@ return [
         //     'pivot_related_key' => 'tag_id',
         // ],
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Search Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Configuration options for search functionality within the package.
+    |
+    */
+    'search' => [
+        /*
+        |--------------------------------------------------------------------------
+        | Force Disable Meilisearch
+        |--------------------------------------------------------------------------
+        |
+        | This option allows you to force disable Meilisearch integration even if
+        | it's properly configured in your application. This can be useful for
+        | debugging or when you want to use the default database search.
+        |
+        */
+        'force_disable_meilisearch' => env('VISNS_DISABLE_MEILISEARCH', false),
+    ],
 ];

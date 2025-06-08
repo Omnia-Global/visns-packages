@@ -655,10 +655,13 @@ The package includes a powerful report builder system that allows users to creat
 The `ReportBuilderController` provides methods for exploring the database schema:
 
 -   `getTables` - Gets all tables in the database
+-   `getTablesSimple` - Gets simplified list of tables
 -   `getTableColumns` - Gets columns for a specific table
 -   `getAllTablesAndColumns` - Gets all tables and their columns
 -   `getTableRelationships` - Gets relationships for a specific table
 -   `getColumnTypeInfo` - Gets detailed type information for a specific column
+-   `getSuggestedJoins` - Gets AI-powered join suggestions between tables
+-   `getJsonFieldKeys` - Extracts keys from JSON columns in your data
 
 ### Report Configuration
 
@@ -875,15 +878,134 @@ fetch('/ajax/pdf/generate-custom', {
 });
 ```
 
+### Generating Quote PDFs
+
+The package also provides a specialized method for generating quote PDFs:
+
+```javascript
+fetch('/ajax/pdf/generate-quote', {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+        quote_id: 123,
+        template: 'quotes.default',
+        download: true
+    }),
+});
+```
+
 The same endpoints are also available via the API with authentication required:
 
 -   `POST /api/pdf/generate`
 -   `POST /api/pdf/generate-from-html`
 -   `POST /api/pdf/generate-custom`
+-   `POST /api/pdf/generate-quote`
 
 ## Dynamic Controller
 
 The package includes a `DynamicController` that provides a flexible way to interact with any model in your application. It automatically determines the model based on the URL path and provides standard CRUD operations and filtering capabilities.
+
+### Search Integration
+
+The Dynamic Controller supports advanced search functionality with automatic Meilisearch integration when available.
+
+#### Meilisearch Support
+
+The Dynamic Controller will automatically use Meilisearch for searching when:
+1. Laravel Scout is installed and configured
+2. The Scout driver is set to 'meilisearch'
+3. The model uses the `Laravel\Scout\Searchable` trait
+4. The Meilisearch server is healthy and accessible
+
+If any of these conditions are not met, the controller will gracefully fall back to the default database search using the model's `customSearch` scope.
+
+#### Configuring Meilisearch
+
+To enable Meilisearch for your models:
+
+1. Install Laravel Scout and Meilisearch:
+```bash
+composer require laravel/scout meilisearch/meilisearch-php
+```
+
+2. Configure Scout in your `.env`:
+```env
+SCOUT_DRIVER=meilisearch
+MEILISEARCH_HOST=http://localhost:7700
+MEILISEARCH_KEY=your-master-key
+```
+
+3. Add the `Searchable` trait to your model:
+```php
+use Laravel\Scout\Searchable;
+
+class Product extends Model
+{
+    use Searchable;
+    
+    // Define searchable fields
+    public function toSearchableArray()
+    {
+        return [
+            'id' => $this->id,
+            'name' => $this->name,
+            'description' => $this->description,
+            'sku' => $this->sku,
+        ];
+    }
+}
+```
+
+4. Index your existing data:
+```bash
+php artisan scout:import "App\Models\Product"
+```
+
+#### Disabling Meilisearch
+
+You can force disable Meilisearch integration by setting the configuration option:
+
+```php
+// In config/visns-packages.php
+'search' => [
+    'force_disable_meilisearch' => true,
+],
+```
+
+Or via environment variable:
+```env
+VISNS_DISABLE_MEILISEARCH=true
+```
+
+#### Search Usage
+
+Search functionality works automatically with the table and dropdown endpoints:
+
+```javascript
+// Search in table view
+fetch('/ajax/products/table?search=laptop')
+
+// Search in dropdown with async loading
+fetch('/ajax/products/dropdown', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+        where: [
+            { id: 'async', value: 'laptop' }
+        ]
+    })
+})
+```
+
+The search will use Meilisearch if available, providing:
+- Full-text search capabilities
+- Typo tolerance
+- Faster search performance for large datasets
+- Relevance-based ranking
+
+If Meilisearch is not available or fails, the search will automatically fall back to SQL LIKE queries using the model's `customSearch` scope.
 
 ### Basic Usage
 
@@ -899,6 +1021,25 @@ For example:
 -   `/ajax/products/dropdown` - Get products for a dropdown list
 -   `/ajax/orders/show/123` - Get a specific order by ID
 -   `/ajax/users/merge` - Merge two user models
+
+### Available Actions
+
+The `DynamicController` provides the following actions:
+
+-   `/ajax/{model}/table` - Get a paginated list
+-   `/ajax/{model}/list` - Get a non-paginated list
+-   `/ajax/{model}/dropdown` - Get data for dropdown lists
+-   `/ajax/{model}/dropdownWithGroups` - Get dropdown data with parent-child grouping
+-   `/ajax/{model}/show/{id}` - Get a specific record
+-   `/ajax/{model}/store` - Create a new record (POST)
+-   `/ajax/{model}/update/{id}` - Update an existing record (PUT)
+-   `/ajax/{model}/destroy/{id}` - Delete a record (DELETE)
+-   `/ajax/{model}/clone/{id}` - Clone a record
+-   `/ajax/{model}/merge` - Merge two models (POST)
+-   `/ajax/{model}/sort_list` - Get sortable list
+-   `/ajax/{model}/sort_update` - Update sort order (POST)
+-   `/ajax/{model}/template_sort/{id}` - Sort template details (POST)
+-   `/ajax/{model}/gallery/{id}` - Update gallery images (POST)
 
 ### Filtering
 
@@ -1004,6 +1145,7 @@ You can customize the merge behavior with additional parameters:
 -   `exclude`: Array of attributes to exclude from merging
 -   `overwriteWithNull`: Whether to overwrite non-null values with null values (default: false)
 -   `mergeTimestamps`: Whether to merge timestamp fields (default: false)
+-   `prioritizeSource`: Whether to prioritize source model attributes over target (default: false)
 
 #### Relationship Handling
 
@@ -1022,6 +1164,188 @@ POST /api/{model_name}/merge
 
 This endpoint requires authentication with a valid API token.
 
+### Advanced Features
+
+#### Nested Object Support
+
+The Dynamic Controller supports creating and updating related models through nested objects in your request data:
+
+```javascript
+// Create a user with a profile
+fetch('/ajax/users/store', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+        name: 'John Doe',
+        email: 'john@example.com',
+        profile: {
+            bio: 'Software Developer',
+            website: 'https://example.com'
+        }
+    })
+});
+```
+
+#### File Upload Handling
+
+The controller automatically handles file uploads for models with polymorphic file relationships:
+
+```javascript
+const formData = new FormData();
+formData.append('name', 'Product Name');
+formData.append('images[]', file1);
+formData.append('images[]', file2);
+
+fetch('/ajax/products/store', {
+    method: 'POST',
+    body: formData
+});
+```
+
+#### Sort Order Management
+
+Update the sort order of multiple models:
+
+```javascript
+fetch('/ajax/products/sort_update', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+        sort_order: [3, 1, 4, 2] // New order for product IDs
+    })
+});
+```
+
+#### Model Cloning
+
+Clone an existing model:
+
+```javascript
+fetch('/ajax/products/clone/123', {
+    method: 'GET'
+});
+// Creates a new product with "(Clone)" appended to the name
+```
+
+## Dynamic JSON Controller
+
+The package includes a `DynamicJsonController` that allows you to manage JSON data stored within model fields. This is useful for managing arrays of structured data without creating separate database tables.
+
+### JSON Data Management
+
+The controller works with models that have JSON/array fields and provides CRUD operations for the data within those fields.
+
+### Available JSON Actions
+
+-   `/ajax/{model_name}/json/{field}/sort_list` - Get sortable list of JSON data
+-   `/ajax/{model_name}/json/{field}/sort_update` - Update sort order
+-   `/ajax/{model_name}/json/{field}/get/{json_id}` - Get specific JSON item
+-   `/ajax/{model_name}/json/{field}/table` - Get paginated table of JSON data
+-   `/ajax/{model_name}/json/{field}/store` - Add new JSON item
+-   `/ajax/{model_name}/json/{field}/update/{json_id}` - Update JSON item
+-   `/ajax/{model_name}/json/{field}/delete/{json_id}` - Delete JSON item
+
+Example usage:
+
+```javascript
+// Add a new item to a JSON array field
+fetch('/ajax/settings/json/menu_items/store', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+        model_id: 1,
+        data: {
+            title: 'New Menu Item',
+            url: '/new-page',
+            icon: 'home'
+        }
+    })
+});
+```
+
+## Audit System
+
+The package includes a comprehensive audit system that tracks all changes to your models using the Laravel Auditing package.
+
+### Audit Logging
+
+Models that use auditing will automatically track:
+- Create, update, and delete events
+- Old and new values for each change
+- User who made the change
+- IP address and user agent
+- URL where the change was made
+
+### Viewing Audit History
+
+The `AuditController` provides methods to view audit history:
+
+```javascript
+// Get audit details for a specific audit record
+fetch('/ajax/audits/123')
+    .then(response => response.json())
+    .then(audit => {
+        console.log(audit.event); // created, updated, deleted
+        console.log(audit.old_values);
+        console.log(audit.new_values);
+        console.log(audit.user);
+    });
+
+// Get paginated audit table
+fetch('/ajax/audits/table', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+        page: 1,
+        per_page: 20,
+        where: [
+            { id: 'auditable_type', value: 'App\\Models\\User' },
+            { id: 'event', value: 'updated' }
+        ]
+    })
+});
+```
+
+## Middleware
+
+### AcceptJson Middleware
+
+The package includes an `AcceptJson` middleware that automatically sets the `Accept: application/json` header for all incoming requests. This ensures consistent JSON responses from your API endpoints.
+
+The middleware is automatically registered with the alias `accept-json` and is applied to all package API routes.
+
+## Exception Handling
+
+### JsonValidationException
+
+The package provides a custom `JsonValidationException` that formats validation errors in a consistent JSON structure:
+
+```php
+use Visnsstudio\VisnsPackages\Exceptions\JsonValidationException;
+
+// In your controller
+$validator = Validator::make($request->all(), [
+    'email' => 'required|email',
+    'name' => 'required|string'
+]);
+
+if ($validator->fails()) {
+    throw new JsonValidationException($validator);
+}
+```
+
+This returns a properly formatted JSON response:
+
+```json
+{
+    "message": "The given data was invalid.",
+    "errors": {
+        "email": ["The email field is required."],
+        "name": ["The name field is required."]
+    }
+}
+```
+
 ## Configuration
 
 ### Environment Variables
@@ -1033,6 +1357,12 @@ The package works with your existing Laravel configuration. Key environment vari
 -   `MAIL_FROM_ADDRESS` - For sending emails
 -   `ALLOW_MULTIPLE_SESSIONS` - Controls multiple session behavior
 -   `APP_NAME` - Used for the name in 2FA authenticator apps (can be overridden in config)
+-   `VISNS_USER_MODEL` - Specify the User model class to use
+-   `VISNS_COMPONENT_HEADER_STYLE_BACKGROUND` - Background color for component headers
+-   `VISNS_COMPONENT_HEADER_STYLE_COLOR` - Text color for component headers
+-   `VISNS_COMPONENT_SELECT_STYLE_HEIGHT` - Height for select components
+-   `VISNS_COMPONENT_TINY_MCE_API_KEY` - TinyMCE API key for rich text editing
+-   `VISNS_DISABLE_MEILISEARCH` - Force disable Meilisearch integration for search
 
 ### Package Configuration
 
@@ -1079,6 +1409,12 @@ return [
         //     'foreign_key' => 'user_id',
         //     'local_key' => 'id',
         // ],
+    ],
+
+    // Search configuration
+    'search' => [
+        // Force disable Meilisearch integration
+        'force_disable_meilisearch' => env('VISNS_DISABLE_MEILISEARCH', false),
     ],
 ];
 ```
@@ -1196,6 +1532,14 @@ Route::post('/ajax/roles/table', [RoleController::class, 'table']);
 Route::post('/ajax/roles/dropdown', [RoleController::class, 'dropdown']);
 ```
 
+#### Audit Routes
+
+```php
+// Audit routes
+Route::get('/ajax/audits/{id}', [AuditController::class, 'show']);
+Route::post('/ajax/audits/table', [AuditController::class, 'table']);
+```
+
 #### Report Builder Routes
 
 ```php
@@ -1215,6 +1559,9 @@ Route::prefix('ajax')
             'getTableRelationships'
         );
         Route::post('/reportBuilder/getColumnTypeInfo', 'getColumnTypeInfo');
+        Route::post('/reportBuilder/getSuggestedJoins', 'getSuggestedJoins');
+        Route::post('/reportBuilder/getTablesSimple', 'getTablesSimple');
+        Route::post('/reportBuilder/getJsonFieldKeys', 'getJsonFieldKeys');
 
         // Report management
         Route::get('/reportBuilder/reports', 'getReports');
@@ -1241,6 +1588,7 @@ Route::prefix('ajax/pdf')
         Route::post('/generate', 'generatePDF');
         Route::post('/generate-from-html', 'generatePDFFromHTML');
         Route::post('/generate-custom', 'generateCustomPDF');
+        Route::post('/generate-quote', 'generateQuotePDF');
     });
 
 // PDF API routes
@@ -1251,6 +1599,7 @@ Route::prefix('api/pdf')
         Route::post('/generate', 'generatePDF');
         Route::post('/generate-from-html', 'generatePDFFromHTML');
         Route::post('/generate-custom', 'generateCustomPDF');
+        Route::post('/generate-quote', 'generateQuotePDF');
     });
 ```
 
@@ -1270,6 +1619,23 @@ Route::middleware('auth:sanctum')->post(
 );
 ```
 
+#### Dynamic JSON Controller Routes
+
+```php
+// Dynamic JSON Controller routes
+Route::prefix('ajax/{model}/json/{field}')
+    ->controller(DynamicJsonController::class)
+    ->group(function () {
+        Route::get('/sort_list', 'jsonSortList');
+        Route::post('/sort_update', 'jsonSortUpdate');
+        Route::get('/get/{json_id}', 'jsonGet');
+        Route::post('/table', 'jsonTable');
+        Route::post('/store', 'jsonStore');
+        Route::put('/update/{json_id}', 'jsonUpdate');
+        Route::delete('/delete/{json_id}', 'jsonDelete');
+    });
+```
+
 #### Social Authentication Routes
 
 ```php
@@ -1287,7 +1653,7 @@ Route::get('/auth/{provider}/callback', [
 #### API Routes
 
 ```php
-// API routes
+// API Authentication routes
 Route::post('/api/login', [AuthController::class, 'login_api']);
 Route::post('/api/register', [AuthController::class, 'register']);
 Route::post('/api/two-factor-challenge', [
@@ -1295,6 +1661,15 @@ Route::post('/api/two-factor-challenge', [
     'twoFactorAuthenticateApi',
 ]);
 Route::post('/api/logout', [AuthController::class, 'logout_api']);
+
+// API Socialite routes
+Route::get('/api/auth/providers', [SocialiteController::class, 'getProviders']);
+Route::get('/api/auth/status', [AuthController::class, 'status']);
+
+// API User routes (require authentication)
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/api/profile', [UserController::class, 'profile']);
+});
 
 // Dynamic model merge API route
 Route::middleware('auth:sanctum')->post(
