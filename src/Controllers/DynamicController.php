@@ -525,18 +525,36 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     protected function handleDateValue($value)
     {
+        // Handle null, empty, or invalid values early
+        if ($this->isInvalidDateValue($value)) {
+            return null;
+        }
+
         // 1. If $value is an array with 'start' and 'end' keys
         if (is_array($value) && isset($value['start'], $value['end'])) {
-            if ($value['start'] !== '' && $value['end'] !== '') {
-                $start = Carbon::parse($value['start'], config('app.timezone'))
-                    ->startOfDay()
-                    ->setTimezone('UTC');
-                $end = Carbon::parse($value['end'], config('app.timezone'))
-                    ->endOfDay()
-                    ->setTimezone('UTC');
+            if ($value['start'] !== '' && $value['end'] !== '' && 
+                !$this->isInvalidDateValue($value['start']) && 
+                !$this->isInvalidDateValue($value['end'])) {
+                
+                try {
+                    $start = Carbon::parse($value['start'], config('app.timezone'))
+                        ->startOfDay()
+                        ->setTimezone('UTC');
+                    $end = Carbon::parse($value['end'], config('app.timezone'))
+                        ->endOfDay()
+                        ->setTimezone('UTC');
 
-                return [$start, $end];
+                    return [$start, $end];
+                } catch (\Exception $e) {
+                    \Log::warning('Failed to parse date range', [
+                        'start' => $value['start'],
+                        'end' => $value['end'],
+                        'error' => $e->getMessage()
+                    ]);
+                    return null;
+                }
             }
+            return null;
         }
 
         // 2. If the value is the string 'now'
@@ -546,20 +564,73 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         // 3. If $value is a scalar (not an array or object)
         if (!is_array($value) && !is_object($value)) {
-            return Carbon::parse($value, config('app.timezone'))->setTimezone(
-                'UTC'
-            );
+            try {
+                return Carbon::parse($value, config('app.timezone'))->setTimezone('UTC');
+            } catch (\Exception $e) {
+                \Log::warning('Failed to parse date value', [
+                    'value' => $value,
+                    'error' => $e->getMessage()
+                ]);
+                return null;
+            }
         }
 
         // 4. If $value is an array or object (without 'start'/'end'), loop through each element
         $result = [];
         foreach ((array) $value as $key => $item) {
-            $result[$key] = Carbon::parse(
-                $item,
-                config('app.timezone')
-            )->setTimezone('UTC');
+            if (!$this->isInvalidDateValue($item)) {
+                try {
+                    $result[$key] = Carbon::parse(
+                        $item,
+                        config('app.timezone')
+                    )->setTimezone('UTC');
+                } catch (\Exception $e) {
+                    \Log::warning('Failed to parse date array item', [
+                        'key' => $key,
+                        'value' => $item,
+                        'error' => $e->getMessage()
+                    ]);
+                    // Skip invalid items rather than including null
+                }
+            }
         }
-        return $result;
+        return empty($result) ? null : $result;
+    }
+
+    /**
+     * Check if a value is invalid for date parsing
+     *
+     * @param mixed $value
+     * @return bool
+     */
+    protected function isInvalidDateValue($value)
+    {
+        // Handle null values
+        if (is_null($value)) {
+            return true;
+        }
+
+        // Handle empty strings
+        if ($value === '') {
+            return true;
+        }
+
+        // Handle string '0' or numeric 0
+        if ($value === '0' || $value === 0) {
+            return true;
+        }
+
+        // Handle boolean false
+        if ($value === false) {
+            return true;
+        }
+
+        // Handle very short strings that are likely not dates (but allow 'now')
+        if (is_string($value) && strlen(trim($value)) < 4 && $value !== 'now') {
+            return true;
+        }
+
+        return false;
     }
 
     /**
