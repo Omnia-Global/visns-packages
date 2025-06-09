@@ -615,18 +615,14 @@ class DynamicController extends \App\Http\Controllers\Controller
             return true;
         }
 
-        // Handle string '0' or numeric 0
-        if ($value === '0' || $value === 0) {
-            return true;
-        }
-
         // Handle boolean false
         if ($value === false) {
             return true;
         }
 
         // Handle very short strings that are likely not dates (but allow 'now')
-        if (is_string($value) && strlen(trim($value)) < 4 && $value !== 'now') {
+        // Note: We removed the check for '0' and 0 since they could be valid timestamps or date representations
+        if (is_string($value) && strlen(trim($value)) < 4 && $value !== 'now' && $value !== '0') {
             return true;
         }
 
