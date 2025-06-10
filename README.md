@@ -979,6 +979,45 @@ Or via environment variable:
 VISNS_DISABLE_MEILISEARCH=true
 ```
 
+#### Meilisearch Management Commands
+
+The package includes three helpful Artisan commands for managing and debugging Meilisearch:
+
+**Configure Meilisearch Index Settings**
+```bash
+# Show current configuration for all indexes
+php artisan meilisearch:configure --show
+
+# Apply configuration from config/scout.php to all indexes
+php artisan meilisearch:configure --apply
+
+# Configure only a specific model's index
+php artisan meilisearch:configure --apply --model=User
+```
+
+**Debug Meilisearch Connection and Indexes**
+```bash
+# Auto-discover and debug searchable models
+php artisan meilisearch:debug
+
+# Debug a specific model
+php artisan meilisearch:debug --model=Customer
+```
+
+**Test Meilisearch Search Functionality**
+```bash
+# Test search with default User model
+php artisan meilisearch:test "search query"
+
+# Test search on specific model
+php artisan meilisearch:test "John" --model=Customer
+
+# Test search with filters and custom limit
+php artisan meilisearch:test "active" --filters="status = active" --limit=20
+```
+
+These commands are particularly useful during development and deployment to ensure your Meilisearch integration is working correctly and to troubleshoot search issues.
+
 #### Search Usage
 
 Search functionality works automatically with the table and dropdown endpoints:

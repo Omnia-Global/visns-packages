@@ -5,6 +5,9 @@ namespace Visnsstudio\VisnsPackages;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Route;
 use Visnsstudio\VisnsPackages\Commands\PublishMigrationsCommand;
+use Visnsstudio\VisnsPackages\Commands\MeilisearchConfigureCommand;
+use Visnsstudio\VisnsPackages\Commands\MeilisearchDebugCommand;
+use Visnsstudio\VisnsPackages\Commands\MeilisearchTestCommand;
 use Visnsstudio\VisnsPackages\Controllers\AuthController;
 use Visnsstudio\VisnsPackages\Controllers\UserController;
 use Visnsstudio\VisnsPackages\Controllers\FileController;
@@ -25,7 +28,12 @@ class VisnsPackagesServiceProvider extends ServiceProvider
     public function register()
     {
         // Register commands
-        $this->commands([PublishMigrationsCommand::class]);
+        $this->commands([
+            PublishMigrationsCommand::class,
+            MeilisearchConfigureCommand::class,
+            MeilisearchDebugCommand::class,
+            MeilisearchTestCommand::class,
+        ]);
 
         // Merge config
         $this->mergeConfigFrom(
