@@ -3534,6 +3534,85 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             }
     }
 
+            try {
+                // Set options based on dataset size
+                if ($useSimplifiedStyling) {
+                    // Simplified options for large datasets
+                    $options = [
+                        'isHtml5ParserEnabled' => false,
+                        'isRemoteEnabled' => false,
+                        'defaultFont' => 'sans-serif',
+                        'dpi' => 96,
+                    ];
+                } else {
+                    // Enhanced options for smaller datasets
+                    $options = [
+                        'isHtml5ParserEnabled' => true,
+                        'isRemoteEnabled' => true,
+                        'defaultFont' => 'sans-serif',
+                        'dpi' => 150,
+                    ];
+                }
+
+                Log::info('Creating PDF with options', [
+                    'options' => $options,
+                    'use_simplified_styling' => $useSimplifiedStyling,
+                ]);
+
+                // Generate PDF using Dompdf with memory-optimized options
+                $pdf = Pdf::loadHTML($html)
+                    ->setOptions($options)
+                    ->setPaper('a4', 'landscape');
+
+                Log::info('PDF generated successfully', [
+                    'memory_usage_after_pdf' => memory_get_usage(true),
+                    'memory_peak' => memory_get_peak_usage(true),
+                ]);
+
+                // Reset memory limit to original value
+                ini_set('memory_limit', $originalMemoryLimit);
+
+                // Return the PDF as a download
+                return $pdf->download($filename);
+            } catch (\Exception $pdfException) {
+                // Reset memory limit on error
+                ini_set('memory_limit', $originalMemoryLimit);
+
+                Log::error('PDF generation failed', [
+                    'message' => $pdfException->getMessage(),
+                    'trace' => $pdfException->getTraceAsString(),
+                    'html_length' => strlen($html),
+                    'memory_usage' => memory_get_usage(true),
+                    'memory_peak' => memory_get_peak_usage(true),
+                    'row_count' => count($dataArray),
+                ]);
+
+                // Check if this is a memory-related error and provide a more specific message
+                if (
+                    strpos($pdfException->getMessage(), 'memory') !== false ||
+                    strpos(
+                        $pdfException->getMessage(),
+                        'Allowed memory size'
+                    ) !== false
+                ) {
+                    throw new \Exception(
+                        'PDF generation failed due to memory limitations. The dataset contains ' .
+                            count($dataArray) .
+                            ' rows which may be too large for PDF export. ' .
+                            'Please try using Excel or CSV format instead.',
+                        0,
+                        $pdfException
+                    );
+                }
+
+                throw new \Exception(
+                    'PDF generation failed: ' . $pdfException->getMessage(),
+                    0,
+                    $pdfException
+                );
+            }
+        }
+    }
 
     /**
      * Generate PDF using TCPDF for better memory handling with large datasets

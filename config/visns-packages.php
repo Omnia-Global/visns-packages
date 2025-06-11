@@ -225,5 +225,41 @@ return [
         |
         */
         'simplified_styling_threshold' => env('VISNS_SIMPLIFIED_STYLING_THRESHOLD', 1000),
+
+        /*
+        |--------------------------------------------------------------------------
+        | PDF Generation Engine
+        |--------------------------------------------------------------------------
+        |
+        | Choose the PDF generation engine: 'dompdf', 'tcpdf', or 'chunked'.
+        | - dompdf: Default Laravel DomPDF (good for small datasets)
+        | - tcpdf: TCPDF library (better memory handling for large datasets)
+        | - chunked: Split large datasets into multiple PDF pages/files
+        |
+        */
+        'pdf_engine' => env('VISNS_PDF_ENGINE', 'dompdf'),
+
+        /*
+        |--------------------------------------------------------------------------
+        | PDF Chunking Configuration
+        |--------------------------------------------------------------------------
+        |
+        | Configuration for chunked PDF generation when dealing with very large
+        | datasets that exceed memory limits.
+        |
+        */
+        'pdf_chunk_size' => env('VISNS_PDF_CHUNK_SIZE', 500),
+        'pdf_max_chunks' => env('VISNS_PDF_MAX_CHUNKS', 10),
+
+        /*
+        |--------------------------------------------------------------------------
+        | TCPDF Row Threshold
+        |--------------------------------------------------------------------------
+        |
+        | Row count above which TCPDF engine is automatically used instead of
+        | DomPDF for better memory management.
+        |
+        */
+        'tcpdf_threshold' => env('VISNS_TCPDF_THRESHOLD', 1000),
     ],
 ];
