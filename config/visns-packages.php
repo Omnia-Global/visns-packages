@@ -261,5 +261,23 @@ return [
         |
         */
         'tcpdf_threshold' => env('VISNS_TCPDF_THRESHOLD', 1000),
+
+        /*
+        |--------------------------------------------------------------------------
+        | PDF Formatting Options
+        |--------------------------------------------------------------------------
+        |
+        | Configuration for PDF cell formatting, text wrapping, and content display.
+        |
+        */
+        'pdf_formatting' => [
+            'enable_text_wrapping' => env('VISNS_PDF_TEXT_WRAPPING', true),
+            'max_json_display_length' => env('VISNS_PDF_JSON_MAX_LENGTH', 100),
+            'min_column_width' => env('VISNS_PDF_MIN_COLUMN_WIDTH', 25), // mm
+            'max_column_width' => env('VISNS_PDF_MAX_COLUMN_WIDTH', 70), // mm
+            'json_formatting_style' => env('VISNS_PDF_JSON_STYLE', 'compact'), // 'compact', 'detailed', 'minimal'
+            'max_cell_height' => env('VISNS_PDF_MAX_CELL_HEIGHT', 50), // mm
+            'line_height_multiplier' => env('VISNS_PDF_LINE_HEIGHT', 1.2),
+        ],
     ],
 ];

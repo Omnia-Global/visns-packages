@@ -3576,20 +3576,29 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             $pdf->Cell(0, 10, str_replace('.pdf', '', $filename), 0, 1, 'C');
             $pdf->Ln(5);
 
-            // Table headers
+            // Table headers with smart column width calculation
             $pdf->SetFont('helvetica', 'B', 7);
             $pdf->SetFillColor(240, 240, 240);
             
-            $columnWidth = (270 / count($headers)); // 270mm is roughly A4 landscape width minus margins
+            // Calculate optimal column widths based on content
+            $columnWidths = $this->calculateOptimalColumnWidths($headers, $dataArray);
             
+            $columnIndex = 0;
             foreach ($headers as $header) {
-                $pdf->Cell($columnWidth, 8, $this->formatColumnName($header), 1, 0, 'L', true);
+                $width = $columnWidths[$columnIndex];
+                $pdf->Cell($width, 8, $this->formatColumnName($header), 1, 0, 'L', true);
+                $columnIndex++;
             }
             $pdf->Ln();
 
-            // Table data
+            // Table data with enhanced text wrapping
             $pdf->SetFont('helvetica', '', 6);
             $pdf->SetFillColor(255, 255, 255);
+            
+            // Get formatting configuration
+            $enableTextWrapping = config('visns-packages.report_export.pdf_formatting.enable_text_wrapping', true);
+            $maxCellHeight = config('visns-packages.report_export.pdf_formatting.max_cell_height', 50);
+            $lineHeightMultiplier = config('visns-packages.report_export.pdf_formatting.line_height_multiplier', 1.2);
             
             $processedRows = 0;
             foreach ($dataArray as $dataRow) {
@@ -3600,39 +3609,24 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     // Re-add headers on new page
                     $pdf->SetFont('helvetica', 'B', 7);
                     $pdf->SetFillColor(240, 240, 240);
+                    $columnIndex = 0;
                     foreach ($headers as $header) {
-                        $pdf->Cell($columnWidth, 8, $this->formatColumnName($header), 1, 0, 'L', true);
+                        $width = $columnWidths[$columnIndex];
+                        $pdf->Cell($width, 8, $this->formatColumnName($header), 1, 0, 'L', true);
+                        $columnIndex++;
                     }
                     $pdf->Ln();
                     $pdf->SetFont('helvetica', '', 6);
                     $pdf->SetFillColor(255, 255, 255);
                 }
 
-                foreach ($dataRow as $key => $value) {
-                    // Handle null values
-                    if (is_null($value)) {
-                        $value = '';
-                    }
-
-                    // Simplify complex data types
-                    if (is_array($value)) {
-                        $value = json_encode($value);
-                    } elseif (is_string($value) && $this->isJsonString($value)) {
-                        // Keep JSON short
-                        $decoded = json_decode($value, true);
-                        if (is_array($decoded) && count($decoded) > 3) {
-                            $value = json_encode(array_slice($decoded, 0, 3)) . '...';
-                        }
-                    }
-
-                    // Truncate long values
-                    if (strlen($value) > 50) {
-                        $value = substr($value, 0, 47) . '...';
-                    }
-
-                    $pdf->Cell($columnWidth, 6, $value, 1, 0, 'L');
+                if ($enableTextWrapping) {
+                    // Enhanced text wrapping with MultiCell
+                    $this->generatePdfRowWithWrapping($pdf, $dataRow, $headers, $columnWidths, $maxCellHeight, $lineHeightMultiplier);
+                } else {
+                    // Fallback to original Cell method
+                    $this->generatePdfRowSimple($pdf, $dataRow, $columnWidths);
                 }
-                $pdf->Ln();
                 
                 $processedRows++;
                 
@@ -3712,5 +3706,600 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             ini_set('memory_limit', $originalMemoryLimit);
             throw $e;
         }
+    }
+
+    /**
+     * Generate PDF row with text wrapping using MultiCell
+     */
+    private function generatePdfRowWithWrapping($pdf, $dataRow, $headers, $columnWidths, $maxCellHeight, $lineHeightMultiplier)
+    {
+        // Calculate the required height for this row with variable column widths
+        $rowHeight = $this->calculateRowHeightWithWidths($pdf, $dataRow, $columnWidths, $maxCellHeight);
+        
+        // Store current position
+        $startY = $pdf->GetY();
+        $startX = $pdf->GetX();
+        
+        $columnIndex = 0;
+        $currentX = $startX;
+        
+        foreach ($dataRow as $key => $value) {
+            // Handle null values
+            if (is_null($value)) {
+                $value = '';
+            }
+
+            // Format value for PDF display
+            $formattedValue = $this->formatValueForPdf($value);
+            
+            // Get width for this specific column
+            $columnWidth = $columnWidths[$columnIndex];
+            
+            // Set position for this cell
+            $pdf->SetXY($currentX, $startY);
+            
+            // Use MultiCell for text wrapping
+            $pdf->MultiCell(
+                $columnWidth,           // width (specific to this column)
+                $rowHeight,            // height
+                $formattedValue,       // text
+                1,                     // border (1 = border around)
+                'L',                   // align (L = left)
+                false,                 // fill (false = no background fill)
+                0,                     // ln (0 = to the right)
+                '',                    // x (empty = current)
+                '',                    // y (empty = current)  
+                true,                  // reseth (true = reset height)
+                0,                     // stretch (0 = disabled)
+                false,                 // ishtml (false = not HTML)
+                true,                  // autopadding (true = auto padding)
+                $rowHeight,            // maxh (max height)
+                'T',                   // valign (T = top)
+                false                  // fitcell (false = no fit)
+            );
+            
+            // Move to next column position
+            $currentX += $columnWidth;
+            $columnIndex++;
+        }
+        
+        // Move to next row
+        $pdf->SetXY($startX, $startY + $rowHeight);
+    }
+
+    /**
+     * Generate PDF row using simple Cell method (fallback)
+     */
+    private function generatePdfRowSimple($pdf, $dataRow, $columnWidths)
+    {
+        $columnIndex = 0;
+        foreach ($dataRow as $key => $value) {
+            // Handle null values
+            if (is_null($value)) {
+                $value = '';
+            }
+
+            // Basic formatting
+            $formattedValue = $this->formatValueForPdf($value);
+            
+            // Get width for this specific column
+            $columnWidth = $columnWidths[$columnIndex];
+            
+            // Truncate long values for simple mode based on column width
+            $maxChars = floor($columnWidth * 2.5); // Rough estimate for 6pt font
+            if (strlen($formattedValue) > $maxChars) {
+                $formattedValue = substr($formattedValue, 0, $maxChars - 3) . '...';
+            }
+
+            $pdf->Cell($columnWidth, 6, $formattedValue, 1, 0, 'L');
+            $columnIndex++;
+        }
+        $pdf->Ln();
+    }
+
+    /**
+     * Calculate the required height for a row based on content
+     */
+    private function calculateRowHeight($pdf, $dataRow, $columnWidth, $maxCellHeight)
+    {
+        $maxLines = 1;
+        $fontSize = 6; // Current font size
+        $lineHeight = $fontSize * 1.2; // Line height in points
+        
+        foreach ($dataRow as $value) {
+            if (is_null($value)) {
+                continue;
+            }
+            
+            $formattedValue = $this->formatValueForPdf($value);
+            
+            // Estimate number of lines needed for this cell
+            $textLength = strlen($formattedValue);
+            $charsPerLine = floor($columnWidth * 2.8); // Rough estimate: 2.8 chars per mm for 6pt font
+            $estimatedLines = max(1, ceil($textLength / $charsPerLine));
+            
+            // Account for explicit line breaks
+            $explicitLines = substr_count($formattedValue, "\n") + 1;
+            $lines = max($estimatedLines, $explicitLines);
+            
+            $maxLines = max($maxLines, $lines);
+        }
+        
+        // Convert to millimeters and apply limits
+        $heightMM = ($maxLines * $lineHeight * 0.352778); // Convert points to mm
+        return min($heightMM, $maxCellHeight);
+    }
+
+    /**
+     * Format value for PDF display with enhanced JSON handling
+     */
+    private function formatValueForPdf($value)
+    {
+        // Handle null values
+        if (is_null($value)) {
+            return '';
+        }
+        
+        // Handle arrays
+        if (is_array($value)) {
+            return $this->formatJsonForPdf($value);
+        }
+        
+        // Handle JSON strings
+        if (is_string($value) && $this->isJsonString($value)) {
+            $decoded = json_decode($value, true);
+            if ($decoded !== null) {
+                return $this->formatJsonForPdf($decoded);
+            }
+        }
+        
+        // Handle regular strings and other types
+        return (string) $value;
+    }
+
+    /**
+     * Format JSON data for PDF display with human-readable formatting
+     */
+    private function formatJsonForPdf($data)
+    {
+        if (empty($data)) {
+            return '';
+        }
+
+        $maxLength = config('visns-packages.report_export.pdf_formatting.max_json_display_length', 100);
+        $style = config('visns-packages.report_export.pdf_formatting.json_formatting_style', 'compact');
+
+        // Special handling for project details (if exists in your data structure)
+        if (isset($data['sector']) && isset($data['project_status'])) {
+            return $this->formatProjectDetailsForPdf($data);
+        }
+
+        switch ($style) {
+            case 'minimal':
+                return $this->formatJsonMinimal($data, $maxLength);
+            case 'detailed':
+                return $this->formatJsonDetailed($data, $maxLength);
+            case 'compact':
+            default:
+                return $this->formatJsonCompact($data, $maxLength);
+        }
+    }
+
+    /**
+     * Format JSON in compact style for PDF
+     */
+    private function formatJsonCompact($data, $maxLength)
+    {
+        $result = [];
+        $currentLength = 0;
+
+        foreach ($data as $key => $value) {
+            // Format the key for better readability
+            $displayKey = $this->humanizeFieldName($key);
+
+            if (is_array($value)) {
+                if (!empty($value)) {
+                    if (isset($value[0]) && is_array($value[0])) {
+                        // Array of objects
+                        $formatted = "$displayKey: [" . count($value) . ' items]';
+                    } else {
+                        // Associative array - show count and sample
+                        $sampleKeys = array_slice(array_keys($value), 0, 2);
+                        $sampleStr = implode(', ', array_map([$this, 'humanizeFieldName'], $sampleKeys));
+                        $formatted = "$displayKey: {$sampleStr}" . (count($value) > 2 ? ', ...' : '');
+                    }
+                } else {
+                    $formatted = "$displayKey: (empty)";
+                }
+            } else {
+                // Simple value
+                $formattedValue = is_bool($value) ? ($value ? 'Yes' : 'No') : (string) $value;
+                if (strlen($formattedValue) > 30) {
+                    $formattedValue = substr($formattedValue, 0, 27) . '...';
+                }
+                $formatted = "$displayKey: $formattedValue";
+            }
+
+            // Check if adding this would exceed length limit
+            $additionalLength = strlen($formatted) + 2; // +2 for \n
+            if ($currentLength + $additionalLength > $maxLength && !empty($result)) {
+                $result[] = '...';
+                break;
+            }
+
+            $result[] = $formatted;
+            $currentLength += $additionalLength;
+        }
+
+        return implode("\n", $result);
+    }
+
+    /**
+     * Format JSON in detailed style for PDF
+     */
+    private function formatJsonDetailed($data, $maxLength)
+    {
+        $result = [];
+        $currentLength = 0;
+
+        foreach ($data as $key => $value) {
+            $displayKey = $this->humanizeFieldName($key);
+
+            if (is_array($value)) {
+                if (!empty($value)) {
+                    $result[] = "$displayKey:";
+                    $currentLength += strlen($displayKey) + 3;
+
+                    if (isset($value[0]) && is_array($value[0])) {
+                        // Array of objects
+                        $result[] = "  [" . count($value) . " items]";
+                        $currentLength += 20;
+                    } else {
+                        // Show nested key-value pairs
+                        $nestedCount = 0;
+                        foreach ($value as $nestedKey => $nestedValue) {
+                            if ($nestedCount >= 3) {
+                                $result[] = "  ...";
+                                $currentLength += 10;
+                                break;
+                            }
+                            
+                            $nestedDisplayKey = $this->humanizeFieldName($nestedKey);
+                            $nestedFormatted = is_bool($nestedValue) ? ($nestedValue ? 'Yes' : 'No') : (string) $nestedValue;
+                            if (strlen($nestedFormatted) > 25) {
+                                $nestedFormatted = substr($nestedFormatted, 0, 22) . '...';
+                            }
+                            
+                            $line = "  $nestedDisplayKey: $nestedFormatted";
+                            $result[] = $line;
+                            $currentLength += strlen($line) + 1;
+                            $nestedCount++;
+                        }
+                    }
+                } else {
+                    $result[] = "$displayKey: (empty)";
+                    $currentLength += strlen($displayKey) + 10;
+                }
+            } else {
+                $formattedValue = is_bool($value) ? ($value ? 'Yes' : 'No') : (string) $value;
+                if (strlen($formattedValue) > 40) {
+                    $formattedValue = substr($formattedValue, 0, 37) . '...';
+                }
+                $line = "$displayKey: $formattedValue";
+                $result[] = $line;
+                $currentLength += strlen($line) + 1;
+            }
+
+            // Check length limit
+            if ($currentLength > $maxLength) {
+                $result[] = '...';
+                break;
+            }
+        }
+
+        return implode("\n", $result);
+    }
+
+    /**
+     * Format JSON in minimal style for PDF
+     */
+    private function formatJsonMinimal($data, $maxLength)
+    {
+        $summary = [];
+        
+        foreach ($data as $key => $value) {
+            if (is_array($value)) {
+                $summary[] = $this->humanizeFieldName($key) . ':Array';
+            } elseif (is_bool($value)) {
+                $summary[] = $this->humanizeFieldName($key) . ':' . ($value ? 'Y' : 'N');
+            } else {
+                $shortValue = strlen((string) $value) > 15 ? substr((string) $value, 0, 12) . '...' : (string) $value;
+                $summary[] = $this->humanizeFieldName($key) . ':' . $shortValue;
+            }
+        }
+
+        $result = implode(', ', $summary);
+        
+        if (strlen($result) > $maxLength) {
+            $result = substr($result, 0, $maxLength - 3) . '...';
+        }
+
+        return $result;
+    }
+
+    /**
+     * Format project details specifically for PDF (if this data structure exists)
+     */
+    private function formatProjectDetailsForPdf($data)
+    {
+        $important = [];
+        
+        // Prioritize key project information
+        if (isset($data['project_status'])) {
+            $important[] = 'Status: ' . $this->humanizeFieldName($data['project_status']);
+        }
+        if (isset($data['sector'])) {
+            $important[] = 'Sector: ' . $this->humanizeFieldName($data['sector']);
+        }
+        if (isset($data['project_value'])) {
+            $important[] = 'Value: ' . $data['project_value'];
+        }
+        if (isset($data['completion_date'])) {
+            $important[] = 'Due: ' . $data['completion_date'];
+        }
+        
+        // Add other fields if space allows
+        $maxLength = config('visns-packages.report_export.pdf_formatting.max_json_display_length', 100);
+        $current = implode("\n", $important);
+        
+        if (strlen($current) < $maxLength) {
+            foreach ($data as $key => $value) {
+                if (!in_array($key, ['project_status', 'sector', 'project_value', 'completion_date'])) {
+                    $additional = $this->humanizeFieldName($key) . ': ' . (string) $value;
+                    if (strlen($current . "\n" . $additional) <= $maxLength) {
+                        $important[] = $additional;
+                        $current .= "\n" . $additional;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+        
+        return implode("\n", $important);
+    }
+
+    /**
+     * Calculate optimal column widths based on headers and content analysis
+     */
+    private function calculateOptimalColumnWidths($headers, $dataArray)
+    {
+        $totalWidth = 270; // A4 landscape width minus margins (mm)
+        $minWidth = config('visns-packages.report_export.pdf_formatting.min_column_width', 25);
+        $maxWidth = config('visns-packages.report_export.pdf_formatting.max_column_width', 70);
+        
+        $columnCount = count($headers);
+        $columnTypes = $this->analyzeColumnTypes($headers, $dataArray);
+        $baseWidths = $this->calculateBaseWidths($headers, $columnTypes, $dataArray);
+        
+        // Apply constraints and distribute remaining width
+        $constrainedWidths = $this->applyWidthConstraints($baseWidths, $minWidth, $maxWidth, $totalWidth);
+        
+        Log::info('Column width calculation', [
+            'total_width' => $totalWidth,
+            'column_count' => $columnCount,
+            'column_types' => $columnTypes,
+            'base_widths' => $baseWidths,
+            'final_widths' => $constrainedWidths,
+        ]);
+        
+        return $constrainedWidths;
+    }
+
+    /**
+     * Analyze column types based on headers and sample data
+     */
+    private function analyzeColumnTypes($headers, $dataArray)
+    {
+        $types = [];
+        $sampleSize = min(10, count($dataArray)); // Sample first 10 rows
+        
+        foreach ($headers as $index => $header) {
+            $type = $this->determineColumnType($header, $dataArray, $index, $sampleSize);
+            $types[$index] = $type;
+        }
+        
+        return $types;
+    }
+
+    /**
+     * Determine column type based on header name and content
+     */
+    private function determineColumnType($header, $dataArray, $columnIndex, $sampleSize)
+    {
+        $headerLower = strtolower($header);
+        
+        // Analyze header name patterns
+        if (preg_match('/^(id|pk|key)$/i', $headerLower) || str_ends_with($headerLower, '_id')) {
+            return 'id';
+        }
+        
+        if (preg_match('/(date|time|created|updated)/', $headerLower)) {
+            return 'date';
+        }
+        
+        if (preg_match('/(name|title|subject|description)/', $headerLower)) {
+            return 'text';
+        }
+        
+        if (preg_match('/(email|url|link)/', $headerLower)) {
+            return 'text';
+        }
+        
+        // Analyze sample data content
+        $jsonCount = 0;
+        $longTextCount = 0;
+        $shortTextCount = 0;
+        $numericCount = 0;
+        
+        for ($i = 0; $i < $sampleSize && $i < count($dataArray); $i++) {
+            $rowData = array_values($dataArray[$i]);
+            if (isset($rowData[$columnIndex])) {
+                $value = $rowData[$columnIndex];
+                
+                if (is_array($value) || (is_string($value) && $this->isJsonString($value))) {
+                    $jsonCount++;
+                } elseif (is_numeric($value)) {
+                    $numericCount++;
+                } elseif (is_string($value)) {
+                    if (strlen($value) > 50) {
+                        $longTextCount++;
+                    } else {
+                        $shortTextCount++;
+                    }
+                }
+            }
+        }
+        
+        // Determine type based on content analysis
+        if ($jsonCount > $sampleSize * 0.5) {
+            return 'json';
+        } elseif ($longTextCount > $sampleSize * 0.3) {
+            return 'long_text';
+        } elseif ($numericCount > $sampleSize * 0.7) {
+            return 'numeric';
+        } else {
+            return 'text';
+        }
+    }
+
+    /**
+     * Calculate base widths for each column type
+     */
+    private function calculateBaseWidths($headers, $columnTypes, $dataArray)
+    {
+        $baseWidths = [];
+        
+        // Base width allocation by type (relative units)
+        $typeWeights = [
+            'id' => 1.0,        // Narrow - just IDs/keys
+            'numeric' => 1.5,   // Medium - numbers
+            'date' => 2.0,      // Medium - dates
+            'text' => 2.5,      // Standard text
+            'long_text' => 4.0, // Wide - descriptions
+            'json' => 3.5,      // Wide - JSON content
+        ];
+        
+        foreach ($columnTypes as $index => $type) {
+            $baseWidths[$index] = $typeWeights[$type] ?? 2.5;
+        }
+        
+        // Adjust for header length
+        foreach ($headers as $index => $header) {
+            $headerLength = strlen($this->formatColumnName($header));
+            $minWidthForHeader = $headerLength * 1.5; // Rough estimate
+            
+            // Ensure header text fits
+            if ($minWidthForHeader > $baseWidths[$index] * 10) { // Scale factor
+                $baseWidths[$index] = $minWidthForHeader / 10;
+            }
+        }
+        
+        return $baseWidths;
+    }
+
+    /**
+     * Apply width constraints and distribute total width
+     */
+    private function applyWidthConstraints($baseWidths, $minWidth, $maxWidth, $totalWidth)
+    {
+        $totalWeight = array_sum($baseWidths);
+        $proportionalWidths = [];
+        
+        // Calculate proportional widths
+        foreach ($baseWidths as $index => $weight) {
+            $proportionalWidths[$index] = ($weight / $totalWeight) * $totalWidth;
+        }
+        
+        // Apply min/max constraints
+        $constrainedWidths = [];
+        $totalUsed = 0;
+        $flexibleColumns = [];
+        
+        foreach ($proportionalWidths as $index => $width) {
+            if ($width < $minWidth) {
+                $constrainedWidths[$index] = $minWidth;
+                $totalUsed += $minWidth;
+            } elseif ($width > $maxWidth) {
+                $constrainedWidths[$index] = $maxWidth;
+                $totalUsed += $maxWidth;
+            } else {
+                $flexibleColumns[] = $index;
+            }
+        }
+        
+        // Distribute remaining width among flexible columns
+        $remainingWidth = $totalWidth - $totalUsed;
+        $flexibleCount = count($flexibleColumns);
+        
+        if ($flexibleCount > 0) {
+            $flexibleTotalWeight = 0;
+            foreach ($flexibleColumns as $index) {
+                $flexibleTotalWeight += $baseWidths[$index];
+            }
+            
+            foreach ($flexibleColumns as $index) {
+                $weight = $baseWidths[$index];
+                $allocatedWidth = ($weight / $flexibleTotalWeight) * $remainingWidth;
+                $constrainedWidths[$index] = max($minWidth, min($maxWidth, $allocatedWidth));
+            }
+        }
+        
+        // Final adjustment to ensure total width is used
+        $actualTotal = array_sum($constrainedWidths);
+        if ($actualTotal != $totalWidth) {
+            $adjustment = $totalWidth / $actualTotal;
+            foreach ($constrainedWidths as $index => $width) {
+                $constrainedWidths[$index] = $width * $adjustment;
+            }
+        }
+        
+        return array_values($constrainedWidths); // Ensure sequential array
+    }
+
+    /**
+     * Calculate row height with variable column widths
+     */
+    private function calculateRowHeightWithWidths($pdf, $dataRow, $columnWidths, $maxCellHeight)
+    {
+        $maxLines = 1;
+        $fontSize = 6;
+        $lineHeight = $fontSize * 1.2;
+        
+        $columnIndex = 0;
+        foreach ($dataRow as $value) {
+            if (is_null($value)) {
+                $columnIndex++;
+                continue;
+            }
+            
+            $formattedValue = $this->formatValueForPdf($value);
+            $columnWidth = $columnWidths[$columnIndex];
+            
+            // Estimate lines needed for this specific column width
+            $charsPerLine = floor($columnWidth * 2.8);
+            $estimatedLines = max(1, ceil(strlen($formattedValue) / $charsPerLine));
+            
+            // Account for explicit line breaks
+            $explicitLines = substr_count($formattedValue, "\n") + 1;
+            $lines = max($estimatedLines, $explicitLines);
+            
+            $maxLines = max($maxLines, $lines);
+            $columnIndex++;
+        }
+        
+        // Convert to millimeters and apply limits
+        $heightMM = ($maxLines * $lineHeight * 0.352778);
+        return min($heightMM, $maxCellHeight);
     }
 }
