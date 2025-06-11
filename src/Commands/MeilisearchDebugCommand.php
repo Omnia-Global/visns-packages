@@ -14,9 +14,9 @@ class MeilisearchDebugCommand extends Command
 
     protected $description = 'Debug Meilisearch connection and index status';
 
-    protected Client $meilisearch;
+    protected ?Client $meilisearch;
 
-    public function __construct(Client $meilisearch)
+    public function __construct(?Client $meilisearch = null)
     {
         parent::__construct();
         $this->meilisearch = $meilisearch;
@@ -24,6 +24,11 @@ class MeilisearchDebugCommand extends Command
 
     public function handle(): int
     {
+        if (!$this->isAvailable()) {
+            $this->error('MeiliSearch is not configured. Please install laravel/scout and meilisearch/meilisearch-php packages and configure them.');
+            return 1;
+        }
+
         $this->info('🔍 Meilisearch Debug Information');
         $this->info('===============================');
 
@@ -239,5 +244,16 @@ class MeilisearchDebugCommand extends Command
         }
 
         return null;
+    }
+
+    /**
+     * Check if MeiliSearch is available and configured.
+     */
+    protected function isAvailable(): bool
+    {
+        return $this->meilisearch !== null &&
+               class_exists(Client::class) &&
+               class_exists(Searchable::class) &&
+               config('scout.driver') === 'meilisearch';
     }
 }

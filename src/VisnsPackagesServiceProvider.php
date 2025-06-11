@@ -28,14 +28,29 @@ class VisnsPackagesServiceProvider extends ServiceProvider
      */
     public function register()
     {
-        // Register commands
-        $this->commands([
-            PublishMigrationsCommand::class,
-            MeilisearchConfigureCommand::class,
-            MeilisearchDebugCommand::class,
-            MeilisearchTestCommand::class,
-            MeilisearchSyncCommand::class,
-        ]);
+        // Register basic commands
+        $commands = [PublishMigrationsCommand::class];
+
+        // Only register MeiliSearch commands if dependencies are available
+        if ($this->meilisearchIsAvailable()) {
+            $commands = array_merge($commands, [
+                MeilisearchConfigureCommand::class,
+                MeilisearchDebugCommand::class,
+                MeilisearchTestCommand::class,
+                MeilisearchSyncCommand::class,
+            ]);
+
+            // Bind MeiliSearch client
+            $this->app->singleton(\MeiliSearch\Client::class, function ($app) {
+                $config = config('scout.meilisearch', []);
+                return new \MeiliSearch\Client(
+                    $config['host'] ?? 'http://localhost:7700',
+                    $config['key'] ?? null
+                );
+            });
+        }
+
+        $this->commands($commands);
 
         // Merge config
         $this->mergeConfigFrom(
@@ -373,5 +388,18 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                         });
                 });
         }
+    }
+
+    /**
+     * Check if MeiliSearch dependencies are available.
+     *
+     * @return bool
+     */
+    protected function meilisearchIsAvailable(): bool
+    {
+        return class_exists(\MeiliSearch\Client::class) &&
+               class_exists(\Laravel\Scout\Searchable::class) &&
+               config('scout.driver') === 'meilisearch' &&
+               !config('visns-packages.search.force_disable_meilisearch', false);
     }
 }

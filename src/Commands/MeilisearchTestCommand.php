@@ -17,9 +17,9 @@ class MeilisearchTestCommand extends Command
 
     protected $description = 'Test Meilisearch search functionality';
 
-    protected Client $meilisearch;
+    protected ?Client $meilisearch;
 
-    public function __construct(Client $meilisearch)
+    public function __construct(?Client $meilisearch = null)
     {
         parent::__construct();
         $this->meilisearch = $meilisearch;
@@ -27,6 +27,11 @@ class MeilisearchTestCommand extends Command
 
     public function handle(): int
     {
+        if (!$this->isAvailable()) {
+            $this->error('MeiliSearch is not configured. Please install laravel/scout and meilisearch/meilisearch-php packages and configure them.');
+            return 1;
+        }
+
         $query = $this->argument('query');
         $modelName = $this->option('model');
         $limit = (int) $this->option('limit');
@@ -231,5 +236,16 @@ class MeilisearchTestCommand extends Command
         } catch (\Exception $e) {
             $this->error("❌ Direct API test failed: " . $e->getMessage());
         }
+    }
+
+    /**
+     * Check if MeiliSearch is available and configured.
+     */
+    protected function isAvailable(): bool
+    {
+        return $this->meilisearch !== null &&
+               class_exists(Client::class) &&
+               class_exists(Searchable::class) &&
+               config('scout.driver') === 'meilisearch';
     }
 }
