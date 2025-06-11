@@ -3135,29 +3135,35 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 'filename' => $filename,
             ]);
 
-            // Set enhanced options for better PDF rendering
-            $options = [
-                'isHtml5ParserEnabled' => true,
-                'isRemoteEnabled' => true,
-                'isPhpEnabled' => true,
-                'defaultFont' => 'sans-serif',
-                'dpi' => 150,
-                'defaultPaperSize' => 'a4',
-                'defaultMediaType' => 'screen',
-                'defaultPaperOrientation' => 'landscape',
-                'isFontSubsettingEnabled' => true,
-                'isJavascriptEnabled' => true,
-                'debugKeepTemp' => true,
-                'debugCss' => true,
-            ];
+            try {
+                // Set enhanced options for better PDF rendering (only compatible options)
+                $options = [
+                    'isHtml5ParserEnabled' => true,
+                    'isRemoteEnabled' => true,
+                    'defaultFont' => 'sans-serif',
+                    'dpi' => 150,
+                ];
 
-            // Generate PDF using Dompdf with enhanced options
-            $pdf = PDF::loadHTML($html)
-                ->setOptions($options)
-                ->setPaper('a4', 'landscape');
+                Log::info('Creating PDF with options', ['options' => $options]);
 
-            // Return the PDF as a download
-            return $pdf->download($filename);
+                // Generate PDF using Dompdf with enhanced options
+                $pdf = Pdf::loadHTML($html)
+                    ->setOptions($options)
+                    ->setPaper('a4', 'landscape');
+
+                Log::info('PDF generated successfully, returning download');
+
+                // Return the PDF as a download
+                return $pdf->download($filename);
+            } catch (\Exception $pdfException) {
+                Log::error('PDF generation failed', [
+                    'message' => $pdfException->getMessage(),
+                    'trace' => $pdfException->getTraceAsString(),
+                    'html_length' => strlen($html),
+                ]);
+                
+                throw new \Exception('PDF generation failed: ' . $pdfException->getMessage(), 0, $pdfException);
+            }
         }
     }
 }
