@@ -1423,7 +1423,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             Log::info('Received query configuration', [
                 'queryConfig' => $queryConfig,
                 'limit' => $limit,
-                'offset' => $offset
+                'offset' => $offset,
             ]);
 
             // If report_id is provided, load the report configuration
@@ -1461,7 +1461,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             Log::info('Query execution result', [
                 'resultCount' => count($result['data']),
                 'total' => $result['total'],
-                'firstRowColumns' => count($result['data']) > 0 ? array_keys((array)$result['data'][0]) : []
+                'firstRowColumns' =>
+                    count($result['data']) > 0
+                        ? array_keys((array) $result['data'][0])
+                        : [],
             ]);
 
             return response()->json([
@@ -1503,7 +1506,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         Log::debug('Building query with configuration', [
             'queryConfig' => $queryConfig,
             'limit' => $limit,
-            'offset' => $offset
+            'offset' => $offset,
         ]);
 
         // Extract configuration
@@ -1547,15 +1550,20 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     $tableColumns[$table] = $columns;
                 } catch (\Exception $e) {
                     // Skip tables that cause errors
-                    Log::warning("Error getting columns for table {$table}: " . $e->getMessage());
+                    Log::warning(
+                        "Error getting columns for table {$table}: " .
+                            $e->getMessage()
+                    );
                 }
             }
 
             Log::debug('Retrieved table columns for relationship analysis', [
-                'tableCount' => count($tableColumns)
+                'tableCount' => count($tableColumns),
             ]);
         } catch (\Exception $e) {
-            Log::warning('Error retrieving database tables: ' . $e->getMessage());
+            Log::warning(
+                'Error retrieving database tables: ' . $e->getMessage()
+            );
         }
 
         // Analyze the joins to build a relationship map
@@ -1577,9 +1585,20 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             // For each target table, keep track of columns that might be foreign keys
             // and the tables they might reference
             if (preg_match('/_id$/', $targetColumn)) {
-                $possibleReferencedTable = preg_replace('/_id$/', 's', $targetColumn);
-                if (!in_array($possibleReferencedTable, $tableRelationships[$targetTable])) {
-                    $tableRelationships[$targetTable][] = $possibleReferencedTable;
+                $possibleReferencedTable = preg_replace(
+                    '/_id$/',
+                    's',
+                    $targetColumn
+                );
+                if (
+                    !in_array(
+                        $possibleReferencedTable,
+                        $tableRelationships[$targetTable]
+                    )
+                ) {
+                    $tableRelationships[
+                        $targetTable
+                    ][] = $possibleReferencedTable;
                 }
             }
 
@@ -1611,7 +1630,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
         // Log the relationship map for debugging
         Log::debug('Table relationship map', [
-            'relationships' => $tableRelationships
+            'relationships' => $tableRelationships,
         ]);
 
         // Second pass: Process the joins with the relationship information
@@ -1639,14 +1658,20 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
             // Check if the target table has columns that match our source column
             $targetHasSourceColumn = false;
-            if (isset($tableColumns[$targetTable]) && in_array($sourceColumn, $tableColumns[$targetTable])) {
+            if (
+                isset($tableColumns[$targetTable]) &&
+                in_array($sourceColumn, $tableColumns[$targetTable])
+            ) {
                 $targetHasSourceColumn = true;
             }
 
             // Check if any previously joined table has the target column
             $tableWithTargetColumn = null;
             foreach ($joinedTables as $joinedTable) {
-                if (isset($tableColumns[$joinedTable]) && in_array($targetColumn, $tableColumns[$joinedTable])) {
+                if (
+                    isset($tableColumns[$joinedTable]) &&
+                    in_array($targetColumn, $tableColumns[$joinedTable])
+                ) {
                     $tableWithTargetColumn = $joinedTable;
                     break;
                 }
@@ -1660,25 +1685,37 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 // If the previous join's target table is already joined, it might be our source
                 if (in_array($prevTargetTable, $joinedTables)) {
                     // Check if the column names make sense for a relationship
-                    if ($sourceColumn === 'id' && preg_match('/_id$/', $targetColumn)) {
+                    if (
+                        $sourceColumn === 'id' &&
+                        preg_match('/_id$/', $targetColumn)
+                    ) {
                         // This looks like a foreign key relationship from prev target to current target
                         $sourceTable = $prevTargetTable;
-                    }
-                    else if (preg_match('/_id$/', $sourceColumn) && $targetColumn === 'id') {
+                    } elseif (
+                        preg_match('/_id$/', $sourceColumn) &&
+                        $targetColumn === 'id'
+                    ) {
                         // This looks like a foreign key relationship from current target to prev target
                         $sourceTable = $prevTargetTable;
                     }
                     // If the previous target table has the source column, it's likely our source
-                    else if (isset($tableColumns[$prevTargetTable]) &&
-                             in_array($sourceColumn, $tableColumns[$prevTargetTable])) {
+                    elseif (
+                        isset($tableColumns[$prevTargetTable]) &&
+                        in_array($sourceColumn, $tableColumns[$prevTargetTable])
+                    ) {
                         $sourceTable = $prevTargetTable;
                     }
                     // If the target table has a column that references the previous target
-                    else if (isset($tableColumns[$targetTable])) {
+                    elseif (isset($tableColumns[$targetTable])) {
                         $prevTableSingular = rtrim($prevTargetTable, 's');
                         $potentialForeignKey = $prevTableSingular . '_id';
 
-                        if (in_array($potentialForeignKey, $tableColumns[$targetTable])) {
+                        if (
+                            in_array(
+                                $potentialForeignKey,
+                                $tableColumns[$targetTable]
+                            )
+                        ) {
                             $sourceTable = $prevTargetTable;
                         }
                     }
@@ -1699,7 +1736,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     if (in_array($singularForm, $joinedTables)) {
                         $sourceTable = $singularForm;
                         break;
-                    } else if (in_array($pluralForm, $joinedTables)) {
+                    } elseif (in_array($pluralForm, $joinedTables)) {
                         $sourceTable = $pluralForm;
                         break;
                     }
@@ -1707,7 +1744,11 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
                 // If the target column ends with _id, it might reference another table
                 if (preg_match('/_id$/', $targetColumn)) {
-                    $referencedTable = preg_replace('/_id$/', 's', $targetColumn);
+                    $referencedTable = preg_replace(
+                        '/_id$/',
+                        's',
+                        $targetColumn
+                    );
                     if (in_array($referencedTable, $joinedTables)) {
                         $sourceTable = $referencedTable;
                     }
@@ -1716,7 +1757,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
             // Case 3: If the source column is 'id' and target column ends with '_id'
             // This is likely a foreign key relationship
-            else if ($sourceColumn === 'id' && preg_match('/_id$/', $targetColumn)) {
+            elseif (
+                $sourceColumn === 'id' &&
+                preg_match('/_id$/', $targetColumn)
+            ) {
                 // The target column references the source table
                 $referencedTable = preg_replace('/_id$/', 's', $targetColumn);
 
@@ -1728,7 +1772,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
             // Case 4: If the target column is 'id' and source column ends with '_id'
             // This is likely a foreign key relationship in the reverse direction
-            else if ($targetColumn === 'id' && preg_match('/_id$/', $sourceColumn)) {
+            elseif (
+                $targetColumn === 'id' &&
+                preg_match('/_id$/', $sourceColumn)
+            ) {
                 // The source column references the target table
                 $referencedTable = preg_replace('/_id$/', 's', $sourceColumn);
 
@@ -1736,8 +1783,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 if ($referencedTable === $targetTable) {
                     // We need to find a table that has the source column
                     foreach ($joinedTables as $joinedTable) {
-                        if (isset($tableColumns[$joinedTable]) &&
-                            in_array($sourceColumn, $tableColumns[$joinedTable])) {
+                        if (
+                            isset($tableColumns[$joinedTable]) &&
+                            in_array($sourceColumn, $tableColumns[$joinedTable])
+                        ) {
                             $sourceTable = $joinedTable;
                             break;
                         }
@@ -1746,7 +1795,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             }
 
             // Case 5: If we found a table that has the target column
-            else if ($tableWithTargetColumn) {
+            elseif ($tableWithTargetColumn) {
                 $sourceTable = $tableWithTargetColumn;
             }
 
@@ -1754,7 +1803,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             $joinedTables[] = $targetTable;
 
             // Log the join for debugging
-            Log::info("Adding join", [
+            Log::info('Adding join', [
                 'index' => $index,
                 'joinType' => $joinType,
                 'sourceTable' => $sourceTable,
@@ -1764,7 +1813,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 'joinedTables' => $joinedTables,
                 'isPivotTable' => $isPivotTable ?? false,
                 'targetHasSourceColumn' => $targetHasSourceColumn ?? false,
-                'tableWithTargetColumn' => $tableWithTargetColumn
+                'tableWithTargetColumn' => $tableWithTargetColumn,
             ]);
 
             // Determine join method
@@ -1781,12 +1830,14 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 'sourceTable' => $sourceTable,
                 'targetTable' => $targetTable,
                 'sourceColumn' => $sourceColumn,
-                'targetColumn' => $targetColumn
+                'targetColumn' => $targetColumn,
             ]);
 
             switch ($joinType) {
                 case 'left':
-                    Log::info("Adding LEFT JOIN: $sourceTable.$sourceColumn = $targetTable.$targetColumn");
+                    Log::info(
+                        "Adding LEFT JOIN: $sourceTable.$sourceColumn = $targetTable.$targetColumn"
+                    );
                     $query->leftJoin(
                         $targetTable,
                         "$sourceTable.$sourceColumn",
@@ -1795,7 +1846,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     );
                     break;
                 case 'right':
-                    Log::info("Adding RIGHT JOIN: $sourceTable.$sourceColumn = $targetTable.$targetColumn");
+                    Log::info(
+                        "Adding RIGHT JOIN: $sourceTable.$sourceColumn = $targetTable.$targetColumn"
+                    );
                     $query->rightJoin(
                         $targetTable,
                         "$sourceTable.$sourceColumn",
@@ -1807,7 +1860,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     // Full outer join is not directly supported in all databases
                     // For MySQL, we can simulate it with a UNION of LEFT and RIGHT joins
                     // But for simplicity, we'll use LEFT JOIN as a fallback
-                    Log::info("Adding LEFT JOIN (as fallback for FULL JOIN): $sourceTable.$sourceColumn = $targetTable.$targetColumn");
+                    Log::info(
+                        "Adding LEFT JOIN (as fallback for FULL JOIN): $sourceTable.$sourceColumn = $targetTable.$targetColumn"
+                    );
                     $query->leftJoin(
                         $targetTable,
                         "$sourceTable.$sourceColumn",
@@ -1817,7 +1872,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     break;
                 case 'inner':
                 default:
-                    Log::info("Adding INNER JOIN: $sourceTable.$sourceColumn = $targetTable.$targetColumn");
+                    Log::info(
+                        "Adding INNER JOIN: $sourceTable.$sourceColumn = $targetTable.$targetColumn"
+                    );
                     $query->join(
                         $targetTable,
                         "$sourceTable.$sourceColumn",
@@ -1854,13 +1911,15 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         Log::info('Columns to select', [
             'selectColumns' => $selectColumns,
             'columnCount' => count($selectColumns),
-            'originalColumns' => $requestColumns
+            'originalColumns' => $requestColumns,
         ]);
 
         // Make sure we have at least one column to select
         if (empty($selectColumns)) {
             // If no columns were specified, select all columns from the main table
-            Log::warning('No columns specified, selecting all columns from main table');
+            Log::warning(
+                'No columns specified, selecting all columns from main table'
+            );
             $query->select("$mainTable.*");
         } else {
             // Select the specified columns directly on the existing query
@@ -1870,7 +1929,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             // Log the query after selecting columns
             Log::info('Query after selecting columns', [
                 'sql' => $query->toSql(),
-                'bindings' => $query->getBindings()
+                'bindings' => $query->getBindings(),
             ]);
         }
 
@@ -1885,7 +1944,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 }
             }
             Log::debug('Extracted filters from groups', [
-                'filterArray' => $filterArray
+                'filterArray' => $filterArray,
             ]);
         } else {
             // This is the old format - a simple array of filters
@@ -1895,7 +1954,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         // Log the filter structure for debugging
         Log::debug('Processing filters', [
             'filters' => $filters,
-            'filterArray' => $filterArray
+            'filterArray' => $filterArray,
         ]);
 
         // Add filters
@@ -1916,17 +1975,25 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             // Simple where clause
             if (strtolower($operator) === 'like') {
                 $query->where($columnRef, 'like', "%$value%");
-            } else if (strtolower($operator) === 'in' && is_array($value)) {
+            } elseif (strtolower($operator) === 'in' && is_array($value)) {
                 $query->whereIn($columnRef, $value);
-            } else if (strtolower($operator) === 'not in' && is_array($value)) {
+            } elseif (strtolower($operator) === 'not in' && is_array($value)) {
                 $query->whereNotIn($columnRef, $value);
-            } else if (strtolower($operator) === 'between' && is_array($value) && count($value) === 2) {
+            } elseif (
+                strtolower($operator) === 'between' &&
+                is_array($value) &&
+                count($value) === 2
+            ) {
                 $query->whereBetween($columnRef, $value);
-            } else if (strtolower($operator) === 'not between' && is_array($value) && count($value) === 2) {
+            } elseif (
+                strtolower($operator) === 'not between' &&
+                is_array($value) &&
+                count($value) === 2
+            ) {
                 $query->whereNotBetween($columnRef, $value);
-            } else if (strtolower($operator) === 'null') {
+            } elseif (strtolower($operator) === 'null') {
                 $query->whereNull($columnRef);
-            } else if (strtolower($operator) === 'not null') {
+            } elseif (strtolower($operator) === 'not null') {
                 $query->whereNotNull($columnRef);
             } else {
                 $query->where($columnRef, $operator, $value);
@@ -1977,18 +2044,23 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     $joinType = str_replace(' join', '', $joinType);
 
                     // Log the join type for debugging
-                    Log::info("Processing count query join with type: '$joinType'", [
-                        'originalJoinType' => $join['joinType'] ?? 'inner',
-                        'normalizedJoinType' => $joinType,
-                        'sourceTable' => $sourceTable,
-                        'targetTable' => $targetTable,
-                        'sourceColumn' => $sourceColumn,
-                        'targetColumn' => $targetColumn
-                    ]);
+                    Log::info(
+                        "Processing count query join with type: '$joinType'",
+                        [
+                            'originalJoinType' => $join['joinType'] ?? 'inner',
+                            'normalizedJoinType' => $joinType,
+                            'sourceTable' => $sourceTable,
+                            'targetTable' => $targetTable,
+                            'sourceColumn' => $sourceColumn,
+                            'targetColumn' => $targetColumn,
+                        ]
+                    );
 
                     switch ($joinType) {
                         case 'left':
-                            Log::info("Adding LEFT JOIN to count query: $sourceTable.$sourceColumn = $targetTable.$targetColumn");
+                            Log::info(
+                                "Adding LEFT JOIN to count query: $sourceTable.$sourceColumn = $targetTable.$targetColumn"
+                            );
                             $distinctCountQuery->leftJoin(
                                 $targetTable,
                                 "$sourceTable.$sourceColumn",
@@ -1997,7 +2069,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                             );
                             break;
                         case 'right':
-                            Log::info("Adding RIGHT JOIN to count query: $sourceTable.$sourceColumn = $targetTable.$targetColumn");
+                            Log::info(
+                                "Adding RIGHT JOIN to count query: $sourceTable.$sourceColumn = $targetTable.$targetColumn"
+                            );
                             $distinctCountQuery->rightJoin(
                                 $targetTable,
                                 "$sourceTable.$sourceColumn",
@@ -2009,7 +2083,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                             // Full outer join is not directly supported in all databases
                             // For MySQL, we can simulate it with a UNION of LEFT and RIGHT joins
                             // But for simplicity, we'll use LEFT JOIN as a fallback
-                            Log::info("Adding LEFT JOIN (as fallback for FULL JOIN) to count query: $sourceTable.$sourceColumn = $targetTable.$targetColumn");
+                            Log::info(
+                                "Adding LEFT JOIN (as fallback for FULL JOIN) to count query: $sourceTable.$sourceColumn = $targetTable.$targetColumn"
+                            );
                             $distinctCountQuery->leftJoin(
                                 $targetTable,
                                 "$sourceTable.$sourceColumn",
@@ -2019,7 +2095,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                             break;
                         case 'inner':
                         default:
-                            Log::info("Adding INNER JOIN to count query: $sourceTable.$sourceColumn = $targetTable.$targetColumn");
+                            Log::info(
+                                "Adding INNER JOIN to count query: $sourceTable.$sourceColumn = $targetTable.$targetColumn"
+                            );
                             $distinctCountQuery->join(
                                 $targetTable,
                                 "$sourceTable.$sourceColumn",
@@ -2037,8 +2115,14 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 if (isset($filters['groups'])) {
                     // This is the new format with groups
                     foreach ($filters['groups'] as $group) {
-                        if (isset($group['filters']) && is_array($group['filters'])) {
-                            $filterArray = array_merge($filterArray, $group['filters']);
+                        if (
+                            isset($group['filters']) &&
+                            is_array($group['filters'])
+                        ) {
+                            $filterArray = array_merge(
+                                $filterArray,
+                                $group['filters']
+                            );
                         }
                     }
                 } else {
@@ -2062,14 +2146,24 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
                     // Simple where clause for the count query
                     if (strtolower($operator) === 'like') {
-                        $distinctCountQuery->where($columnRef, 'like', "%$value%");
+                        $distinctCountQuery->where(
+                            $columnRef,
+                            'like',
+                            "%$value%"
+                        );
                     } else {
-                        $distinctCountQuery->where($columnRef, $operator, $value);
+                        $distinctCountQuery->where(
+                            $columnRef,
+                            $operator,
+                            $value
+                        );
                     }
                 }
 
                 // Select count distinct on the main table's primary key
-                $distinctCountQuery->select(DB::raw("COUNT(DISTINCT $mainTable.id) as total_count"));
+                $distinctCountQuery->select(
+                    DB::raw("COUNT(DISTINCT $mainTable.id) as total_count")
+                );
 
                 // Execute the count query
                 $countResult = $distinctCountQuery->first();
@@ -2077,22 +2171,28 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
                 Log::debug('Count query with joins', [
                     'total' => $total,
-                    'countSql' => $countQuery->toSql()
+                    'countSql' => $countQuery->toSql(),
                 ]);
             } catch (\Exception $e) {
                 // If there's an error with the distinct count, try a simpler approach
-                Log::warning('Error with distinct count, trying simpler approach: ' . $e->getMessage());
+                Log::warning(
+                    'Error with distinct count, trying simpler approach: ' .
+                        $e->getMessage()
+                );
 
                 try {
                     // Try a simpler approach - just count all rows and accept potential duplicates
                     $total = $countQuery->count();
 
                     Log::info('Used simple count as fallback', [
-                        'total' => $total
+                        'total' => $total,
                     ]);
                 } catch (\Exception $e2) {
                     // If even the simple count fails, just return a default value
-                    Log::error('Error with simple count, using default value: ' . $e2->getMessage());
+                    Log::error(
+                        'Error with simple count, using default value: ' .
+                            $e2->getMessage()
+                    );
                     $total = 0;
                 }
             }
@@ -2116,7 +2216,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
         // Log the final SQL query with all bindings replaced
         Log::info('Final SQL query with bindings replaced', [
-            'sql' => $sql
+            'sql' => $sql,
         ]);
 
         // Log the final SQL query for debugging
@@ -2126,7 +2226,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             'joins' => $joins,
             'selectColumns' => $selectColumns,
             'mainTable' => $mainTable,
-            'columnCount' => count($selectColumns)
+            'columnCount' => count($selectColumns),
         ]);
 
         // Execute the query
@@ -2135,14 +2235,15 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         // Log the results for debugging
         Log::info('Query results', [
             'resultCount' => count($results),
-            'firstRowColumns' => count($results) > 0 ? array_keys((array)$results[0]) : [],
+            'firstRowColumns' =>
+                count($results) > 0 ? array_keys((array) $results[0]) : [],
             'selectedColumns' => $selectColumns,
-            'actualQuery' => $query->toSql()
+            'actualQuery' => $query->toSql(),
         ]);
 
         // If we have results but the columns don't match what we expected, log a warning
         if (count($results) > 0) {
-            $actualColumns = array_keys((array)$results[0]);
+            $actualColumns = array_keys((array) $results[0]);
             $expectedColumnCount = count($selectColumns);
             $actualColumnCount = count($actualColumns);
 
@@ -2151,7 +2252,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     'expectedColumnCount' => $expectedColumnCount,
                     'actualColumnCount' => $actualColumnCount,
                     'expectedColumns' => $selectColumns,
-                    'actualColumns' => $actualColumns
+                    'actualColumns' => $actualColumns,
                 ]);
             }
         }
@@ -2246,8 +2347,14 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
             // Check PDF row limits and memory requirements
             $rowCount = count($result['data']);
-            $pdfMaxRows = config('visns-packages.report_export.pdf_max_rows', 2000);
-            $autoSwitchToCsv = config('visns-packages.report_export.auto_switch_to_csv', false);
+            $pdfMaxRows = config(
+                'visns-packages.report_export.pdf_max_rows',
+                2000
+            );
+            $autoSwitchToCsv = config(
+                'visns-packages.report_export.auto_switch_to_csv',
+                false
+            );
 
             Log::info('Dataset size validation', [
                 'row_count' => $rowCount,
@@ -2309,7 +2416,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
             // Check if this is a memory exhaustion error
             $errorMessage = $e->getMessage();
-            if (strpos($errorMessage, 'memory') !== false || strpos($errorMessage, 'Allowed memory size') !== false) {
+            if (
+                strpos($errorMessage, 'memory') !== false ||
+                strpos($errorMessage, 'Allowed memory size') !== false
+            ) {
                 Log::error('Memory exhaustion detected during export', [
                     'memory_limit' => ini_get('memory_limit'),
                     'memory_usage' => memory_get_usage(true),
@@ -2319,7 +2429,8 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 return response()->json(
                     [
                         'success' => false,
-                        'message' => 'Export failed due to memory limitations. The dataset is too large for the requested format. Please try using Excel or CSV format, or reduce the number of rows in your query.',
+                        'message' =>
+                            'Export failed due to memory limitations. The dataset is too large for the requested format. Please try using Excel or CSV format, or reduce the number of rows in your query.',
                         'error_code' => 'MEMORY_EXHAUSTION',
                         'details' => [
                             'suggested_formats' => ['xlsx', 'csv'],
@@ -2620,8 +2731,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
         return implode("\n", $result);
     }
-
-
 
     /**
      * Format a value for display based on its type and field name
@@ -3110,7 +3219,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         } else {
             // Set memory limit for PDF generation
             $originalMemoryLimit = ini_get('memory_limit');
-            $pdfMemoryLimit = config('visns-packages.report_export.pdf_memory_limit', '1G');
+            $pdfMemoryLimit = config(
+                'visns-packages.report_export.pdf_memory_limit',
+                '1G'
+            );
             ini_set('memory_limit', $pdfMemoryLimit);
 
             Log::info('PDF generation started', [
@@ -3121,8 +3233,12 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             ]);
 
             // Check if we should use simplified styling
-            $simplifiedStylingThreshold = config('visns-packages.report_export.simplified_styling_threshold', 1000);
-            $useSimplifiedStyling = count($dataArray) > $simplifiedStylingThreshold;
+            $simplifiedStylingThreshold = config(
+                'visns-packages.report_export.simplified_styling_threshold',
+                1000
+            );
+            $useSimplifiedStyling =
+                count($dataArray) > $simplifiedStylingThreshold;
 
             Log::info('PDF styling decision', [
                 'use_simplified_styling' => $useSimplifiedStyling,
@@ -3131,7 +3247,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             ]);
 
             // Generate PDF using Dompdf with memory-optimized styling
-            Log::info('Generating PDF file using Dompdf with optimized styling');
+            Log::info(
+                'Generating PDF file using Dompdf with optimized styling'
+            );
 
             // Create HTML content with conditional styling
             if ($useSimplifiedStyling) {
@@ -3230,7 +3348,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                         // Simplified value processing for large datasets
                         if (is_array($value)) {
                             $value = json_encode($value);
-                        } elseif (is_string($value) && $this->isJsonString($value)) {
+                        } elseif (
+                            is_string($value) &&
+                            $this->isJsonString($value)
+                        ) {
                             // Keep JSON as-is for simplified processing
                             $value = htmlspecialchars($value);
                         } else {
@@ -3255,9 +3376,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     $html .= '<td>' . $value . '</td>';
                 }
                 $html .= '</tr>';
-                
+
                 $processedRows++;
-                
+
                 // Log progress for large datasets
                 if ($processedRows % 500 === 0) {
                     Log::info('PDF row processing progress', [
@@ -3322,7 +3443,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             } catch (\Exception $pdfException) {
                 // Reset memory limit on error
                 ini_set('memory_limit', $originalMemoryLimit);
-                
+
                 Log::error('PDF generation failed', [
                     'message' => $pdfException->getMessage(),
                     'trace' => $pdfException->getTraceAsString(),
@@ -3331,20 +3452,30 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     'memory_peak' => memory_get_peak_usage(true),
                     'row_count' => count($dataArray),
                 ]);
-                
+
                 // Check if this is a memory-related error and provide a more specific message
-                if (strpos($pdfException->getMessage(), 'memory') !== false || 
-                    strpos($pdfException->getMessage(), 'Allowed memory size') !== false) {
+                if (
+                    strpos($pdfException->getMessage(), 'memory') !== false ||
+                    strpos(
+                        $pdfException->getMessage(),
+                        'Allowed memory size'
+                    ) !== false
+                ) {
                     throw new \Exception(
-                        'PDF generation failed due to memory limitations. The dataset contains ' . 
-                        count($dataArray) . ' rows which may be too large for PDF export. ' .
-                        'Please try using Excel or CSV format instead.',
+                        'PDF generation failed due to memory limitations. The dataset contains ' .
+                            count($dataArray) .
+                            ' rows which may be too large for PDF export. ' .
+                            'Please try using Excel or CSV format instead.',
                         0,
                         $pdfException
                     );
                 }
-                
-                throw new \Exception('PDF generation failed: ' . $pdfException->getMessage(), 0, $pdfException);
+
+                throw new \Exception(
+                    'PDF generation failed: ' . $pdfException->getMessage(),
+                    0,
+                    $pdfException
+                );
             }
         }
     }
