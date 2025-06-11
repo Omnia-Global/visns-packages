@@ -1016,6 +1016,28 @@ php artisan meilisearch:test "John" --model=Customer
 php artisan meilisearch:test "active" --filters="status = active" --limit=20
 ```
 
+**Sync Models with Meilisearch**
+```bash
+# Sync all searchable models
+php artisan meilisearch:sync
+
+# Sync specific model
+php artisan meilisearch:sync --model=Customer
+
+# Flush index before syncing (removes all existing data)
+php artisan meilisearch:sync --flush
+
+# Sync with custom batch size
+php artisan meilisearch:sync --chunk=50
+
+# Skip confirmation prompt
+php artisan meilisearch:sync --force
+
+# Sync models from custom namespace or path
+php artisan meilisearch:sync --namespace="MyPackage\Models"
+php artisan meilisearch:sync --path="/path/to/models"
+```
+
 These commands are particularly useful during development and deployment to ensure your Meilisearch integration is working correctly and to troubleshoot search issues.
 
 #### Search Usage

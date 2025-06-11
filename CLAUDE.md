@@ -48,7 +48,7 @@ This is `visns-packages`, a comprehensive Laravel package that provides enhanced
 
 ### Meilisearch Commands
 
-The package includes three helpful Meilisearch commands for debugging and configuration:
+The package includes four helpful Meilisearch commands for debugging, configuration, and data synchronization:
 
 ```bash
 # Configure Meilisearch index settings
@@ -64,6 +64,13 @@ php artisan meilisearch:debug --model=Customer              # Debug specific mod
 php artisan meilisearch:test "search query"                 # Test search (defaults to User model)
 php artisan meilisearch:test "John" --model=Customer        # Test search on specific model
 php artisan meilisearch:test "active" --filters="status = active" --limit=20
+
+# Sync models with Meilisearch
+php artisan meilisearch:sync                                # Sync all searchable models
+php artisan meilisearch:sync --model=Customer               # Sync specific model
+php artisan meilisearch:sync --flush --force                # Flush and sync without confirmation
+php artisan meilisearch:sync --chunk=50                     # Custom batch size
+php artisan meilisearch:sync --namespace="MyPackage\Models" # Sync from custom namespace
 ```
 
 ### Testing

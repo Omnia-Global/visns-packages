@@ -133,6 +133,25 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Model Discovery Configuration
+    |--------------------------------------------------------------------------
+    |
+    | These options control how the package discovers models for operations
+    | like Meilisearch syncing and debugging.
+    |
+    */
+    'model_paths' => [
+        // Additional paths to search for model files
+        // Example: base_path('packages/my-package/src/Models'),
+    ],
+
+    'model_namespaces' => [
+        // Additional namespaces to search for models
+        // Example: 'MyPackage\\Models\\',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Search Configuration
     |--------------------------------------------------------------------------
     |

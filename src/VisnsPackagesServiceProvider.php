@@ -8,6 +8,7 @@ use Visnsstudio\VisnsPackages\Commands\PublishMigrationsCommand;
 use Visnsstudio\VisnsPackages\Commands\MeilisearchConfigureCommand;
 use Visnsstudio\VisnsPackages\Commands\MeilisearchDebugCommand;
 use Visnsstudio\VisnsPackages\Commands\MeilisearchTestCommand;
+use Visnsstudio\VisnsPackages\Commands\MeilisearchSyncCommand;
 use Visnsstudio\VisnsPackages\Controllers\AuthController;
 use Visnsstudio\VisnsPackages\Controllers\UserController;
 use Visnsstudio\VisnsPackages\Controllers\FileController;
@@ -33,6 +34,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             MeilisearchConfigureCommand::class,
             MeilisearchDebugCommand::class,
             MeilisearchTestCommand::class,
+            MeilisearchSyncCommand::class,
         ]);
 
         // Merge config
