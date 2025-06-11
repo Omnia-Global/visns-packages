@@ -2244,6 +2244,49 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 );
             }
 
+            // Check PDF row limits and memory requirements
+            $rowCount = count($result['data']);
+            $pdfMaxRows = config('visns-packages.report_export.pdf_max_rows', 2000);
+            $autoSwitchToCsv = config('visns-packages.report_export.auto_switch_to_csv', false);
+
+            Log::info('Dataset size validation', [
+                'row_count' => $rowCount,
+                'format' => $format,
+                'pdf_max_rows' => $pdfMaxRows,
+                'auto_switch_to_csv' => $autoSwitchToCsv,
+            ]);
+
+            // Handle PDF row limits
+            if ($format === 'pdf' && $pdfMaxRows && $rowCount > $pdfMaxRows) {
+                if ($autoSwitchToCsv) {
+                    Log::info('Auto-switching to CSV due to large dataset', [
+                        'original_format' => $format,
+                        'row_count' => $rowCount,
+                        'pdf_max_rows' => $pdfMaxRows,
+                    ]);
+                    $format = 'csv';
+                    $filename = str_replace('.pdf', '.csv', $filename);
+                } else {
+                    Log::warning('Dataset too large for PDF export', [
+                        'row_count' => $rowCount,
+                        'pdf_max_rows' => $pdfMaxRows,
+                    ]);
+                    return response()->json(
+                        [
+                            'success' => false,
+                            'message' => "Dataset too large for PDF export. The dataset contains {$rowCount} rows, but PDF export is limited to {$pdfMaxRows} rows to prevent memory issues. Please use Excel or CSV format for large datasets, or reduce your query results.",
+                            'error_code' => 'PDF_ROW_LIMIT_EXCEEDED',
+                            'details' => [
+                                'row_count' => $rowCount,
+                                'pdf_max_rows' => $pdfMaxRows,
+                                'suggested_formats' => ['xlsx', 'csv'],
+                            ],
+                        ],
+                        413
+                    );
+                }
+            }
+
             // Format the date for the filename
             $date = date('Ymd');
             $filename = "{$date}_{$reportName}.{$format}";
@@ -2263,6 +2306,29 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         } catch (\Exception $e) {
             Log::error('Error exporting report: ' . $e->getMessage());
             Log::error('Stack trace: ' . $e->getTraceAsString());
+
+            // Check if this is a memory exhaustion error
+            $errorMessage = $e->getMessage();
+            if (strpos($errorMessage, 'memory') !== false || strpos($errorMessage, 'Allowed memory size') !== false) {
+                Log::error('Memory exhaustion detected during export', [
+                    'memory_limit' => ini_get('memory_limit'),
+                    'memory_usage' => memory_get_usage(true),
+                    'memory_peak' => memory_get_peak_usage(true),
+                ]);
+
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' => 'Export failed due to memory limitations. The dataset is too large for the requested format. Please try using Excel or CSV format, or reduce the number of rows in your query.',
+                        'error_code' => 'MEMORY_EXHAUSTION',
+                        'details' => [
+                            'suggested_formats' => ['xlsx', 'csv'],
+                            'memory_limit' => ini_get('memory_limit'),
+                        ],
+                    ],
+                    507
+                );
+            }
 
             return response()->json(
                 [
@@ -3042,50 +3108,100 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 ])
                 ->deleteFileAfterSend(true);
         } else {
-            // Generate PDF using Dompdf with enhanced styling
-            Log::info('Generating PDF file using Dompdf with enhanced styling');
+            // Set memory limit for PDF generation
+            $originalMemoryLimit = ini_get('memory_limit');
+            $pdfMemoryLimit = config('visns-packages.report_export.pdf_memory_limit', '1G');
+            ini_set('memory_limit', $pdfMemoryLimit);
 
-            // Create HTML content
-            $html =
-                '<!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="UTF-8">
-                <title>' .
-                htmlspecialchars(str_replace('.pdf', '', $filename)) .
-                '</title>
-                <style>
-                    body { font-family: Arial, sans-serif; margin: 20px; }
-                    h1 { text-align: center; margin-bottom: 20px; }
-                    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-                    th { background-color: #f2f2f2; font-weight: bold; text-align: left; }
-                    th, td { border: 1px solid #ddd; padding: 8px; }
-                    tr:nth-child(even) { background-color: #f9f9f9; }
+            Log::info('PDF generation started', [
+                'original_memory_limit' => $originalMemoryLimit,
+                'pdf_memory_limit' => $pdfMemoryLimit,
+                'memory_usage_before' => memory_get_usage(true),
+                'row_count' => count($dataArray),
+            ]);
 
-                    /* JSON Styling */
-                    .json-data { font-family: Arial, sans-serif; font-size: 12px; line-height: 1.4; border-left: 3px solid #e0e0e0; padding-left: 10px; margin-bottom: 8px; }
-                    .json-data.project-details { border-left: 3px solid #4a86e8; background-color: #f8f9fa; padding: 8px 10px; }
-                    .json-item { margin-bottom: 5px; }
-                    .json-key { font-weight: bold; color: #333; }
-                    .json-value { color: #0066cc; }
+            // Check if we should use simplified styling
+            $simplifiedStylingThreshold = config('visns-packages.report_export.simplified_styling_threshold', 1000);
+            $useSimplifiedStyling = count($dataArray) > $simplifiedStylingThreshold;
 
-                    /* Print styles */
-                    @media print {
-                        body { font-size: 10pt; }
-                        h1 { font-size: 14pt; }
-                        table { page-break-inside: auto; }
-                        tr { page-break-inside: avoid; page-break-after: auto; }
-                        td { word-break: break-word; }
-                    }
-                </style>
-            </head>
-            <body>
-                <h1>' .
-                htmlspecialchars(str_replace('.pdf', '', $filename)) .
-                '</h1>
-                <table>
-                    <thead>
-                        <tr>';
+            Log::info('PDF styling decision', [
+                'use_simplified_styling' => $useSimplifiedStyling,
+                'threshold' => $simplifiedStylingThreshold,
+                'row_count' => count($dataArray),
+            ]);
+
+            // Generate PDF using Dompdf with memory-optimized styling
+            Log::info('Generating PDF file using Dompdf with optimized styling');
+
+            // Create HTML content with conditional styling
+            if ($useSimplifiedStyling) {
+                // Simplified styling for large datasets
+                $html =
+                    '<!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>' .
+                    htmlspecialchars(str_replace('.pdf', '', $filename)) .
+                    '</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; margin: 10px; font-size: 8pt; }
+                        h1 { text-align: center; margin-bottom: 10px; font-size: 12pt; }
+                        table { width: 100%; border-collapse: collapse; }
+                        th, td { border: 1px solid #000; padding: 2px; font-size: 7pt; }
+                        th { background-color: #ccc; font-weight: bold; }
+                    </style>
+                </head>
+                <body>
+                    <h1>' .
+                    htmlspecialchars(str_replace('.pdf', '', $filename)) .
+                    '</h1>
+                    <table>
+                        <thead>
+                            <tr>';
+            } else {
+                // Enhanced styling for smaller datasets
+                $html =
+                    '<!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>' .
+                    htmlspecialchars(str_replace('.pdf', '', $filename)) .
+                    '</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; margin: 20px; }
+                        h1 { text-align: center; margin-bottom: 20px; }
+                        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+                        th { background-color: #f2f2f2; font-weight: bold; text-align: left; }
+                        th, td { border: 1px solid #ddd; padding: 8px; }
+                        tr:nth-child(even) { background-color: #f9f9f9; }
+
+                        /* JSON Styling */
+                        .json-data { font-family: Arial, sans-serif; font-size: 12px; line-height: 1.4; border-left: 3px solid #e0e0e0; padding-left: 10px; margin-bottom: 8px; }
+                        .json-data.project-details { border-left: 3px solid #4a86e8; background-color: #f8f9fa; padding: 8px 10px; }
+                        .json-item { margin-bottom: 5px; }
+                        .json-key { font-weight: bold; color: #333; }
+                        .json-value { color: #0066cc; }
+
+                        /* Print styles */
+                        @media print {
+                            body { font-size: 10pt; }
+                            h1 { font-size: 14pt; }
+                            table { page-break-inside: auto; }
+                            tr { page-break-inside: avoid; page-break-after: auto; }
+                            td { word-break: break-word; }
+                        }
+                    </style>
+                </head>
+                <body>
+                    <h1>' .
+                    htmlspecialchars(str_replace('.pdf', '', $filename)) .
+                    '</h1>
+                    <table>
+                        <thead>
+                            <tr>';
+            }
 
             // Add table headers
             foreach ($headers as $header) {
@@ -3099,7 +3215,8 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     </thead>
                     <tbody>';
 
-            // Add table rows
+            // Add table rows with memory-efficient processing
+            $processedRows = 0;
             foreach ($dataArray as $dataRow) {
                 $html .= '<tr>';
                 foreach ($dataRow as $key => $value) {
@@ -3108,21 +3225,47 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                         $value = '';
                     }
 
-                    // Format JSON values or arrays for better readability
-                    if (is_array($value)) {
-                        $value = $this->formatJsonForDisplay($value);
-                    } elseif (
-                        is_string($value) &&
-                        $this->isJsonString($value)
-                    ) {
-                        $value = $this->formatJsonForDisplay(
-                            json_decode($value, true)
-                        );
+                    // For large datasets, simplify JSON processing to save memory
+                    if ($useSimplifiedStyling) {
+                        // Simplified value processing for large datasets
+                        if (is_array($value)) {
+                            $value = json_encode($value);
+                        } elseif (is_string($value) && $this->isJsonString($value)) {
+                            // Keep JSON as-is for simplified processing
+                            $value = htmlspecialchars($value);
+                        } else {
+                            $value = htmlspecialchars($value);
+                        }
+                    } else {
+                        // Enhanced formatting for smaller datasets
+                        if (is_array($value)) {
+                            $value = $this->formatJsonForDisplay($value);
+                        } elseif (
+                            is_string($value) &&
+                            $this->isJsonString($value)
+                        ) {
+                            $value = $this->formatJsonForDisplay(
+                                json_decode($value, true)
+                            );
+                        } else {
+                            $value = htmlspecialchars($value);
+                        }
                     }
 
                     $html .= '<td>' . $value . '</td>';
                 }
                 $html .= '</tr>';
+                
+                $processedRows++;
+                
+                // Log progress for large datasets
+                if ($processedRows % 500 === 0) {
+                    Log::info('PDF row processing progress', [
+                        'processed_rows' => $processedRows,
+                        'total_rows' => count($dataArray),
+                        'memory_usage' => memory_get_usage(true),
+                    ]);
+                }
             }
 
             $html .= '</tbody>
@@ -3133,34 +3276,73 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             Log::info('HTML content generated for PDF', [
                 'content_length' => strlen($html),
                 'filename' => $filename,
+                'memory_usage_before_pdf' => memory_get_usage(true),
             ]);
 
             try {
-                // Set enhanced options for better PDF rendering (only compatible options)
-                $options = [
-                    'isHtml5ParserEnabled' => true,
-                    'isRemoteEnabled' => true,
-                    'defaultFont' => 'sans-serif',
-                    'dpi' => 150,
-                ];
+                // Set options based on dataset size
+                if ($useSimplifiedStyling) {
+                    // Simplified options for large datasets
+                    $options = [
+                        'isHtml5ParserEnabled' => false,
+                        'isRemoteEnabled' => false,
+                        'defaultFont' => 'sans-serif',
+                        'dpi' => 96,
+                    ];
+                } else {
+                    // Enhanced options for smaller datasets
+                    $options = [
+                        'isHtml5ParserEnabled' => true,
+                        'isRemoteEnabled' => true,
+                        'defaultFont' => 'sans-serif',
+                        'dpi' => 150,
+                    ];
+                }
 
-                Log::info('Creating PDF with options', ['options' => $options]);
+                Log::info('Creating PDF with options', [
+                    'options' => $options,
+                    'use_simplified_styling' => $useSimplifiedStyling,
+                ]);
 
-                // Generate PDF using Dompdf with enhanced options
+                // Generate PDF using Dompdf with memory-optimized options
                 $pdf = Pdf::loadHTML($html)
                     ->setOptions($options)
                     ->setPaper('a4', 'landscape');
 
-                Log::info('PDF generated successfully, returning download');
+                Log::info('PDF generated successfully', [
+                    'memory_usage_after_pdf' => memory_get_usage(true),
+                    'memory_peak' => memory_get_peak_usage(true),
+                ]);
+
+                // Reset memory limit to original value
+                ini_set('memory_limit', $originalMemoryLimit);
 
                 // Return the PDF as a download
                 return $pdf->download($filename);
             } catch (\Exception $pdfException) {
+                // Reset memory limit on error
+                ini_set('memory_limit', $originalMemoryLimit);
+                
                 Log::error('PDF generation failed', [
                     'message' => $pdfException->getMessage(),
                     'trace' => $pdfException->getTraceAsString(),
                     'html_length' => strlen($html),
+                    'memory_usage' => memory_get_usage(true),
+                    'memory_peak' => memory_get_peak_usage(true),
+                    'row_count' => count($dataArray),
                 ]);
+                
+                // Check if this is a memory-related error and provide a more specific message
+                if (strpos($pdfException->getMessage(), 'memory') !== false || 
+                    strpos($pdfException->getMessage(), 'Allowed memory size') !== false) {
+                    throw new \Exception(
+                        'PDF generation failed due to memory limitations. The dataset contains ' . 
+                        count($dataArray) . ' rows which may be too large for PDF export. ' .
+                        'Please try using Excel or CSV format instead.',
+                        0,
+                        $pdfException
+                    );
+                }
                 
                 throw new \Exception('PDF generation failed: ' . $pdfException->getMessage(), 0, $pdfException);
             }

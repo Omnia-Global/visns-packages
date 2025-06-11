@@ -171,4 +171,59 @@ return [
         */
         'force_disable_meilisearch' => env('VISNS_DISABLE_MEILISEARCH', false),
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Report Export Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Configuration options for report export functionality, including PDF
+    | generation settings and memory management.
+    |
+    */
+    'report_export' => [
+        /*
+        |--------------------------------------------------------------------------
+        | PDF Row Limits
+        |--------------------------------------------------------------------------
+        |
+        | Maximum number of rows allowed for PDF export. Large datasets can cause
+        | memory exhaustion in PDF generation. Set to null to disable the limit.
+        |
+        */
+        'pdf_max_rows' => env('VISNS_PDF_MAX_ROWS', 2000),
+
+        /*
+        |--------------------------------------------------------------------------
+        | Memory Limit for PDF Generation
+        |--------------------------------------------------------------------------
+        |
+        | Memory limit to set during PDF generation. This helps handle large
+        | datasets without running out of memory.
+        |
+        */
+        'pdf_memory_limit' => env('VISNS_PDF_MEMORY_LIMIT', '1G'),
+
+        /*
+        |--------------------------------------------------------------------------
+        | Auto Switch to CSV
+        |--------------------------------------------------------------------------
+        |
+        | Automatically switch to CSV format when the dataset exceeds PDF limits.
+        | If false, an error will be returned instead.
+        |
+        */
+        'auto_switch_to_csv' => env('VISNS_AUTO_SWITCH_TO_CSV', false),
+
+        /*
+        |--------------------------------------------------------------------------
+        | Simplified Styling Threshold
+        |--------------------------------------------------------------------------
+        |
+        | Row count threshold above which simplified styling is used for PDF
+        | generation to reduce memory usage.
+        |
+        */
+        'simplified_styling_threshold' => env('VISNS_SIMPLIFIED_STYLING_THRESHOLD', 1000),
+    ],
 ];
