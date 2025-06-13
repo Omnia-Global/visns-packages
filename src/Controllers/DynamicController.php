@@ -23,6 +23,7 @@ class DynamicController extends \App\Http\Controllers\Controller
 {
     protected $model;
     protected $folder;
+    protected $original;
 
     /**
      * Validate the request data and return validated data.
