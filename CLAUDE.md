@@ -140,6 +140,31 @@ Configure dynamic relationships in `config/visns-packages.php`:
 ],
 ```
 
+### Dropdown Field Configuration
+
+Configure intelligent field detection for dropdown functionality:
+
+```php
+'dropdown_fields' => [
+    'label_fields' => ['label', 'name', 'title', 'full_name', 'display_name'],
+    'name_combinations' => [
+        ['title', 'firstname', 'lastname'],
+        ['firstname', 'lastname'],
+        ['first_name', 'last_name'],
+        ['firstname', 'surname'],
+    ],
+    'id_fields' => ['id', 'uuid', 'slug', 'code'],
+    'sort_fields' => ['label', 'name', 'title', 'firstname', 'created_at'],
+],
+```
+
+The dropdown function now automatically:
+- Detects the best ID field (id, uuid, slug, code)
+- Finds available label fields (label, name, title, etc.)
+- Concatenates name components (firstname + lastname, etc.)
+- Intelligently sorts by the most appropriate field
+- Caches field detection for performance
+
 ### Search Configuration
 
 Configure Meilisearch integration:

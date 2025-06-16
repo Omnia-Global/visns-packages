@@ -155,6 +155,184 @@ class DynamicController extends \App\Http\Controllers\Controller
         ]);
     }
 
+    /**
+     * Intelligently detect available fields for dropdown functionality
+     *
+     * @return array
+     */
+    private function detectAvailableFields()
+    {
+        $cacheKey = 'dropdown_fields_' . get_class($this->model);
+
+        return Cache::remember($cacheKey, 3600, function () {
+            $tableName = $this->model->getTable();
+            $columns = Schema::getColumnListing($tableName);
+
+            $config = config('visns-packages.dropdown_fields', []);
+
+            $detectedFields = [
+                'id' => $this->detectIdField(
+                    $columns,
+                    $config['id_fields'] ?? ['id', 'uuid', 'slug', 'code']
+                ),
+                'label' => $this->detectLabelField($columns, $config),
+                'sort' => $this->detectSortField(
+                    $columns,
+                    $config['sort_fields'] ?? [
+                        'label',
+                        'name',
+                        'title',
+                        'firstname',
+                        'created_at',
+                    ]
+                ),
+                'name_combination' => $this->detectNameCombination(
+                    $columns,
+                    $config['name_combinations'] ?? []
+                ),
+                'available_columns' => $columns,
+            ];
+
+            return $detectedFields;
+        });
+    }
+
+    /**
+     * Detect the best ID field for the model
+     *
+     * @param array $columns
+     * @param array $idFields
+     * @return string
+     */
+    private function detectIdField($columns, $idFields)
+    {
+        foreach ($idFields as $field) {
+            if (in_array($field, $columns)) {
+                return $field;
+            }
+        }
+
+        return $columns[0] ?? 'id'; // fallback to first column or 'id'
+    }
+
+    /**
+     * Detect the best single label field for the model
+     *
+     * @param array $columns
+     * @param array $config
+     * @return string|null
+     */
+    private function detectLabelField($columns, $config)
+    {
+        $labelFields = $config['label_fields'] ?? [
+            'label',
+            'name',
+            'title',
+            'full_name',
+            'display_name',
+        ];
+
+        foreach ($labelFields as $field) {
+            if (in_array($field, $columns)) {
+                return $field;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Detect the best name field combination for concatenation
+     *
+     * @param array $columns
+     * @param array $combinations
+     * @return array|null
+     */
+    private function detectNameCombination($columns, $combinations)
+    {
+        foreach ($combinations as $combination) {
+            $allFieldsExist = true;
+            foreach ($combination as $field) {
+                if (!in_array($field, $columns)) {
+                    $allFieldsExist = false;
+                    break;
+                }
+            }
+
+            if ($allFieldsExist) {
+                return $combination;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Detect the best field for sorting
+     *
+     * @param array $columns
+     * @param array $sortFields
+     * @return string
+     */
+    private function detectSortField($columns, $sortFields)
+    {
+        foreach ($sortFields as $field) {
+            if (in_array($field, $columns)) {
+                return $field;
+            }
+        }
+
+        return $columns[0] ?? 'id'; // fallback to first column or 'id'
+    }
+
+    /**
+     * Build a smart label for a model instance
+     *
+     * @param mixed $item
+     * @param array $detectedFields
+     * @return string
+     */
+    private function buildSmartLabel($item, $detectedFields)
+    {
+        // Try single label field first
+        if (
+            $detectedFields['label'] &&
+            !empty($item->{$detectedFields['label']})
+        ) {
+            return trim($item->{$detectedFields['label']});
+        }
+
+        // Try name combination
+        if ($detectedFields['name_combination']) {
+            $nameParts = [];
+            foreach ($detectedFields['name_combination'] as $field) {
+                $value = $item->{$field} ?? '';
+                if (!empty($value)) {
+                    $nameParts[] = trim($value);
+                }
+            }
+
+            if (!empty($nameParts)) {
+                return implode(' ', $nameParts);
+            }
+        }
+
+        // Fallback to any text-like field
+        $textFields = ['description', 'title', 'subject', 'code', 'reference'];
+        foreach ($textFields as $field) {
+            if (
+                in_array($field, $detectedFields['available_columns']) &&
+                !empty($item->{$field})
+            ) {
+                return trim($item->{$field});
+            }
+        }
+
+        // Final fallback - use ID or first available field
+        $idField = $detectedFields['id'];
+        return $item->{$idField} ?? 'N/A';
+    }
+
     private function getSortParams(Request $request, $fields)
     {
         $sortField =
@@ -162,9 +340,10 @@ class DynamicController extends \App\Http\Controllers\Controller
             ($request->input('sortBy') ?? ($fields[1] ?? null));
         $sort = $request->input('order') ?? ($request->input('sort') ?? 'asc');
 
-        // Default to "label" if no sortField is specified in the request or fields
+        // Use intelligent sort field detection if no sort field specified
         if (is_null($sortField)) {
-            $sortField = 'label';
+            $detectedFields = $this->detectAvailableFields();
+            $sortField = $detectedFields['sort'];
         }
 
         return [$sortField, $sort];
@@ -174,23 +353,26 @@ class DynamicController extends \App\Http\Controllers\Controller
     {
         $data = [];
 
-        // Determine the sorting field
-        $sortField = 'label'; // default sorting field
-        $sort = 'asc';
-        $fields = $request->input('fields', ['id', 'label']);
+        // Detect available fields intelligently
+        $detectedFields = $this->detectAvailableFields();
 
-        // Get sorting parameters
+        // Use intelligent field detection or fall back to provided fields
+        $fields = $request->input('fields', [$detectedFields['id'], 'label']);
+
+        // Get intelligent sorting parameters
         [$sortField, $sort] = $this->getSortParams($request, $fields);
 
-        // Assuming a default ordering method if customOrder is not available
+        // Build query with intelligent ordering
         $query = method_exists($this->model, 'scopeCustomOrder')
             ? $this->model::customOrder($sortField, $sort)
             : $this->model::orderBy($sortField, $sort);
 
+        // Apply standard filters
         if (Schema::hasColumn($this->model->getTable(), 'hide')) {
             $query->where('hide', 0);
         }
 
+        // Apply where conditions
         if ($request->has('where') && $request->filled('where')) {
             foreach ($request->input('where') as $condition) {
                 switch ($condition['id']) {
@@ -202,14 +384,27 @@ class DynamicController extends \App\Http\Controllers\Controller
                     case 'async':
                         if ($this->shouldUseMeilisearch($this->model)) {
                             try {
-                                $this->applyMeilisearchFilter($query, $condition['value']);
+                                $this->applyMeilisearchFilter(
+                                    $query,
+                                    $condition['value']
+                                );
                             } catch (\Exception $e) {
-                                Log::warning('Meilisearch search failed in dropdown, falling back to custom search: ' . $e->getMessage());
-                                if (method_exists($this->model, 'scopeCustomSearch')) {
+                                Log::warning(
+                                    'Meilisearch search failed in dropdown, falling back to custom search: ' .
+                                        $e->getMessage()
+                                );
+                                if (
+                                    method_exists(
+                                        $this->model,
+                                        'scopeCustomSearch'
+                                    )
+                                ) {
                                     $query->customSearch($condition['value']);
                                 }
                             }
-                        } elseif (method_exists($this->model, 'scopeCustomSearch')) {
+                        } elseif (
+                            method_exists($this->model, 'scopeCustomSearch')
+                        ) {
                             $query->customSearch($condition['value']);
                         }
                         break;
@@ -227,54 +422,32 @@ class DynamicController extends \App\Http\Controllers\Controller
             }
         }
 
+        // Process each item with intelligent label building
         foreach ($query->get() as $item) {
             $itemData = [];
 
-            // First key-value pair
-            $firstKey = $fields[0];
-            $itemData[$firstKey] = $item->{$firstKey};
+            // Set ID field intelligently
+            $idField = $detectedFields['id'];
+            $itemData[$idField] = $item->{$idField};
 
-            // Check if fields include 'firstname' and 'surname' to combine them
-            if (
-                in_array('firstname', $fields) &&
-                in_array('surname', $fields)
-            ) {
-                $firstname = $item->firstname ?? '';
-                $surname = $item->surname ?? '';
-                $itemData['label'] = trim($firstname . ' ' . $surname);
-            } elseif (in_array('label', $fields)) {
-                // Use 'label' field if it exists
-                $itemData['label'] = $item->label;
+            // Build smart label
+            $itemData['label'] = $this->buildSmartLabel($item, $detectedFields);
 
-                // Check if 'label' field is empty and use 'name' field as fallback
-                if (
-                    empty($itemData['label']) &&
-                    isset($fields[2]) &&
-                    isset($item->{$fields[2]})
-                ) {
-                    $itemData['label'] = $item->{$fields[2]};
-                }
-            } elseif (in_array('name', $fields)) {
-                // Use 'name' field as 'label' if 'label' is not present
-                $itemData['label'] = $item->name;
-            } else {
-                // Default behavior if no 'label' or 'name' field exists
-                $secondKey = $fields[1] ?? 'label'; // Default to 'label' if there is no second key
-                $itemData['label'] = $item->{$secondKey};
-            }
-
-            // Add remaining fields
+            // Add any additional requested fields (excluding name combination fields to avoid duplication)
             foreach ($fields as $key => $field) {
-                if (
-                    $key > 1 &&
-                    $field !== 'firstname' &&
-                    $field !== 'surname'
-                ) {
-                    $itemData[$field] = $item->{$field};
+                if ($key > 1 && $field !== $idField && $field !== 'label') {
+                    // Skip name combination fields if they were used for label building
+                    if (
+                        $detectedFields['name_combination'] &&
+                        in_array($field, $detectedFields['name_combination'])
+                    ) {
+                        continue;
+                    }
+                    $itemData[$field] = $item->{$field} ?? null;
                 }
             }
 
-            array_push($data, $itemData);
+            $data[] = $itemData;
         }
 
         return response()->json(['data' => $data], 200);
@@ -308,14 +481,27 @@ class DynamicController extends \App\Http\Controllers\Controller
                     case 'async':
                         if ($this->shouldUseMeilisearch($this->model)) {
                             try {
-                                $this->applyMeilisearchFilter($query, $condition['value']);
+                                $this->applyMeilisearchFilter(
+                                    $query,
+                                    $condition['value']
+                                );
                             } catch (\Exception $e) {
-                                Log::warning('Meilisearch search failed in dropdown, falling back to custom search: ' . $e->getMessage());
-                                if (method_exists($this->model, 'scopeCustomSearch')) {
+                                Log::warning(
+                                    'Meilisearch search failed in dropdown, falling back to custom search: ' .
+                                        $e->getMessage()
+                                );
+                                if (
+                                    method_exists(
+                                        $this->model,
+                                        'scopeCustomSearch'
+                                    )
+                                ) {
                                     $query->customSearch($condition['value']);
                                 }
                             }
-                        } elseif (method_exists($this->model, 'scopeCustomSearch')) {
+                        } elseif (
+                            method_exists($this->model, 'scopeCustomSearch')
+                        ) {
                             $query->customSearch($condition['value']);
                         }
                         break;
@@ -481,7 +667,10 @@ class DynamicController extends \App\Http\Controllers\Controller
                     $this->applyMeilisearchFilter($query, $searchTerm);
                 } catch (\Exception $e) {
                     // Log the error and fallback to custom search
-                    Log::warning('Meilisearch search failed, falling back to custom search: ' . $e->getMessage());
+                    Log::warning(
+                        'Meilisearch search failed, falling back to custom search: ' .
+                            $e->getMessage()
+                    );
                     if (method_exists($this->model, 'scopeCustomSearch')) {
                         $query->customSearch($searchTerm);
                     }
@@ -533,12 +722,17 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         // 1. If $value is an array with 'start' and 'end' keys
         if (is_array($value) && isset($value['start'], $value['end'])) {
-            if ($value['start'] !== '' && $value['end'] !== '' && 
-                !$this->isInvalidDateValue($value['start']) && 
-                !$this->isInvalidDateValue($value['end'])) {
-                
+            if (
+                $value['start'] !== '' &&
+                $value['end'] !== '' &&
+                !$this->isInvalidDateValue($value['start']) &&
+                !$this->isInvalidDateValue($value['end'])
+            ) {
                 try {
-                    $start = Carbon::parse($value['start'], config('app.timezone'))
+                    $start = Carbon::parse(
+                        $value['start'],
+                        config('app.timezone')
+                    )
                         ->startOfDay()
                         ->setTimezone('UTC');
                     $end = Carbon::parse($value['end'], config('app.timezone'))
@@ -550,7 +744,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                     \Log::warning('Failed to parse date range', [
                         'start' => $value['start'],
                         'end' => $value['end'],
-                        'error' => $e->getMessage()
+                        'error' => $e->getMessage(),
                     ]);
                     return null;
                 }
@@ -566,11 +760,14 @@ class DynamicController extends \App\Http\Controllers\Controller
         // 3. If $value is a scalar (not an array or object)
         if (!is_array($value) && !is_object($value)) {
             try {
-                return Carbon::parse($value, config('app.timezone'))->setTimezone('UTC');
+                return Carbon::parse(
+                    $value,
+                    config('app.timezone')
+                )->setTimezone('UTC');
             } catch (\Exception $e) {
                 \Log::warning('Failed to parse date value', [
                     'value' => $value,
-                    'error' => $e->getMessage()
+                    'error' => $e->getMessage(),
                 ]);
                 return null;
             }
@@ -589,7 +786,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                     \Log::warning('Failed to parse date array item', [
                         'key' => $key,
                         'value' => $item,
-                        'error' => $e->getMessage()
+                        'error' => $e->getMessage(),
                     ]);
                     // Skip invalid items rather than including null
                 }
@@ -623,7 +820,12 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         // Handle very short strings that are likely not dates (but allow 'now')
         // Note: We removed the check for '0' and 0 since they could be valid timestamps or date representations
-        if (is_string($value) && strlen(trim($value)) < 4 && $value !== 'now' && $value !== '0') {
+        if (
+            is_string($value) &&
+            strlen(trim($value)) < 4 &&
+            $value !== 'now' &&
+            $value !== '0'
+        ) {
             return true;
         }
 
@@ -2624,7 +2826,9 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
 
         // Check if model uses Searchable trait
-        if (!in_array('Laravel\Scout\Searchable', class_uses_recursive($model))) {
+        if (
+            !in_array('Laravel\Scout\Searchable', class_uses_recursive($model))
+        ) {
             return false;
         }
 
@@ -2654,7 +2858,9 @@ class DynamicController extends \App\Http\Controllers\Controller
                 $client->health();
                 return true;
             } catch (\Exception $e) {
-                Log::warning('Meilisearch health check failed: ' . $e->getMessage());
+                Log::warning(
+                    'Meilisearch health check failed: ' . $e->getMessage()
+                );
                 return false;
             }
         });
@@ -2680,7 +2886,10 @@ class DynamicController extends \App\Http\Controllers\Controller
             $query->whereRaw('1 = 0');
         } else {
             // Filter by found IDs while preserving other query conditions
-            $query->whereIn($this->model->getKeyName(), $searchResults->toArray());
+            $query->whereIn(
+                $this->model->getKeyName(),
+                $searchResults->toArray()
+            );
         }
     }
 }

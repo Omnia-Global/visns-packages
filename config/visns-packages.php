@@ -174,6 +174,66 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Dropdown Field Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Configuration for intelligent field detection and smart label building
+    | in dropdown functionality.
+    |
+    */
+    'dropdown_fields' => [
+        /*
+        |--------------------------------------------------------------------------
+        | Label Field Hierarchy
+        |--------------------------------------------------------------------------
+        |
+        | Fields to try in order when building dropdown labels. The system will
+        | use the first available field from this list.
+        |
+        */
+        'label_fields' => ['label', 'name', 'title', 'full_name', 'display_name'],
+
+        /*
+        |--------------------------------------------------------------------------
+        | Name Field Combinations
+        |--------------------------------------------------------------------------
+        |
+        | Combinations of fields to concatenate when building names. The system
+        | will try these combinations in order if single label fields aren't available.
+        |
+        */
+        'name_combinations' => [
+            ['title', 'firstname', 'lastname'],
+            ['title', 'first_name', 'last_name'], 
+            ['firstname', 'lastname'],
+            ['first_name', 'last_name'],
+            ['firstname', 'surname'],
+            ['first_name', 'surname'],
+        ],
+
+        /*
+        |--------------------------------------------------------------------------
+        | ID Field Priority
+        |--------------------------------------------------------------------------
+        |
+        | Fields to use as ID in dropdown data, in order of preference.
+        |
+        */
+        'id_fields' => ['id', 'uuid', 'slug', 'code'],
+
+        /*
+        |--------------------------------------------------------------------------
+        | Default Sort Fields
+        |--------------------------------------------------------------------------
+        |
+        | Fields to use for sorting dropdowns when no explicit sort is specified.
+        |
+        */
+        'sort_fields' => ['label', 'name', 'title', 'firstname', 'created_at'],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Report Export Configuration
     |--------------------------------------------------------------------------
     |
