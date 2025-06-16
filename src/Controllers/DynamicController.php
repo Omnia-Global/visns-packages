@@ -346,6 +346,12 @@ class DynamicController extends \App\Http\Controllers\Controller
             $sortField = $detectedFields['sort'];
         }
 
+        // Verify the sort field exists in the table
+        if ($sortField && !Schema::hasColumn($this->model->getTable(), $sortField)) {
+            $detectedFields = $this->detectAvailableFields();
+            $sortField = $detectedFields['sort'];
+        }
+
         return [$sortField, $sort];
     }
 
@@ -357,7 +363,7 @@ class DynamicController extends \App\Http\Controllers\Controller
         $detectedFields = $this->detectAvailableFields();
 
         // Use intelligent field detection or fall back to provided fields
-        $fields = $request->input('fields', [$detectedFields['id'], 'label']);
+        $fields = $request->input('fields', [$detectedFields['id'], $detectedFields['label'] ?? $detectedFields['id']]);
 
         // Get intelligent sorting parameters
         [$sortField, $sort] = $this->getSortParams($request, $fields);
