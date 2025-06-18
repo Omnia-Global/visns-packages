@@ -18,6 +18,7 @@ use Visnsstudio\VisnsPackages\Controllers\SocialiteController;
 use Visnsstudio\VisnsPackages\Controllers\ReportBuilderController;
 use Visnsstudio\VisnsPackages\Controllers\PDFController;
 use Visnsstudio\VisnsPackages\Middleware\AcceptJson;
+use Visnsstudio\VisnsPackages\Services\FilePathResolver;
 
 class VisnsPackagesServiceProvider extends ServiceProvider
 {
@@ -51,6 +52,11 @@ class VisnsPackagesServiceProvider extends ServiceProvider
         }
 
         $this->commands($commands);
+
+        // Register FilePathResolver as singleton
+        $this->app->singleton(FilePathResolver::class, function ($app) {
+            return new FilePathResolver();
+        });
 
         // Merge config
         $this->mergeConfigFrom(
