@@ -2164,6 +2164,7 @@ class DynamicController extends \App\Http\Controllers\Controller
             'overwriteWithNull' => $request->input('overwriteWithNull', false),
             'mergeTimestamps' => $request->input('mergeTimestamps', false),
             'prioritizeSource' => true, // Always prioritize source model attributes
+            'field_overrides' => $request->input('field_overrides', []), // Explicit field value overrides
         ];
 
         // Wrap everything in a try-catch block
@@ -2821,6 +2822,7 @@ class DynamicController extends \App\Http\Controllers\Controller
             'overwriteWithNull' => false,
             'mergeTimestamps' => false,
             'prioritizeSource' => false, // Default to original behavior
+            'field_overrides' => [], // Explicit field value overrides for conflict resolution
         ];
 
         // Merge provided options with defaults
@@ -2852,10 +2854,34 @@ class DynamicController extends \App\Http\Controllers\Controller
             $options['exclude']
         );
 
+        // First apply any explicit field overrides from conflict resolution
+        if (!empty($options['field_overrides']) && is_array($options['field_overrides'])) {
+            \Log::info("Processing field overrides", [
+                'field_overrides' => $options['field_overrides'],
+                'attributesToMerge' => $attributesToMerge,
+                'exclude' => $options['exclude']
+            ]);
+            
+            foreach ($options['field_overrides'] as $field => $value) {
+                // Apply field override if field is in attributesToMerge OR if it's a valid model attribute
+                if (in_array($field, $attributesToMerge) || array_key_exists($field, $sourceAttributes) || array_key_exists($field, $targetAttributes)) {
+                    $target->$field = $value;
+                    \Log::info("Applied field override for '{$field}': '{$value}'");
+                } else {
+                    \Log::warning("Skipped field override for '{$field}' - not found in attributes to merge or model attributes");
+                }
+            }
+        }
+
         // Merge attributes based on prioritization
         if ($options['prioritizeSource']) {
             // Prioritize source model - only fill missing data in source from target
             foreach ($attributesToMerge as $attribute) {
+                // Skip if this field has an explicit override (already handled above)
+                if (!empty($options['field_overrides']) && array_key_exists($attribute, $options['field_overrides'])) {
+                    continue;
+                }
+                
                 $sourceValue = $sourceAttributes[$attribute];
                 $targetValue = $targetAttributes[$attribute] ?? null;
 
@@ -2872,6 +2898,11 @@ class DynamicController extends \App\Http\Controllers\Controller
         } else {
             // Original behavior - merge source into target
             foreach ($attributesToMerge as $attribute) {
+                // Skip if this field has an explicit override (already handled above)
+                if (!empty($options['field_overrides']) && array_key_exists($attribute, $options['field_overrides'])) {
+                    continue;
+                }
+                
                 $sourceValue = $sourceAttributes[$attribute];
 
                 // Skip if the source value is null and we're not overwriting with nulls
