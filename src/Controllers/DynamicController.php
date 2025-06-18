@@ -395,6 +395,12 @@ class DynamicController extends \App\Http\Controllers\Controller
             }
         }
 
+        // Apply exclude_id parameter to filter out specific records
+        $excludeId = $request->input('exclude_id');
+        if ($excludeId) {
+            $query->where('id', '!=', $excludeId);
+        }
+
         // Apply where conditions
         if ($request->has('where') && $request->filled('where')) {
             foreach ($request->input('where') as $condition) {
