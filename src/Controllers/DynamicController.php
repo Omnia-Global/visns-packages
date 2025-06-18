@@ -2956,12 +2956,22 @@ class DynamicController extends \App\Http\Controllers\Controller
                     $relation instanceof
                         \Illuminate\Database\Eloquent\Relations\BelongsTo
                 ) {
-                    // For HasOne or BelongsTo, get the related model
-                    $relatedModel = $source->$relationship;
+                    // For HasOne or BelongsTo, prioritize source but fallback to target
+                    $sourceModel = $source->$relationship;
+                    $targetModel = $target->$relationship;
+                    
+                    // Prefer source model, but use target if source is empty
+                    $selectedModel = $sourceModel ?: $targetModel;
+                    
+                    \Log::info("Merging HasOne/BelongsTo relationship '{$relationship}'", [
+                        'has_source' => !is_null($sourceModel),
+                        'has_target' => !is_null($targetModel),
+                        'selected' => $selectedModel ? ($sourceModel ? 'source' : 'target') : 'none'
+                    ]);
 
-                    if ($relatedModel) {
-                        // Clone the related model to avoid modifying the original
-                        $clonedModel = $relatedModel->replicate();
+                    if ($selectedModel) {
+                        // Clone the selected model to avoid modifying the original
+                        $clonedModel = $selectedModel->replicate();
 
                         // Set the relationship on the target after saving
                         // Note: This will need to be handled after saving the target
@@ -2971,17 +2981,38 @@ class DynamicController extends \App\Http\Controllers\Controller
                     $relation instanceof
                     \Illuminate\Database\Eloquent\Relations\HasMany
                 ) {
-                    // For HasMany, get the collection of related models
-                    $relatedModels = $source->$relationship;
-
-                    if ($relatedModels && $relatedModels->count() > 0) {
-                        // Clone each related model
-                        $clonedModels = $relatedModels->map(function ($model) {
+                    // For HasMany, merge related models from both source and target
+                    $sourceModels = $source->$relationship;
+                    $targetModels = $target->$relationship;
+                    
+                    // Combine models from both entities
+                    $allModels = collect();
+                    
+                    if ($sourceModels && $sourceModels->count() > 0) {
+                        // Clone source models and add to collection
+                        $clonedSourceModels = $sourceModels->map(function ($model) {
                             return $model->replicate();
                         });
+                        $allModels = $allModels->merge($clonedSourceModels);
+                    }
+                    
+                    if ($targetModels && $targetModels->count() > 0) {
+                        // Clone target models and add to collection
+                        $clonedTargetModels = $targetModels->map(function ($model) {
+                            return $model->replicate();
+                        });
+                        $allModels = $allModels->merge($clonedTargetModels);
+                    }
+                    
+                    \Log::info("Merging HasMany relationship '{$relationship}'", [
+                        'source_count' => $sourceModels ? $sourceModels->count() : 0,
+                        'target_count' => $targetModels ? $targetModels->count() : 0,
+                        'merged_count' => $allModels->count()
+                    ]);
 
-                        // Set the relationship on the target
-                        $target->setRelation($relationship, $clonedModels);
+                    if ($allModels->count() > 0) {
+                        // Set the merged relationship on the target
+                        $target->setRelation($relationship, $allModels);
                     }
                 } elseif (
                     $relation instanceof
