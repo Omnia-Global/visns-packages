@@ -93,8 +93,16 @@ class File extends Model implements Auditable
                     return $validatedPath;
                 }
 
-                // Fallback to legacy logic if no valid path found
-                return $this->generateFallbackPath();
+                // Log that no valid path was found
+                \Log::warning("File model: No valid path found for file {$this->id}, using fallback", [
+                    'file_id' => $this->id,
+                    'fileable_type' => $this->fileable_type,
+                    'original_path' => $this->file_path
+                ]);
+
+                // Return the original file_path as stored in database
+                // This prevents generating invalid paths like "clientNotes/file.ext"
+                return $this->file_path;
             }
         );
     }

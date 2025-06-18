@@ -38,6 +38,14 @@ class FilePathResolver
         $variations = $this->generateAllPathVariations($file);
         $attemptedPaths = [];
 
+        Log::info("FilePathResolver: Starting path resolution for file {$file->id}", [
+            'file_id' => $file->id,
+            'fileable_type' => $file->fileable_type,
+            'original_path' => $file->file_path,
+            'total_variations' => count($variations),
+            'first_10_variations' => array_slice($variations, 0, 10)
+        ]);
+
         foreach ($variations as $path) {
             $attemptedPaths[] = $path;
             
@@ -224,7 +232,15 @@ class FilePathResolver
         
         foreach ($storageDisks as $diskName => $config) {
             try {
-                if ($this->diskExists($diskName) && Storage::disk($diskName)->exists($path)) {
+                $diskExists = $this->diskExists($diskName);
+                
+                Log::debug("FilePathResolver: Checking path on disk {$diskName}", [
+                    'path' => $path,
+                    'disk' => $diskName,
+                    'disk_exists' => $diskExists
+                ]);
+                
+                if ($diskExists && Storage::disk($diskName)->exists($path)) {
                     $result = [
                         'disk' => $diskName,
                         'path' => $path
@@ -242,6 +258,11 @@ class FilePathResolver
                             ]);
                         }
                     }
+                    
+                    Log::info("FilePathResolver: File found on disk {$diskName}", [
+                        'path' => $path,
+                        'disk' => $diskName
+                    ]);
                     
                     return $result;
                 }
