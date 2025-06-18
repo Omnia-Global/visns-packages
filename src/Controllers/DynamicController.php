@@ -2375,6 +2375,146 @@ class DynamicController extends \App\Http\Controllers\Controller
     }
 
     /**
+     * Detect potential duplicate entities based on similarity matching
+     *
+     * Request parameters:
+     * - entity_id: The ID of the entity to find duplicates for
+     * - fields: Array of field names to use for similarity matching (default: ['name', 'email'])
+     * - threshold: Minimum similarity percentage (default: 70)
+     * - limit: Maximum number of results to return (default: 10)
+     *
+     * @param \Illuminate\Http\Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function detectDuplicates(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'entity_id' => 'required|exists:' . $this->model->getTable() . ',id',
+                'fields' => 'array',
+                'threshold' => 'integer|min:0|max:100',
+                'limit' => 'integer|min:1|max:100'
+            ]);
+
+            if ($validator->fails()) {
+                throw new JsonValidationException($validator);
+            }
+
+            $entityId = $request->input('entity_id');
+            $fields = $request->input('fields', ['name', 'email']);
+            $threshold = $request->input('threshold', 70);
+            $limit = $request->input('limit', 10);
+
+            // Get the source entity
+            $sourceEntity = $this->model::findOrFail($entityId);
+            
+            // Get all other entities (excluding the source)
+            $candidates = $this->model::where('id', '!=', $entityId)->get();
+            
+            $duplicates = [];
+
+            foreach ($candidates as $candidate) {
+                $totalSimilarity = 0;
+                $validFields = 0;
+
+                foreach ($fields as $field) {
+                    $sourceValue = $sourceEntity->$field ?? '';
+                    $candidateValue = $candidate->$field ?? '';
+
+                    // Skip empty values
+                    if (empty($sourceValue) || empty($candidateValue)) {
+                        continue;
+                    }
+
+                    $similarity = $this->calculateStringSimilarity($sourceValue, $candidateValue);
+                    $totalSimilarity += $similarity;
+                    $validFields++;
+                }
+
+                // Calculate average similarity if we have valid fields
+                if ($validFields > 0) {
+                    $averageSimilarity = $totalSimilarity / $validFields;
+                    
+                    if ($averageSimilarity >= $threshold) {
+                        $duplicates[] = [
+                            'entity' => $candidate,
+                            'similarity' => round($averageSimilarity, 2),
+                            'matched_fields' => $validFields
+                        ];
+                    }
+                }
+            }
+
+            // Sort by similarity score (highest first)
+            usort($duplicates, function($a, $b) {
+                return $b['similarity'] <=> $a['similarity'];
+            });
+
+            // Limit results
+            $duplicates = array_slice($duplicates, 0, $limit);
+
+            // Extract just the entities for the response
+            $entities = array_map(function($duplicate) {
+                return $duplicate['entity'];
+            }, $duplicates);
+
+            return response()->json([
+                'data' => $entities,
+                'meta' => [
+                    'total_found' => count($duplicates),
+                    'threshold_used' => $threshold,
+                    'fields_checked' => $fields
+                ],
+                'error' => ''
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => [],
+                'error' => 'Error detecting duplicates: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Calculate string similarity using Levenshtein distance
+     *
+     * @param string $str1
+     * @param string $str2
+     * @return float Similarity percentage (0-100)
+     */
+    private function calculateStringSimilarity($str1, $str2)
+    {
+        // Normalize strings for comparison
+        $str1 = strtolower(trim($str1));
+        $str2 = strtolower(trim($str2));
+
+        // Handle exact matches
+        if ($str1 === $str2) {
+            return 100.0;
+        }
+
+        // Handle empty strings
+        if (empty($str1) || empty($str2)) {
+            return 0.0;
+        }
+
+        // Use similar_text for percentage similarity
+        similar_text($str1, $str2, $percent);
+        
+        // Also calculate Levenshtein distance for additional accuracy
+        $maxLength = max(strlen($str1), strlen($str2));
+        if ($maxLength > 0) {
+            $levenshteinPercent = (1 - (levenshtein($str1, $str2) / $maxLength)) * 100;
+            
+            // Return the average of both methods for better accuracy
+            return ($percent + $levenshteinPercent) / 2;
+        }
+
+        return $percent;
+    }
+
+    /**
      * Duplicate relationships from one model to another.
      * This method focuses on duplicating relationships rather than moving them,
      * which is simpler and less error-prone.

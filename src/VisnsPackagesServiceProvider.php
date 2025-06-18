@@ -393,6 +393,56 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                             Route::post('/generate-quote', 'generateQuotePDF');
                         });
                 });
+
+            // Register dynamic entity routes if configured
+            $this->registerDynamicEntityRoutes();
+        }
+    }
+
+    /**
+     * Register dynamic entity routes for DynamicController
+     *
+     * @return void
+     */
+    protected function registerDynamicEntityRoutes()
+    {
+        $dynamicEntities = config('visns-packages.dynamic_entities', []);
+        
+        if (!empty($dynamicEntities)) {
+            foreach ($dynamicEntities as $entity) {
+                Route::prefix("ajax/{$entity}")
+                    ->controller(\Visnsstudio\VisnsPackages\Controllers\DynamicController::class)
+                    ->group(function () use ($entity) {
+                        Route::get('/', 'index');
+                        Route::post('/', 'store');
+                        Route::get('/{id}', 'show');
+                        Route::put('/{id}', 'update');
+                        Route::post('/updateGallery/{id}', 'updateGallery');
+                        Route::post('/{id}/clone', 'clone');
+                        Route::post('/merge', 'mergeModels');
+                        Route::post('/detect-duplicates', 'detectDuplicates');
+                        Route::delete('/{id}', 'destroy');
+                        Route::post('/table', 'table');
+                        Route::post('/dropdown', 'dropdown');
+                    });
+
+                Route::prefix("ajax/{$entity}/json")
+                    ->controller(\Visnsstudio\VisnsPackages\Controllers\DynamicJsonController::class)
+                    ->group(function () use ($entity) {
+                        Route::post('/sortList', 'jsonSortList');
+                        Route::post('/sortUpdate', 'jsonSortUpdate');
+                        Route::post('/table', 'jsonTable');
+                        Route::post('/get', 'jsonGet');
+                        Route::post('/set', 'jsonSet');
+                        Route::post('/push', 'jsonPush');
+                        Route::post('/where', 'jsonWhere');
+                        Route::post('/search', 'jsonSearch');
+                        Route::post('/clone', 'jsonClone');
+                        Route::post('/toggle', 'jsonToggle');
+                        Route::post('/delete', 'jsonDelete');
+                        Route::post('/dropdown', 'jsonDropdown');
+                    });
+            }
         }
     }
 

@@ -57,6 +57,36 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Dynamic Entity Routes
+    |--------------------------------------------------------------------------
+    |
+    | List of entities that should have dynamic CRUD routes automatically
+    | registered by the package. This replaces the need to manually register
+    | routes for each entity in your web.php file.
+    | 
+    | Each entity in this array will get the following routes:
+    | - GET /ajax/{entity}
+    | - POST /ajax/{entity}
+    | - GET /ajax/{entity}/{id}
+    | - PUT /ajax/{entity}/{id}
+    | - DELETE /ajax/{entity}/{id}
+    | - POST /ajax/{entity}/table
+    | - POST /ajax/{entity}/dropdown
+    | - POST /ajax/{entity}/merge
+    | - POST /ajax/{entity}/detect-duplicates
+    | - And JSON manipulation routes under /ajax/{entity}/json/
+    |
+    */
+    'dynamic_entities' => [
+        // Example entities:
+        // 'contacts',
+        // 'clients', 
+        // 'leads',
+        // 'projects',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | User Model
     |--------------------------------------------------------------------------
     |
