@@ -378,6 +378,23 @@ class DynamicController extends \App\Http\Controllers\Controller
             $query->where('hide', 0);
         }
 
+        // Apply search functionality similar to table function
+        $searchTerm = $request->input('search');
+        if ($searchTerm) {
+            if ($this->shouldUseMeilisearch($this->model)) {
+                try {
+                    $this->applyMeilisearchFilter($query, $searchTerm);
+                } catch (\Exception $e) {
+                    Log::warning('Meilisearch search failed in dropdown, falling back to custom search: ' . $e->getMessage());
+                    if (method_exists($this->model, 'scopeCustomSearch')) {
+                        $query->customSearch($searchTerm);
+                    }
+                }
+            } elseif (method_exists($this->model, 'scopeCustomSearch')) {
+                $query->customSearch($searchTerm);
+            }
+        }
+
         // Apply where conditions
         if ($request->has('where') && $request->filled('where')) {
             foreach ($request->input('where') as $condition) {
