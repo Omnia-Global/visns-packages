@@ -35,48 +35,48 @@ class File extends Model implements Auditable
     {
         return Attribute::make(
             get: function ($value, $attributes) {
-                $baseClassName = str_replace(
-                    'App\\Models\\',
-                    '',
-                    $this->fileable_type
-                );
-                $plural = Str::plural($baseClassName);
-                $singular = Str::singular($baseClassName);
+                // Use intelligent path resolver to find actual file path
+                $resolver = app(FilePathResolver::class);
+                $validatedResult = $resolver->resolve($this);
 
-                $possibleModels = [
-                    lcfirst($plural),
-                    ucfirst($plural),
-                    lcfirst($singular),
-                    ucfirst($singular),
-                ];
+                if ($validatedResult && isset($validatedResult['url'])) {
+                    // Return pre-generated URL from resolver
+                    return $validatedResult['url'];
+                }
 
-                $model = lcfirst($plural);
-
-                $path = $this->file_path;
-                $fileableTypeExists = $this->fileable_type && $this->file_path;
-
-                if ($fileableTypeExists) {
-                    // Check if file_path already contains any form of the model name
-                    $containsModelName = false;
-                    foreach ($possibleModels as $possibleModel) {
-                        if (
-                            stripos($this->file_path, $possibleModel . '/') !==
-                            false
-                        ) {
-                            $containsModelName = true;
-                            break;
-                        }
-                    }
-
-                    // Only prepend model if it does not already contain it
-                    if (!$containsModelName) {
-                        $path = $model . '/' . $this->file_path;
+                if ($validatedResult && isset($validatedResult['path'])) {
+                    // Generate URL for validated path
+                    try {
+                        return Storage::disk($validatedResult['disk'])->temporaryUrl(
+                            $validatedResult['path'], 
+                            now()->addMinutes(60)
+                        );
+                    } catch (\Exception $e) {
+                        \Log::warning("File model: Could not generate URL for validated path", [
+                            'file_id' => $this->id,
+                            'path' => $validatedResult['path'],
+                            'disk' => $validatedResult['disk'],
+                            'error' => $e->getMessage()
+                        ]);
                     }
                 }
 
-                return env('CLOUDFRONT_URL')
-                    ? env('CLOUDFRONT_URL') . $attributes['file_path']
-                    : Storage::temporaryUrl($path, now()->addMinutes(60));
+                // Fallback: Check CloudFront URL
+                if (env('CLOUDFRONT_URL')) {
+                    return env('CLOUDFRONT_URL') . $this->file_path;
+                }
+
+                // Final fallback: Try to generate URL with original path
+                try {
+                    return Storage::disk('s3')->temporaryUrl($this->file_path, now()->addMinutes(60));
+                } catch (\Exception $e) {
+                    \Log::warning("File model: Could not generate fallback URL", [
+                        'file_id' => $this->id,
+                        'original_path' => $this->file_path,
+                        'error' => $e->getMessage()
+                    ]);
+                    return null;
+                }
             }
         );
     }
