@@ -12,6 +12,7 @@ class FilePathResolver
 {
     protected $cachePrefix = 'file_path_resolver:';
     protected $cacheTtl = 3600; // 1 hour
+    protected $maxAttemptsBeforeGiveUp = 10; // Stop after 10 failed attempts
 
     public function resolve(File $file): ?array
     {
@@ -35,26 +36,24 @@ class FilePathResolver
 
     protected function findValidPath(File $file): ?array
     {
-        $variations = $this->generateAllPathVariations($file);
+        $variations = $this->generatePrioritizedPathVariations($file);
         $attemptedPaths = [];
 
-        Log::info("FilePathResolver: Starting path resolution for file {$file->id}", [
-            'file_id' => $file->id,
-            'fileable_type' => $file->fileable_type,
-            'original_path' => $file->file_path,
-            'total_variations' => count($variations),
-            'first_10_variations' => array_slice($variations, 0, 10)
-        ]);
-
+        // Check only S3 first (most likely location)
         foreach ($variations as $path) {
             $attemptedPaths[] = $path;
             
-            $result = $this->checkPathExists($path);
+            // Early termination if we've tried too many paths
+            if (count($attemptedPaths) > $this->maxAttemptsBeforeGiveUp) {
+                Log::debug("FilePathResolver: Early termination after {$this->maxAttemptsBeforeGiveUp} attempts for file {$file->id}");
+                break;
+            }
+            
+            $result = $this->checkPathExistsS3Only($path);
             if ($result) {
                 Log::info("FilePathResolver: Found valid path for file {$file->id}", [
                     'file_id' => $file->id,
                     'valid_path' => $path,
-                    'storage_disk' => $result['disk'],
                     'attempts' => count($attemptedPaths)
                 ]);
                 
@@ -70,14 +69,13 @@ class FilePathResolver
             'file_id' => $file->id,
             'fileable_type' => $file->fileable_type,
             'original_path' => $file->file_path,
-            'attempted_paths' => $attemptedPaths,
             'total_attempts' => count($attemptedPaths)
         ]);
 
         return null;
     }
 
-    protected function generateAllPathVariations(File $file): array
+    protected function generatePrioritizedPathVariations(File $file): array
     {
         $modelName = $this->extractModelName($file->fileable_type);
         $fileName = $file->file_path;
@@ -86,12 +84,12 @@ class FilePathResolver
         // If file_path already contains a folder structure, try it as-is first
         $variations[] = $fileName;
 
-        // Generate all naming variations
-        $namingVariations = $this->getNamingVariations($modelName);
+        // Generate only the most likely naming variations first
+        $prioritizedNamingVariations = $this->getPrioritizedNamingVariations($modelName);
+        $prioritizedStructures = $this->getPrioritizedPathStructures();
         
-        foreach ($namingVariations as $variant) {
-            // Generate all path structure variations
-            foreach ($this->getPathStructures() as $structure) {
+        foreach ($prioritizedNamingVariations as $variant) {
+            foreach ($prioritizedStructures as $structure) {
                 $path = $this->buildPath($structure, $variant, $fileName);
                 if ($path && !in_array($path, $variations)) {
                     $variations[] = $path;
@@ -99,8 +97,7 @@ class FilePathResolver
             }
         }
 
-        // Prioritize variations (most likely patterns first)
-        return $this->prioritizeVariations(array_unique($variations));
+        return array_unique($variations);
     }
 
     protected function extractModelName(?string $fileableType): string
@@ -116,59 +113,27 @@ class FilePathResolver
         return $baseClassName;
     }
 
-    protected function getNamingVariations(string $modelName): array
+    protected function getPrioritizedNamingVariations(string $modelName): array
     {
+        // Only the most common variations, in order of likelihood
         $variations = [
-            // Original forms
+            // Most common Laravel patterns
+            Str::snake(Str::plural($modelName)), // client_notes (most common)
+            Str::camel(Str::plural($modelName)), // clientNotes 
+            Str::snake($modelName),              // client_note
+            Str::camel($modelName),              // clientNote
             $modelName,                          // ClientNote
             Str::plural($modelName),             // ClientNotes
-            Str::singular($modelName),           // ClientNote
-            
-            // camelCase variations
-            Str::camel($modelName),              // clientNote
-            Str::camel(Str::plural($modelName)), // clientNotes
-            Str::camel(Str::singular($modelName)), // clientNote
-            
-            // snake_case variations
-            Str::snake($modelName),              // client_note
-            Str::snake(Str::plural($modelName)), // client_notes
-            Str::snake(Str::singular($modelName)), // client_note
-            
-            // StudlyCase variations
-            Str::studly($modelName),             // ClientNote
-            Str::studly(Str::plural($modelName)), // ClientNotes
-            Str::studly(Str::singular($modelName)), // ClientNote
-            
-            // kebab-case variations
-            Str::kebab($modelName),              // client-note
-            Str::kebab(Str::plural($modelName)), // client-notes
-            Str::kebab(Str::singular($modelName)), // client-note
-            
-            // lowercase variations
-            strtolower($modelName),              // clientnote
-            strtolower(Str::plural($modelName)), // clientnotes
-            strtolower(Str::singular($modelName)), // clientnote
-            
-            // UPPERCASE variations
-            strtoupper($modelName),              // CLIENTNOTE
-            strtoupper(Str::plural($modelName)), // CLIENTNOTES
-            strtoupper(Str::singular($modelName)), // CLIENTNOTE
         ];
 
-        // Remove duplicates while preserving order
         return array_values(array_unique($variations));
     }
 
-    protected function getPathStructures(): array
+    protected function getPrioritizedPathStructures(): array
     {
         return [
-            '{folder}/{filename}',               // clientNotes/file.ext
-            '{filename}',                        // file.ext (no folder)
-            'files/{folder}/{filename}',         // files/clientNotes/file.ext
-            'uploads/{folder}/{filename}',       // uploads/clientNotes/file.ext
-            'storage/{folder}/{filename}',       // storage/clientNotes/file.ext
-            'attachments/{folder}/{filename}',   // attachments/clientNotes/file.ext
-            'documents/{folder}/{filename}',     // documents/clientNotes/file.ext
+            '{filename}',                        // file.ext (no folder) - try first
+            '{folder}/{filename}',               // clientNotes/file.ext - most common
         ];
     }
 
@@ -226,54 +191,26 @@ class FilePathResolver
         return array_values(array_unique($prioritized));
     }
 
-    protected function checkPathExists(string $path): ?array
+    protected function checkPathExistsS3Only(string $path): ?array
     {
-        $storageDisks = $this->getStorageDisks();
-        
-        foreach ($storageDisks as $diskName => $config) {
-            try {
-                $diskExists = $this->diskExists($diskName);
+        try {
+            if ($this->diskExists('s3') && Storage::disk('s3')->exists($path)) {
+                $result = [
+                    'disk' => 's3',
+                    'path' => $path
+                ];
                 
-                Log::debug("FilePathResolver: Checking path on disk {$diskName}", [
-                    'path' => $path,
-                    'disk' => $diskName,
-                    'disk_exists' => $diskExists
-                ]);
-                
-                if ($diskExists && Storage::disk($diskName)->exists($path)) {
-                    $result = [
-                        'disk' => $diskName,
-                        'path' => $path
-                    ];
-                    
-                    // Generate URL if possible
-                    if ($diskName === 's3' && method_exists(Storage::disk($diskName), 'temporaryUrl')) {
-                        try {
-                            $result['url'] = Storage::disk($diskName)->temporaryUrl($path, now()->addMinutes(60));
-                        } catch (\Exception $e) {
-                            Log::debug("FilePathResolver: Could not generate temporary URL", [
-                                'path' => $path,
-                                'disk' => $diskName,
-                                'error' => $e->getMessage()
-                            ]);
-                        }
-                    }
-                    
-                    Log::info("FilePathResolver: File found on disk {$diskName}", [
-                        'path' => $path,
-                        'disk' => $diskName
-                    ]);
-                    
-                    return $result;
+                // Generate URL if possible
+                try {
+                    $result['url'] = Storage::disk('s3')->temporaryUrl($path, now()->addMinutes(60));
+                } catch (\Exception $e) {
+                    // Ignore URL generation errors
                 }
-            } catch (\Exception $e) {
-                Log::debug("FilePathResolver: Error checking path on disk {$diskName}", [
-                    'path' => $path,
-                    'disk' => $diskName,
-                    'error' => $e->getMessage()
-                ]);
-                continue;
+                
+                return $result;
             }
+        } catch (\Exception $e) {
+            // Ignore S3 errors and continue
         }
 
         return null;
