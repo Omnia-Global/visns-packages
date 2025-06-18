@@ -2193,6 +2193,17 @@ class DynamicController extends \App\Http\Controllers\Controller
                 );
             }
 
+            // Load relationships on both models before merging
+            if (!empty($options['relationships'])) {
+                $source->load($options['relationships']);
+                $target->load($options['relationships']);
+                \Log::info("Loaded relationships before merge", [
+                    'relationships' => $options['relationships'],
+                    'source_id' => $source->id,
+                    'target_id' => $target->id
+                ]);
+            }
+
             // Merge the target model INTO the source model (note the reversed order)
             $mergedModel = $this->merge($source, $target, $options);
 
@@ -2274,7 +2285,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                     ) {
                         if ($relatedModel && $relatedModel->count() > 0) {
                             try {
-                                // Create a sync array that includes pivot data
+                                // For BelongsToMany, we want to sync all merged relationships
+                                // This will replace existing relationships with the merged set
                                 $syncData = [];
 
                                 // Add relations with their pivot data
@@ -2306,10 +2318,20 @@ class DynamicController extends \App\Http\Controllers\Controller
                                     }
                                 }
 
+                                // Log what we're about to sync
+                                \Log::info("Syncing BelongsToMany relationship '{$relationship}'", [
+                                    'entity_id' => $mergedModel->id,
+                                    'sync_data_count' => count($syncData),
+                                    'sync_ids' => array_keys($syncData)
+                                ]);
+
                                 // Only sync if we have valid IDs
                                 if (!empty($syncData)) {
-                                    // Sync to the target with pivot data
+                                    // Sync to the target with pivot data (this replaces existing)
                                     $relation->sync($syncData);
+                                    \Log::info("Successfully synced {$relationship} with " . count($syncData) . " relationships");
+                                } else {
+                                    \Log::warning("No valid sync data for {$relationship}");
                                 }
                             } catch (\Exception $e) {
                                 // Log the error for debugging
@@ -2333,6 +2355,7 @@ class DynamicController extends \App\Http\Controllers\Controller
 
                                     if (!empty($ids)) {
                                         $relation->sync($ids);
+                                        \Log::info("Fallback sync successful for {$relationship} with IDs: " . implode(', ', $ids));
                                     }
                                 } catch (\Exception $innerE) {
                                     Log::error(
@@ -2964,28 +2987,26 @@ class DynamicController extends \App\Http\Controllers\Controller
                     $relation instanceof
                     \Illuminate\Database\Eloquent\Relations\BelongsToMany
                 ) {
-                    // For BelongsToMany, get the collection of related models with pivot data
-                    $belongsToManyRelation = $source->$relationship();
-                    // Get the pivot table columns
-                    $pivotColumns = Schema::getColumnListing(
-                        $belongsToManyRelation->getTable()
-                    );
-                    // Remove the foreign key columns
-                    $pivotColumns = array_diff($pivotColumns, [
-                        $belongsToManyRelation->getForeignPivotKeyName(),
-                        $belongsToManyRelation->getRelatedPivotKeyName(),
-                        'created_at',
-                        'updated_at',
+                    // For BelongsToMany, we need to merge relationships from both source and target
+                    $sourceRelation = $source->$relationship();
+                    $targetRelation = $target->$relationship();
+                    
+                    // Get relationships from both entities
+                    $sourceModels = $sourceRelation->get();
+                    $targetModels = $targetRelation->get();
+                    
+                    // Combine both collections and remove duplicates
+                    $allModels = $sourceModels->merge($targetModels)->unique('id');
+                    
+                    \Log::info("Merging BelongsToMany relationship '{$relationship}'", [
+                        'source_count' => $sourceModels->count(),
+                        'target_count' => $targetModels->count(), 
+                        'merged_count' => $allModels->count()
                     ]);
 
-                    // Get related models with pivot data
-                    $relatedModels = $belongsToManyRelation->get();
-
-                    if ($relatedModels && $relatedModels->count() > 0) {
+                    if ($allModels->count() > 0) {
                         // Filter out models with null or empty IDs
-                        $validModels = $relatedModels->filter(function (
-                            $model
-                        ) {
+                        $validModels = $allModels->filter(function ($model) {
                             return !is_null($model->id) && $model->id !== '';
                         });
 
