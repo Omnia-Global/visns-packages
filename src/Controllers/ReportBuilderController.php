@@ -858,7 +858,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
                     return $type;
                 } catch (\Exception $e) {
-                    );
+                    // Fall through to method 2
                 }
             }
 
