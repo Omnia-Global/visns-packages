@@ -22,16 +22,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
     public function getTables()
     {
         try {
-            Log::info('getTables method called');
 
             // Get all tables from the database
             $tables = $this->getAllDatabaseTables();
-            Log::info('Retrieved tables from getAllDatabaseTables', [
-                'count' => count($tables),
-            ]);
 
-            // Debug: Log all tables
-            Log::debug('All tables before filtering', ['tables' => $tables]);
 
             // Filter out Laravel system tables if needed
             $excludedTables = [
@@ -48,7 +42,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
             // Re-index the array after filtering
             $tables = array_values($tables);
-            Log::info('Tables after filtering', ['count' => count($tables)]);
 
             // Format the response
             $formattedTables = [];
@@ -59,9 +52,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 ];
             }
 
-            Log::info('Formatted tables for response', [
-                'count' => count($formattedTables),
-            ]);
 
             return response()->json([
                 'success' => true,
@@ -797,28 +787,16 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
     private function getAllDatabaseTables()
     {
         try {
-            Log::info('Getting all database tables');
 
             // Use the simplest and most reliable method - SHOW TABLES
             $databaseName = DB::connection()->getDatabaseName();
-            Log::info('Using SHOW TABLES to get tables', [
-                'database' => $databaseName,
-            ]);
 
             $tables = DB::select('SHOW TABLES');
             if (!empty($tables)) {
-                Log::info('Retrieved tables using SHOW TABLES', [
-                    'count' => count($tables),
-                ]);
 
                 // Determine the property name from the first table
                 $firstTable = $tables[0];
 
-                // Dump the first table object to see its structure
-                Log::debug('First table object structure', [
-                    'object' => json_encode($firstTable),
-                    'properties' => get_object_vars($firstTable),
-                ]);
 
                 $propertyName = 'Tables_in_' . strtolower($databaseName);
 
@@ -827,9 +805,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     $vars = get_object_vars($firstTable);
                     if (!empty($vars)) {
                         $propertyName = array_key_first($vars);
-                        Log::info('Using detected property name', [
-                            'property' => $propertyName,
-                        ]);
                     } else {
                         Log::warning('No properties found in table object');
                         return [];
@@ -840,10 +815,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     return $table->$propertyName;
                 }, $tables);
 
-                Log::info('Successfully extracted table names', [
-                    'count' => count($tableNames),
-                    'first_few' => array_slice($tableNames, 0, 5),
-                ]);
 
                 return $tableNames;
             }
@@ -867,10 +838,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
     private function getColumnType($tableName, $column)
     {
         try {
-            Log::info('Getting column type', [
-                'table' => $tableName,
-                'column' => $column,
-            ]);
 
             // Method 1: Using Schema Builder (Laravel 8+)
             if (
@@ -883,9 +850,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     $type = DB::connection()
                         ->getSchemaBuilder()
                         ->getColumnType($tableName, $column);
-                    Log::info('Retrieved column type using Schema Builder', [
-                        'type' => $type,
-                    ]);
 
                     // Check if it's a JSON type
                     if ($type === 'json') {
@@ -894,9 +858,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
                     return $type;
                 } catch (\Exception $e) {
-                    Log::info(
-                        'Schema Builder getColumnType failed: ' .
-                            $e->getMessage()
                     );
                 }
             }
@@ -906,12 +867,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 $databaseName = DB::connection()->getDatabaseName();
                 $connection = DB::connection()->getDriverName();
 
-                Log::info('Using raw query to get column type', [
-                    'database' => $databaseName,
-                    'table' => $tableName,
-                    'column' => $column,
-                    'connection' => $connection,
-                ]);
 
                 // Different query based on database type
                 if ($connection === 'pgsql') {
@@ -929,12 +884,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
                     if (!empty($result) && isset($result[0]->type)) {
                         $type = strtolower($result[0]->type);
-                        Log::info(
-                            'Retrieved column type using PostgreSQL query',
-                            [
-                                'type' => $type,
-                            ]
-                        );
 
                         // Check for JSON types
                         if ($type === 'json' || $type === 'jsonb') {
@@ -952,9 +901,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
                     if (!empty($result)) {
                         $type = strtolower($result[0]->DATA_TYPE);
-                        Log::info('Retrieved column type using raw query', [
-                            'type' => $type,
-                        ]);
 
                         // Check for JSON type
                         if ($type === 'json') {
@@ -965,9 +911,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     }
                 }
             } catch (\Exception $e) {
-                Log::info(
-                    'Raw query for column type failed: ' . $e->getMessage()
-                );
             }
 
             // Method 3: Try to get column listing and infer type
@@ -982,9 +925,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     if ($sample && property_exists($sample, $column)) {
                         $value = $sample->$column;
                         $inferredType = gettype($value);
-                        Log::info('Inferred column type from sample value', [
-                            'type' => $inferredType,
-                        ]);
 
                         // Check if it might be a JSON string
                         if ($inferredType === 'string') {
@@ -1001,9 +941,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                                     json_last_error() === JSON_ERROR_NONE &&
                                     is_array($decoded)
                                 ) {
-                                    Log::info(
-                                        'Detected JSON string from sample value'
-                                    );
                                     return 'json';
                                 }
                             }
@@ -1013,7 +950,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     }
                 }
             } catch (\Exception $e) {
-                Log::info('Inferring column type failed: ' . $e->getMessage());
             }
 
             Log::warning('Could not determine column type');
@@ -1419,12 +1355,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             // Get the query configuration
             $queryConfig = $validated['query'];
 
-            // Log the query configuration for debugging
-            Log::info('Received query configuration', [
-                'queryConfig' => $queryConfig,
-                'limit' => $limit,
-                'offset' => $offset,
-            ]);
 
             // If report_id is provided, load the report configuration
             if (isset($validated['report_id'])) {
@@ -1458,14 +1388,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             );
 
             // Log the result for debugging
-            Log::info('Query execution result', [
-                'resultCount' => count($result['data']),
-                'total' => $result['total'],
-                'firstRowColumns' =>
-                    count($result['data']) > 0
-                        ? array_keys((array) $result['data'][0])
-                        : [],
-            ]);
 
             return response()->json([
                 'success' => true,
@@ -1503,11 +1425,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         array $parameters = []
     ) {
         // Log the query configuration for debugging
-        Log::debug('Building query with configuration', [
-            'queryConfig' => $queryConfig,
-            'limit' => $limit,
-            'offset' => $offset,
-        ]);
 
         // Extract configuration
         $mainTable = $queryConfig['mainTable'] ?? null;
@@ -1557,9 +1474,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 }
             }
 
-            Log::debug('Retrieved table columns for relationship analysis', [
-                'tableCount' => count($tableColumns),
-            ]);
         } catch (\Exception $e) {
             Log::warning(
                 'Error retrieving database tables: ' . $e->getMessage()
@@ -1629,9 +1543,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         }
 
         // Log the relationship map for debugging
-        Log::debug('Table relationship map', [
-            'relationships' => $tableRelationships,
-        ]);
 
         // Second pass: Process the joins with the relationship information
         foreach ($joins as $index => $join) {
@@ -1803,18 +1714,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             $joinedTables[] = $targetTable;
 
             // Log the join for debugging
-            Log::info('Adding join', [
-                'index' => $index,
-                'joinType' => $joinType,
-                'sourceTable' => $sourceTable,
-                'sourceColumn' => $sourceColumn,
-                'targetTable' => $targetTable,
-                'targetColumn' => $targetColumn,
-                'joinedTables' => $joinedTables,
-                'isPivotTable' => $isPivotTable ?? false,
-                'targetHasSourceColumn' => $targetHasSourceColumn ?? false,
-                'tableWithTargetColumn' => $tableWithTargetColumn,
-            ]);
 
             // Determine join method
             // Normalize join type to lowercase and trim any extra spaces
@@ -1824,20 +1723,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             $joinType = str_replace(' join', '', $joinType);
 
             // Log the join type for debugging
-            Log::info("Processing join with type: '$joinType'", [
-                'originalJoinType' => $join['joinType'] ?? 'inner',
-                'normalizedJoinType' => $joinType,
-                'sourceTable' => $sourceTable,
-                'targetTable' => $targetTable,
-                'sourceColumn' => $sourceColumn,
-                'targetColumn' => $targetColumn,
-            ]);
 
             switch ($joinType) {
                 case 'left':
-                    Log::info(
-                        "Adding LEFT JOIN: $sourceTable.$sourceColumn = $targetTable.$targetColumn"
-                    );
                     $query->leftJoin(
                         $targetTable,
                         "$sourceTable.$sourceColumn",
@@ -1846,9 +1734,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     );
                     break;
                 case 'right':
-                    Log::info(
-                        "Adding RIGHT JOIN: $sourceTable.$sourceColumn = $targetTable.$targetColumn"
-                    );
                     $query->rightJoin(
                         $targetTable,
                         "$sourceTable.$sourceColumn",
@@ -1860,9 +1745,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     // Full outer join is not directly supported in all databases
                     // For MySQL, we can simulate it with a UNION of LEFT and RIGHT joins
                     // But for simplicity, we'll use LEFT JOIN as a fallback
-                    Log::info(
-                        "Adding LEFT JOIN (as fallback for FULL JOIN): $sourceTable.$sourceColumn = $targetTable.$targetColumn"
-                    );
                     $query->leftJoin(
                         $targetTable,
                         "$sourceTable.$sourceColumn",
@@ -1872,9 +1754,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     break;
                 case 'inner':
                 default:
-                    Log::info(
-                        "Adding INNER JOIN: $sourceTable.$sourceColumn = $targetTable.$targetColumn"
-                    );
                     $query->join(
                         $targetTable,
                         "$sourceTable.$sourceColumn",
@@ -1889,7 +1768,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         $selectColumns = [];
         
         // Log all columns for debugging
-        Log::info("All request columns received:", ['columns' => $requestColumns]);
         
         foreach ($requestColumns as $column) {
             $tableName = $column['table'] ?? $mainTable;
@@ -1901,13 +1779,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             }
 
             // Log each column processing
-            Log::info("Processing column", [
-                'table' => $column['table'] ?? 'null',
-                'column' => $columnName,
-                'isCalculated' => isset($column['isCalculated']) ? $column['isCalculated'] : 'not set',
-                'hasFormula' => isset($column['formula']),
-                'tableName' => $tableName
-            ]);
 
             // Check if this is a calculated field
             if (isset($column['isCalculated']) && $column['isCalculated'] === true) {
@@ -1921,10 +1792,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     if ($safeFormula) {
                         // Use the formula directly as SQL expression with alias
                         $selectColumns[] = DB::raw("({$safeFormula}) as `{$displayName}`");
-                        Log::info("Added calculated field", [
-                            'formula' => $safeFormula,
-                            'alias' => $displayName
-                        ]);
                     } else {
                         Log::warning("Calculated field formula failed validation", [
                             'formula' => $formula,
@@ -1949,11 +1816,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         }
 
         // Log the columns for debugging
-        Log::info('Columns to select', [
-            'selectColumns' => $selectColumns,
-            'columnCount' => count($selectColumns),
-            'originalColumns' => $requestColumns,
-        ]);
 
         // Make sure we have at least one column to select
         if (empty($selectColumns)) {
@@ -1964,14 +1826,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             $query->select("$mainTable.*");
         } else {
             // Select the specified columns directly on the existing query
-            Log::info('Selecting columns', ['columns' => $selectColumns]);
             $query->select($selectColumns);
 
             // Log the query after selecting columns
-            Log::info('Query after selecting columns', [
-                'sql' => $query->toSql(),
-                'bindings' => $query->getBindings(),
-            ]);
         }
 
         // Process filters
@@ -1984,19 +1841,12 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     $filterArray = array_merge($filterArray, $group['filters']);
                 }
             }
-            Log::debug('Extracted filters from groups', [
-                'filterArray' => $filterArray,
-            ]);
         } else {
             // This is the old format - a simple array of filters
             $filterArray = $filters;
         }
 
         // Log the filter structure for debugging
-        Log::debug('Processing filters', [
-            'filters' => $filters,
-            'filterArray' => $filterArray,
-        ]);
 
         // Add filters
         foreach ($filterArray as $filter) {
@@ -2085,23 +1935,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     $joinType = str_replace(' join', '', $joinType);
 
                     // Log the join type for debugging
-                    Log::info(
-                        "Processing count query join with type: '$joinType'",
-                        [
-                            'originalJoinType' => $join['joinType'] ?? 'inner',
-                            'normalizedJoinType' => $joinType,
-                            'sourceTable' => $sourceTable,
-                            'targetTable' => $targetTable,
-                            'sourceColumn' => $sourceColumn,
-                            'targetColumn' => $targetColumn,
-                        ]
-                    );
 
                     switch ($joinType) {
                         case 'left':
-                            Log::info(
-                                "Adding LEFT JOIN to count query: $sourceTable.$sourceColumn = $targetTable.$targetColumn"
-                            );
                             $distinctCountQuery->leftJoin(
                                 $targetTable,
                                 "$sourceTable.$sourceColumn",
@@ -2110,9 +1946,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                             );
                             break;
                         case 'right':
-                            Log::info(
-                                "Adding RIGHT JOIN to count query: $sourceTable.$sourceColumn = $targetTable.$targetColumn"
-                            );
                             $distinctCountQuery->rightJoin(
                                 $targetTable,
                                 "$sourceTable.$sourceColumn",
@@ -2124,9 +1957,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                             // Full outer join is not directly supported in all databases
                             // For MySQL, we can simulate it with a UNION of LEFT and RIGHT joins
                             // But for simplicity, we'll use LEFT JOIN as a fallback
-                            Log::info(
-                                "Adding LEFT JOIN (as fallback for FULL JOIN) to count query: $sourceTable.$sourceColumn = $targetTable.$targetColumn"
-                            );
                             $distinctCountQuery->leftJoin(
                                 $targetTable,
                                 "$sourceTable.$sourceColumn",
@@ -2136,9 +1966,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                             break;
                         case 'inner':
                         default:
-                            Log::info(
-                                "Adding INNER JOIN to count query: $sourceTable.$sourceColumn = $targetTable.$targetColumn"
-                            );
                             $distinctCountQuery->join(
                                 $targetTable,
                                 "$sourceTable.$sourceColumn",
@@ -2210,10 +2037,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 $countResult = $distinctCountQuery->first();
                 $total = $countResult->total_count ?? 0;
 
-                Log::debug('Count query with joins', [
-                    'total' => $total,
-                    'countSql' => $countQuery->toSql(),
-                ]);
             } catch (\Exception $e) {
                 // If there's an error with the distinct count, try a simpler approach
                 Log::warning(
@@ -2225,9 +2048,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     // Try a simpler approach - just count all rows and accept potential duplicates
                     $total = $countQuery->count();
 
-                    Log::info('Used simple count as fallback', [
-                        'total' => $total,
-                    ]);
                 } catch (\Exception $e2) {
                     // If even the simple count fails, just return a default value
                     Log::error(
@@ -2256,31 +2076,13 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         }
 
         // Log the final SQL query with all bindings replaced
-        Log::info('Final SQL query with bindings replaced', [
-            'sql' => $sql,
-        ]);
 
         // Log the final SQL query for debugging
-        Log::info('Executing SQL query', [
-            'sql' => $sql,
-            'bindings' => $bindings,
-            'joins' => $joins,
-            'selectColumns' => $selectColumns,
-            'mainTable' => $mainTable,
-            'columnCount' => count($selectColumns),
-        ]);
 
         // Execute the query
         $results = $query->get();
 
         // Log the results for debugging
-        Log::info('Query results', [
-            'resultCount' => count($results),
-            'firstRowColumns' =>
-                count($results) > 0 ? array_keys((array) $results[0]) : [],
-            'selectedColumns' => $selectColumns,
-            'actualQuery' => $query->toSql(),
-        ]);
 
         // If we have results but the columns don't match what we expected, log a warning
         if (count($results) > 0) {
@@ -2315,11 +2117,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
     {
         try {
             // Log the raw request data for debugging
-            Log::info('Export report request received', [
-                'request_data' => $request->all(),
-                'request_content_type' => $request->header('Content-Type'),
-                'request_method' => $request->method(),
-            ]);
 
             // Get the query parameter
             $query = $request->input('query');
@@ -2339,7 +2136,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
             // Get the format parameter
             $format = $request->input('format', 'pdf');
-            Log::info('Format requested', ['format' => $format]);
 
             // Get the report_id parameter
             $reportId = $request->input('report_id');
@@ -2360,9 +2156,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             }
 
             // Execute query
-            Log::info('Building query for export', [
-                'report_name' => $reportName,
-            ]);
 
             $result = $this->buildAndExecuteQuery(
                 $query,
@@ -2397,21 +2190,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 false
             );
 
-            Log::info('Dataset size validation', [
-                'row_count' => $rowCount,
-                'format' => $format,
-                'pdf_max_rows' => $pdfMaxRows,
-                'auto_switch_to_csv' => $autoSwitchToCsv,
-            ]);
 
             // Handle PDF row limits
             if ($format === 'pdf' && $pdfMaxRows && $rowCount > $pdfMaxRows) {
                 if ($autoSwitchToCsv) {
-                    Log::info('Auto-switching to CSV due to large dataset', [
-                        'original_format' => $format,
-                        'row_count' => $rowCount,
-                        'pdf_max_rows' => $pdfMaxRows,
-                    ]);
                     $format = 'csv';
                     $filename = str_replace('.pdf', '.csv', $filename);
                 } else {
@@ -2439,11 +2221,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             $date = date('Ymd');
             $filename = "{$date}_{$reportName}.{$format}";
 
-            Log::info('Generating export file', [
-                'filename' => $filename,
-                'format' => $format,
-                'row_count' => count($result['data']),
-            ]);
 
             // Generate the export file based on format
             return $this->generateExportFile(
@@ -3116,14 +2893,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
     private function generateExportFile($data, $filename, $format)
     {
         // Log the input parameters
-        Log::info('generateExportFile called with parameters', [
-            'filename' => $filename,
-            'format' => $format,
-            'format_type' => gettype($format),
-            'data_count' => is_countable($data)
-                ? count($data)
-                : 'not countable',
-        ]);
 
         // Normalize format
         if (is_string($format)) {
@@ -3146,7 +2915,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             $format = 'pdf'; // Default to PDF for unknown formats
         }
 
-        Log::info('Using format: ' . $format);
 
         // Convert data collection to array
         $dataArray = json_decode(json_encode($data), true);
@@ -3170,17 +2938,12 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         $headers = [];
         if (!empty($dataArray)) {
             $headers = array_keys($dataArray[0]);
-            Log::info('Headers extracted from data', [
-                'headers' => $headers,
-                'count' => count($headers),
-            ]);
         } else {
             Log::warning('No data to export, empty array provided');
         }
 
         // Create a temporary file
         $tempFile = tempnam(sys_get_temp_dir(), 'report_');
-        Log::info('Temporary file created', ['tempFile' => $tempFile]);
 
         if ($format === 'csv') {
             // Generate CSV file
@@ -3263,12 +3026,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             $pdfMemoryLimit = config('visns-packages.report_export.pdf_memory_limit', '1G');
             ini_set('memory_limit', $pdfMemoryLimit);
 
-            Log::info('PDF generation started', [
-                'original_memory_limit' => $originalMemoryLimit,
-                'pdf_memory_limit' => $pdfMemoryLimit,
-                'memory_usage_before' => memory_get_usage(true),
-                'row_count' => count($dataArray),
-            ]);
 
             // Determine which PDF engine to use
             $pdfEngine = config('visns-packages.report_export.pdf_engine', 'dompdf');
@@ -3278,10 +3035,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             // Auto-switch to TCPDF for large datasets
             if ($pdfEngine === 'dompdf' && $rowCount > $tcpdfThreshold) {
                 $pdfEngine = 'tcpdf';
-                Log::info('Auto-switching to TCPDF for large dataset', [
-                    'row_count' => $rowCount,
-                    'tcpdf_threshold' => $tcpdfThreshold,
-                ]);
             }
 
             // Check if dataset is too large even for optimized engines
@@ -3310,10 +3063,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 ], 413);
             }
 
-            Log::info('PDF engine selection', [
-                'engine' => $pdfEngine,
-                'row_count' => $rowCount,
-            ]);
 
             try {
                 // Generate PDF using selected engine
@@ -3363,11 +3112,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         $simplifiedStylingThreshold = config('visns-packages.report_export.simplified_styling_threshold', 1000);
         $useSimplifiedStyling = count($dataArray) > $simplifiedStylingThreshold;
 
-        Log::info('Generating PDF with DomPDF', [
-            'use_simplified_styling' => $useSimplifiedStyling,
-            'threshold' => $simplifiedStylingThreshold,
-            'row_count' => count($dataArray),
-        ]);
 
             // Create HTML content with conditional styling
             if ($useSimplifiedStyling) {
@@ -3499,11 +3243,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
                 // Log progress for large datasets
                 if ($processedRows % 500 === 0) {
-                    Log::info('PDF row processing progress', [
-                        'processed_rows' => $processedRows,
-                        'total_rows' => count($dataArray),
-                        'memory_usage' => memory_get_usage(true),
-                    ]);
                 }
             }
 
@@ -3512,11 +3251,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             </body>
             </html>';
 
-            Log::info('HTML content generated for PDF', [
-                'content_length' => strlen($html),
-                'filename' => $filename,
-                'memory_usage_before_pdf' => memory_get_usage(true),
-            ]);
 
             try {
                 // Set options based on dataset size
@@ -3538,20 +3272,12 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     ];
                 }
 
-                Log::info('Creating PDF with DomPDF options', [
-                    'options' => $options,
-                    'use_simplified_styling' => $useSimplifiedStyling,
-                ]);
 
                 // Generate PDF using Dompdf with memory-optimized options
                 $pdf = Pdf::loadHTML($html)
                     ->setOptions($options)
                     ->setPaper('a4', 'landscape');
 
-                Log::info('DomPDF generated successfully', [
-                    'memory_usage_after_pdf' => memory_get_usage(true),
-                    'memory_peak' => memory_get_peak_usage(true),
-                ]);
 
                 // Reset memory limit to original value
                 ini_set('memory_limit', $originalMemoryLimit);
@@ -3585,10 +3311,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             // Include TCPDF
             require_once(base_path('vendor/tecnickcom/tcpdf/tcpdf.php'));
             
-            Log::info('Generating PDF with TCPDF', [
-                'row_count' => count($dataArray),
-                'memory_before' => memory_get_usage(true),
-            ]);
 
             // Create new PDF document
             $pdf = new \TCPDF('L', 'mm', 'A4', true, 'UTF-8', false);
@@ -3673,11 +3395,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 
                 // Log progress and manage memory
                 if ($processedRows % 200 === 0) {
-                    Log::info('TCPDF processing progress', [
-                        'processed_rows' => $processedRows,
-                        'total_rows' => count($dataArray),
-                        'memory_usage' => memory_get_usage(true),
-                    ]);
                     
                     // Force garbage collection
                     if (function_exists('gc_collect_cycles')) {
@@ -3686,10 +3403,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 }
             }
 
-            Log::info('TCPDF generation completed', [
-                'memory_usage_after' => memory_get_usage(true),
-                'memory_peak' => memory_get_peak_usage(true),
-            ]);
 
             // Reset memory limit
             ini_set('memory_limit', $originalMemoryLimit);
@@ -3732,11 +3445,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             ]);
         }
 
-        Log::info('Generating chunked PDF', [
-            'total_rows' => count($dataArray),
-            'chunk_size' => $chunkSize,
-            'num_chunks' => count($chunks),
-        ]);
 
         try {
             // For now, generate a single PDF with chunked processing
@@ -4126,13 +3834,6 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         // Apply constraints and distribute remaining width
         $constrainedWidths = $this->applyWidthConstraints($baseWidths, $minWidth, $maxWidth, $totalWidth);
         
-        Log::info('Column width calculation', [
-            'total_width' => $totalWidth,
-            'column_count' => $columnCount,
-            'column_types' => $columnTypes,
-            'base_widths' => $baseWidths,
-            'final_widths' => $constrainedWidths,
-        ]);
         
         return $constrainedWidths;
     }
