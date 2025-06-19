@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is `visns-packages`, a comprehensive Laravel package that provides enhanced authentication, file management, two-factor authentication, and report building capabilities for Laravel applications. It's developed by Omnia Global and serves as a shared library across multiple Laravel projects.
+This is `visns-packages`, a comprehensive Laravel package that provides enhanced authentication, file management, two-factor authentication, report building, and proposal generation capabilities for Laravel applications. It's developed by Omnia Global and serves as a shared library across multiple Laravel projects.
 
 **Important**: This is a Laravel package designed to be installed into existing Laravel applications, not a standalone Laravel project. When working with this codebase, remember that it will be consumed by other Laravel applications via Composer.
 
@@ -19,6 +19,8 @@ This is `visns-packages`, a comprehensive Laravel package that provides enhanced
   - `UserController`: User management, notifications, and 2FA setup
   - `ReportBuilderController`: Database schema exploration and custom report generation
   - `PDFController`: PDF generation from views or HTML
+  - `ProposalTemplateController`: Proposal template management
+  - `BrandingProfileController`: Company branding and styling
   - `FileController`: Polymorphic file management
   - `PermissionController`, `RoleController`: Role-based access control
   - `AuditController`: Change tracking and audit logs
@@ -29,6 +31,12 @@ This is `visns-packages`, a comprehensive Laravel package that provides enhanced
   - `ReportBuilder`: Custom report configurations
   - `Audit`: Change tracking records
   - `TwoFactorRememberToken`: Device-specific 2FA bypass tokens
+  - `ProposalTemplate`: Proposal template configurations
+  - `ProposalTemplateSection`: Individual sections within templates
+  - `BrandingProfile`: Company branding and styling profiles
+
+- **Services**: Business logic and processing
+  - `ProposalAssemblyService`: Assembles complete proposals from templates and data
 
 - **Traits**: Reusable functionality
   - `UsePackageUser`: Adds package functionality to existing User models
@@ -43,6 +51,7 @@ This is `visns-packages`, a comprehensive Laravel package that provides enhanced
 6. **Model Merging**: Advanced functionality to merge attributes and relationships between models
 7. **Social Authentication**: Integration with Laravel Socialite for OAuth providers
 8. **Audit System**: Comprehensive change tracking using Laravel Auditing
+9. **Proposal System**: Professional proposal generation with templates, branding, and dynamic content
 
 ## Development Commands
 
@@ -71,6 +80,21 @@ php artisan meilisearch:sync --model=Customer               # Sync specific mode
 php artisan meilisearch:sync --flush --force                # Flush and sync without confirmation
 php artisan meilisearch:sync --chunk=50                     # Custom batch size
 php artisan meilisearch:sync --namespace="MyPackage\Models" # Sync from custom namespace
+```
+
+### Proposal System Commands
+
+The package includes commands for managing the proposal system:
+
+```bash
+# Create default proposal template with sections
+php artisan db:seed --class="Visnsstudio\VisnsPackages\Database\Seeders\DefaultProposalTemplateSeeder"
+
+# Publish proposal migrations and seeders
+php artisan vendor:publish --tag=visns-packages-migrations
+
+# Run migrations to create proposal tables
+php artisan migrate
 ```
 
 ### Testing
@@ -175,6 +199,48 @@ MEILISEARCH_HOST=http://localhost:7700
 VISNS_DISABLE_MEILISEARCH=false  # Set to true to force disable
 ```
 
+### Proposal System Configuration
+
+Configure proposal generation features:
+
+```php
+// In config/visns-packages.php
+'proposal' => [
+    'features' => [
+        'enable_proposal_mode' => true,
+        'enable_template_builder' => true,
+        'enable_branding_profiles' => true,
+        'enable_dynamic_variables' => true,
+    ],
+    'templates' => [
+        'default_template_name' => 'Default Business Proposal',
+        'auto_generate_toc' => true,
+        'variable_prefix' => '{{',
+        'variable_suffix' => '}}',
+    ],
+    'pdf' => [
+        'default_paper' => 'a4',
+        'default_orientation' => 'portrait',
+        'default_margins' => '40px',
+        'enable_page_numbers' => true,
+    ],
+    'branding' => [
+        'logo_max_size' => '2MB',
+        'logo_allowed_types' => ['jpg', 'jpeg', 'png', 'svg'],
+        'default_colors' => [
+            'primary' => '#2563eb',
+            'secondary' => '#64748b', 
+            'accent' => '#059669',
+        ],
+    ],
+    'sections' => [
+        'allow_custom_sections' => true,
+        'required_sections' => ['cover_page', 'toc', 'overview', 'quote_items'],
+        'static_sections' => ['terms_conditions', 'agreement_signature'],
+    ],
+],
+```
+
 ## API Patterns
 
 ### Dynamic Controller Usage
@@ -210,6 +276,36 @@ POST /ajax/reportBuilder/execute
 POST /ajax/reportBuilder/export
 ```
 
+### Proposal System API
+
+```bash
+# Template management
+GET /ajax/proposal-templates                    # List templates
+POST /ajax/proposal-templates                   # Create template
+GET /ajax/proposal-templates/{id}               # Get template
+PUT /ajax/proposal-templates/{id}               # Update template
+DELETE /ajax/proposal-templates/{id}            # Delete template
+POST /ajax/proposal-templates/table             # Table data
+POST /ajax/proposal-templates/dropdown          # Dropdown data
+POST /ajax/proposal-templates/{id}/preview      # Preview template
+POST /ajax/proposal-templates/{id}/duplicate    # Duplicate template
+
+# Branding profiles
+GET /ajax/branding-profiles                     # List profiles
+POST /ajax/branding-profiles                    # Create profile
+GET /ajax/branding-profiles/{id}                # Get profile
+PUT /ajax/branding-profiles/{id}                # Update profile
+DELETE /ajax/branding-profiles/{id}             # Delete profile
+POST /ajax/branding-profiles/table              # Table data
+POST /ajax/branding-profiles/dropdown           # Dropdown data
+GET /ajax/branding-profiles/{id}/css            # Get CSS
+POST /ajax/branding-profiles/{id}/upload-logo   # Upload logo
+
+# PDF generation
+POST /ajax/pdf/generate-proposal                # Generate proposal PDF
+POST /ajax/pdf/preview-proposal                 # Preview proposal HTML
+```
+
 ## Dependencies
 
 ### Required PHP Packages
@@ -224,6 +320,8 @@ POST /ajax/reportBuilder/export
 - Laravel Socialite (for social authentication)
 - Spatie Laravel Permission (for roles/permissions)
 - Laravel Auditing (for change tracking)
+- VerumConsilium Browsershot (for advanced PDF generation)
+- DOMDocument (for HTML processing in proposals)
 
 ## Important Notes
 
@@ -234,3 +332,7 @@ POST /ajax/reportBuilder/export
 - Search functionality automatically detects and uses Meilisearch when available
 - Two-factor authentication includes device remembering for 30 days
 - Model merging supports complex relationship handling and attribute prioritization
+- Proposal system supports both static and dynamic content sections
+- Template sections can be reordered and customized per project
+- Branding profiles support logo uploads and custom CSS generation
+- Proposal generation integrates seamlessly with existing quote systems

@@ -1650,6 +1650,8 @@ Route::prefix('ajax/pdf')
         Route::post('/generate-from-html', 'generatePDFFromHTML');
         Route::post('/generate-custom', 'generateCustomPDF');
         Route::post('/generate-quote', 'generateQuotePDF');
+        Route::post('/generate-proposal', 'generateProposalPDF');
+        Route::post('/preview-proposal', 'previewProposalHTML');
     });
 
 // PDF API routes
@@ -1661,6 +1663,8 @@ Route::prefix('api/pdf')
         Route::post('/generate-from-html', 'generatePDFFromHTML');
         Route::post('/generate-custom', 'generateCustomPDF');
         Route::post('/generate-quote', 'generateQuotePDF');
+        Route::post('/generate-proposal', 'generateProposalPDF');
+        Route::post('/preview-proposal', 'previewProposalHTML');
     });
 ```
 

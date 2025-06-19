@@ -364,4 +364,155 @@ class PDFController extends \App\Http\Controllers\Controller
             );
         }
     }
+
+    /**
+     * Generate a Proposal PDF with multi-page support
+     * Backward compatible - leverages existing PDF generation infrastructure
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\Response
+     */
+    public function generateProposalPDF(Request $request)
+    {
+        try {
+            // Validate request
+            $validated = $request->validate([
+                'proposal_data' => 'required|array',
+                'template_id' => 'nullable|integer',
+                'branding_id' => 'nullable|integer',
+                'filename' => 'nullable|string',
+                'paper' => 'nullable|string',
+                'orientation' => 'nullable|string|in:portrait,landscape',
+                'download' => 'nullable|boolean',
+                'sections' => 'nullable|array',
+            ]);
+
+            // Use the proposal assembly service to build the proposal
+            $proposalService = app(\Visnsstudio\VisnsPackages\Services\ProposalAssemblyService::class);
+            
+            $proposalData = $proposalService->assembleProposal($validated);
+
+            // Get filename (default: proposal.pdf)
+            $filename = $validated['filename'] ?? 'proposal-' . date('Y-m-d') . '.pdf';
+
+            // Get paper size (default: a4)
+            $paper = $validated['paper'] ?? 'a4';
+
+            // Get orientation (default: portrait)
+            $orientation = $validated['orientation'] ?? 'portrait';
+
+            // Set enhanced options for proposal PDFs
+            $options = [
+                'isHtml5ParserEnabled' => true,
+                'isRemoteEnabled' => true,
+                'isPhpEnabled' => true,
+                'defaultFont' => 'sans-serif',
+                'dpi' => 150,
+                'defaultPaperSize' => $paper,
+                'defaultMediaType' => 'screen',
+                'defaultPaperOrientation' => $orientation,
+                'isFontSubsettingEnabled' => true,
+                'isJavascriptEnabled' => false,
+                'debugKeepTemp' => false,
+                'chroot' => public_path(),
+            ];
+
+            // Generate PDF using the assembled HTML content
+            $pdf = PDF::loadHTML($proposalData['html'])
+                ->setOptions($options)
+                ->setPaper($paper, $orientation);
+
+            // Return PDF as download or inline
+            $download = $validated['download'] ?? true;
+
+            if ($download) {
+                return $pdf->download($filename);
+            } else {
+                return $pdf->stream($filename);
+            }
+        } catch (\Exception $e) {
+            Log::error('Error generating Proposal PDF: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error generating Proposal PDF',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
+
+    /**
+     * Preview a Proposal without downloading
+     * Backward compatible method for proposal preview
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\Response
+     */
+    public function previewProposalPDF(Request $request)
+    {
+        try {
+            // Set download to false for preview
+            $request->merge(['download' => false]);
+            
+            return $this->generateProposalPDF($request);
+        } catch (\Exception $e) {
+            Log::error('Error previewing Proposal PDF: ' . $e->getMessage());
+
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error previewing Proposal PDF',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
+
+    /**
+     * Generate Proposal HTML for preview
+     * Returns HTML content without PDF generation
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function generateProposalHTML(Request $request)
+    {
+        try {
+            // Validate request
+            $validated = $request->validate([
+                'proposal_data' => 'required|array',
+                'template_id' => 'nullable|integer',
+                'branding_id' => 'nullable|integer',
+                'sections' => 'nullable|array',
+            ]);
+
+            // Use the proposal assembly service to build the proposal
+            $proposalService = app(\Visnsstudio\VisnsPackages\Services\ProposalAssemblyService::class);
+            
+            $proposalData = $proposalService->assembleProposal($validated);
+
+            return response()->json([
+                'success' => true,
+                'html' => $proposalData['html'],
+                'sections' => $proposalData['sections'],
+                'metadata' => $proposalData['metadata']
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error generating Proposal HTML: ' . $e->getMessage());
+
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error generating Proposal HTML',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
 }

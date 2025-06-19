@@ -83,6 +83,11 @@ return [
         // 'clients', 
         // 'leads',
         // 'projects',
+        
+        // Proposal system entities (backward compatible)
+        'proposalTemplates',
+        'proposalTemplateSections',
+        'brandingProfiles',
     ],
 
     /*
@@ -368,6 +373,154 @@ return [
             'json_formatting_style' => env('VISNS_PDF_JSON_STYLE', 'compact'), // 'compact', 'detailed', 'minimal'
             'max_cell_height' => env('VISNS_PDF_MAX_CELL_HEIGHT', 50), // mm
             'line_height_multiplier' => env('VISNS_PDF_LINE_HEIGHT', 1.2),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Proposal System Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Configuration options for the proposal generation system, including
+    | templates, branding, and PDF generation settings.
+    |
+    */
+    'proposal' => [
+        /*
+        |--------------------------------------------------------------------------
+        | Template Configuration
+        |--------------------------------------------------------------------------
+        |
+        | Settings for proposal template management and rendering.
+        |
+        */
+        'templates' => [
+            'default_template' => env('VISNS_PROPOSAL_DEFAULT_TEMPLATE', 'Standard Business Proposal'),
+            'template_path' => 'proposals',
+            'allowed_variables' => [
+                '{{customer_name}}' => 'Customer Name',
+                '{{customer_address}}' => 'Customer Address',
+                '{{quote_number}}' => 'Quote/Proposal Number',
+                '{{quote_date}}' => 'Quote Date',
+                '{{current_date}}' => 'Current Date',
+                '{{total_amount}}' => 'Total Amount',
+                '{{company_name}}' => 'Company Name',
+                '{{company_address}}' => 'Company Address',
+                '{{company_phone}}' => 'Company Phone',
+                '{{company_email}}' => 'Company Email',
+                '{{project_manager}}' => 'Project Manager',
+                '{{due_date}}' => 'Due Date',
+                '{{terms_and_conditions}}' => 'Terms and Conditions',
+            ],
+            'section_types' => [
+                'cover_page' => 'Cover Page',
+                'toc' => 'Table of Contents',
+                'content' => 'Content Section',
+                'quote_items' => 'Quote Items',
+                'terms' => 'Terms & Conditions',
+            ],
+        ],
+
+        /*
+        |--------------------------------------------------------------------------
+        | PDF Generation Settings
+        |--------------------------------------------------------------------------
+        |
+        | Configuration for proposal PDF generation, building on existing
+        | PDF infrastructure for enhanced multi-page document support.
+        |
+        */
+        'pdf' => [
+            'multi_page_support' => true,
+            'toc_generation' => true,
+            'section_numbering' => true,
+            'page_breaks' => true,
+            'default_paper' => env('VISNS_PROPOSAL_PAPER_SIZE', 'a4'),
+            'default_orientation' => env('VISNS_PROPOSAL_ORIENTATION', 'portrait'),
+            'margins' => [
+                'top' => 20,
+                'right' => 15,
+                'bottom' => 20,
+                'left' => 15,
+            ],
+            'header_footer' => [
+                'show_header' => false,
+                'show_footer' => true,
+                'footer_content' => '{{company_name}} | Page {PAGE_NUM} of {PAGE_COUNT}',
+            ],
+        ],
+
+        /*
+        |--------------------------------------------------------------------------
+        | Branding Configuration
+        |--------------------------------------------------------------------------
+        |
+        | Settings for branding profile management and application.
+        |
+        */
+        'branding' => [
+            'default_profile' => env('VISNS_PROPOSAL_DEFAULT_BRANDING', 'Default'),
+            'logo_max_size' => env('VISNS_PROPOSAL_LOGO_MAX_SIZE', 2048), // KB
+            'supported_formats' => ['png', 'jpg', 'jpeg', 'svg'],
+            'logo_storage_path' => 'branding/logos',
+            'default_colors' => [
+                'primary' => '#2563eb',
+                'secondary' => '#64748b',
+                'accent' => '#059669',
+            ],
+            'default_fonts' => [
+                'heading' => 'Arial, sans-serif',
+                'body' => 'Arial, sans-serif',
+            ],
+        ],
+
+        /*
+        |--------------------------------------------------------------------------
+        | Custom Variables
+        |--------------------------------------------------------------------------
+        |
+        | Project-specific variables that can be used in proposal templates.
+        | These will be merged with the system variables above.
+        |
+        */
+        'custom_variables' => [
+            // Example:
+            // '{{project_manager}}' => 'user.name',
+            // '{{company_abn}}' => 'settings.company_abn',
+        ],
+
+        /*
+        |--------------------------------------------------------------------------
+        | Feature Flags
+        |--------------------------------------------------------------------------
+        |
+        | Enable or disable specific proposal system features for backward
+        | compatibility and gradual rollout.
+        |
+        */
+        'features' => [
+            'enable_proposal_mode' => env('VISNS_PROPOSAL_ENABLE', true),
+            'enable_template_builder' => env('VISNS_PROPOSAL_TEMPLATE_BUILDER', true),
+            'enable_branding_profiles' => env('VISNS_PROPOSAL_BRANDING', true),
+            'enable_multi_page_pdf' => env('VISNS_PROPOSAL_MULTIPAGE', true),
+            'backward_compatible_quotes' => env('VISNS_PROPOSAL_BACKWARD_COMPAT', true),
+        ],
+
+        /*
+        |--------------------------------------------------------------------------
+        | Integration Settings
+        |--------------------------------------------------------------------------
+        |
+        | Settings for integrating the proposal system with existing quote
+        | functionality and other system components.
+        |
+        */
+        'integration' => [
+            'quote_model' => env('VISNS_QUOTE_MODEL', 'App\\Models\\Quote'),
+            'auto_create_proposals' => env('VISNS_AUTO_CREATE_PROPOSALS', false),
+            'default_proposal_status' => 'draft',
+            'file_attachment_enabled' => true,
+            'email_integration_enabled' => false,
         ],
     ],
 ];

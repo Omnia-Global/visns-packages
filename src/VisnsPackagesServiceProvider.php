@@ -17,6 +17,8 @@ use Visnsstudio\VisnsPackages\Controllers\RoleController;
 use Visnsstudio\VisnsPackages\Controllers\SocialiteController;
 use Visnsstudio\VisnsPackages\Controllers\ReportBuilderController;
 use Visnsstudio\VisnsPackages\Controllers\PDFController;
+use Visnsstudio\VisnsPackages\Controllers\ProposalTemplateController;
+use Visnsstudio\VisnsPackages\Controllers\BrandingProfileController;
 use Visnsstudio\VisnsPackages\Middleware\AcceptJson;
 use Visnsstudio\VisnsPackages\Services\FilePathResolver;
 
@@ -317,6 +319,42 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                                 'generateCustomPDF'
                             );
                             Route::post('/generate-quote', 'generateQuotePDF');
+                            
+                            // Proposal PDF generation routes (backward compatible)
+                            Route::post('/generate-proposal', 'generateProposalPDF');
+                            Route::post('/preview-proposal', 'previewProposalPDF');
+                            Route::post('/generate-proposal-html', 'generateProposalHTML');
+                        });
+
+                    // Proposal Template routes (backward compatible)
+                    Route::prefix('ajax/proposal-templates')
+                        ->controller(ProposalTemplateController::class)
+                        ->group(function () {
+                            Route::get('/', 'index');
+                            Route::post('/', 'store');
+                            Route::get('/{id}', 'show');
+                            Route::put('/{id}', 'update');
+                            Route::delete('/{id}', 'destroy');
+                            Route::post('/dropdown', 'dropdown');
+                            Route::get('/{id}/preview', 'preview');
+                            Route::post('/{id}/duplicate', 'duplicate');
+                            Route::get('/variables/available', 'getAvailableVariables');
+                        });
+
+                    // Branding Profile routes (backward compatible)  
+                    Route::prefix('ajax/branding-profiles')
+                        ->controller(BrandingProfileController::class)
+                        ->group(function () {
+                            Route::get('/', 'index');
+                            Route::post('/', 'store');
+                            Route::get('/{id}', 'show');
+                            Route::put('/{id}', 'update');
+                            Route::delete('/{id}', 'destroy');
+                            Route::post('/dropdown', 'dropdown');
+                            Route::get('/default', 'getDefault');
+                            Route::post('/apply-branding', 'applyBranding');
+                            Route::get('/{id}/preview', 'preview');
+                            Route::post('/{id}/duplicate', 'duplicate');
                         });
 
                     Route::controller(AuthController::class)->group(
@@ -391,6 +429,11 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                                 'generateCustomPDF'
                             );
                             Route::post('/generate-quote', 'generateQuotePDF');
+                            
+                            // Proposal PDF generation API routes (backward compatible)  
+                            Route::post('/generate-proposal', 'generateProposalPDF');
+                            Route::post('/preview-proposal', 'previewProposalPDF');
+                            Route::post('/generate-proposal-html', 'generateProposalHTML');
                         });
                 });
 
