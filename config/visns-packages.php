@@ -92,6 +92,39 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Entity Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Advanced configuration for each dynamic entity, allowing custom controllers,
+    | middleware, and permissions to be specified for individual entities.
+    |
+    */
+    'entity_config' => [
+        'proposalTemplates' => [
+            'controller' => \Visnsstudio\VisnsPackages\Controllers\ProposalTemplateController::class,
+            'middleware' => ['auth', 'permission:Settings'],
+            'model' => \Visnsstudio\VisnsPackages\Models\ProposalTemplate::class,
+            'table_endpoint' => true,
+            'dropdown_endpoint' => true,
+            'preview_endpoint' => true,
+            'duplicate_endpoint' => true,
+            'soft_deletes' => true,
+        ],
+        'brandingProfiles' => [
+            'controller' => \Visnsstudio\VisnsPackages\Controllers\BrandingProfileController::class,
+            'middleware' => ['auth', 'permission:Settings'],
+            'model' => \Visnsstudio\VisnsPackages\Models\BrandingProfile::class,
+            'table_endpoint' => true,
+            'dropdown_endpoint' => true,
+            'preview_endpoint' => true,
+            'duplicate_endpoint' => true,
+            'file_upload' => true,
+            'soft_deletes' => true,
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | User Model
     |--------------------------------------------------------------------------
     |

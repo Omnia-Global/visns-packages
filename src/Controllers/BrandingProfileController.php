@@ -41,6 +41,60 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
     }
 
     /**
+     * Get branding profiles for admin table view (integrates with GenericIndex/GenericGrid)
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function table(Request $request)
+    {
+        try {
+            $query = BrandingProfile::query();
+
+            // Apply search if provided
+            if ($request->filled('search')) {
+                $search = $request->search;
+                $query->where(function($q) use ($search) {
+                    $q->where('name', 'like', "%{$search}%")
+                      ->orWhere('company_name', 'like', "%{$search}%");
+                });
+            }
+
+            // Apply sorting
+            $sortBy = $request->get('sortBy', 'name');
+            $sortOrder = $request->get('sort', 'asc');
+            
+            // Validate sort column for security
+            $allowedSortColumns = ['id', 'name', 'company_name', 'is_default', 'created_at', 'updated_at'];
+            if (in_array($sortBy, $allowedSortColumns)) {
+                $query->orderBy($sortBy, $sortOrder);
+            }
+
+            // Apply where clauses for filtering
+            if ($request->filled('where')) {
+                foreach ($request->where as $condition) {
+                    if (isset($condition['id']) && isset($condition['value'])) {
+                        $query->where($condition['id'], $condition['value']);
+                    }
+                }
+            }
+
+            // Get paginated results
+            $perPage = $request->get('take', 25);
+            $profiles = $query->paginate($perPage);
+
+            return response()->json($profiles);
+        } catch (\Exception $e) {
+            Log::error('Error fetching branding profiles table: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Error fetching branding profiles table',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Get branding profiles for dropdown (integrates with existing dropdown patterns)
      *
      * @param Request $request

@@ -42,6 +42,60 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
     }
 
     /**
+     * Get templates for admin table view (integrates with GenericIndex/GenericGrid)
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function table(Request $request)
+    {
+        try {
+            $query = ProposalTemplate::query();
+
+            // Apply search if provided
+            if ($request->filled('search')) {
+                $search = $request->search;
+                $query->where(function($q) use ($search) {
+                    $q->where('name', 'like', "%{$search}%")
+                      ->orWhere('description', 'like', "%{$search}%");
+                });
+            }
+
+            // Apply sorting
+            $sortBy = $request->get('sortBy', 'name');
+            $sortOrder = $request->get('sort', 'asc');
+            
+            // Validate sort column for security
+            $allowedSortColumns = ['id', 'name', 'description', 'is_default', 'created_at', 'updated_at'];
+            if (in_array($sortBy, $allowedSortColumns)) {
+                $query->orderBy($sortBy, $sortOrder);
+            }
+
+            // Apply where clauses for filtering
+            if ($request->filled('where')) {
+                foreach ($request->where as $condition) {
+                    if (isset($condition['id']) && isset($condition['value'])) {
+                        $query->where($condition['id'], $condition['value']);
+                    }
+                }
+            }
+
+            // Get paginated results
+            $perPage = $request->get('take', 25);
+            $templates = $query->withCount('sections')->paginate($perPage);
+
+            return response()->json($templates);
+        } catch (\Exception $e) {
+            Log::error('Error fetching proposal templates table: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Error fetching proposal templates table',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Get templates for dropdown (integrates with existing dropdown patterns)
      *
      * @param Request $request
