@@ -345,6 +345,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                             Route::get('/{id}', 'show');
                             Route::put('/{id}', 'update');
                             Route::delete('/{id}', 'destroy');
+                            Route::post('/table', 'table');
                             Route::post('/dropdown', 'dropdown');
                             Route::get('/{id}/preview', 'preview');
                             Route::post('/{id}/duplicate', 'duplicate');
@@ -360,6 +361,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                             Route::get('/{id}', 'show');
                             Route::put('/{id}', 'update');
                             Route::delete('/{id}', 'destroy');
+                            Route::post('/table', 'table');
                             Route::post('/dropdown', 'dropdown');
                             Route::get('/default', 'getDefault');
                             Route::post('/apply-branding', 'applyBranding');
@@ -460,41 +462,48 @@ class VisnsPackagesServiceProvider extends ServiceProvider
     protected function registerDynamicEntityRoutes()
     {
         $dynamicEntities = config('visns-packages.dynamic_entities', []);
+        $entityConfig = config('visns-packages.entity_config', []);
         
         if (!empty($dynamicEntities)) {
             foreach ($dynamicEntities as $entity) {
-                Route::prefix("ajax/{$entity}")
-                    ->controller(\Visnsstudio\VisnsPackages\Controllers\DynamicController::class)
-                    ->group(function () use ($entity) {
-                        Route::get('/', 'index');
-                        Route::post('/', 'store');
-                        Route::get('/{id}', 'show');
-                        Route::put('/{id}', 'update');
-                        Route::post('/updateGallery/{id}', 'updateGallery');
-                        Route::post('/{id}/clone', 'clone');
-                        Route::post('/merge', 'mergeModels');
-                        Route::post('/detect-duplicates', 'detectDuplicates');
-                        Route::delete('/{id}', 'destroy');
-                        Route::post('/table', 'table');
-                        Route::post('/dropdown', 'dropdown');
-                    });
+                // Check if entity has a specific controller defined in entity_config
+                $hasSpecificController = isset($entityConfig[$entity]) && isset($entityConfig[$entity]['controller']);
+                
+                // Only register dynamic routes for entities that don't have specific controllers
+                if (!$hasSpecificController) {
+                    Route::prefix("ajax/{$entity}")
+                        ->controller(\Visnsstudio\VisnsPackages\Controllers\DynamicController::class)
+                        ->group(function () use ($entity) {
+                            Route::get('/', 'index');
+                            Route::post('/', 'store');
+                            Route::get('/{id}', 'show');
+                            Route::put('/{id}', 'update');
+                            Route::post('/updateGallery/{id}', 'updateGallery');
+                            Route::post('/{id}/clone', 'clone');
+                            Route::post('/merge', 'mergeModels');
+                            Route::post('/detect-duplicates', 'detectDuplicates');
+                            Route::delete('/{id}', 'destroy');
+                            Route::post('/table', 'table');
+                            Route::post('/dropdown', 'dropdown');
+                        });
 
-                Route::prefix("ajax/{$entity}/json")
-                    ->controller(\Visnsstudio\VisnsPackages\Controllers\DynamicJsonController::class)
-                    ->group(function () use ($entity) {
-                        Route::post('/sortList', 'jsonSortList');
-                        Route::post('/sortUpdate', 'jsonSortUpdate');
-                        Route::post('/table', 'jsonTable');
-                        Route::post('/get', 'jsonGet');
-                        Route::post('/set', 'jsonSet');
-                        Route::post('/push', 'jsonPush');
-                        Route::post('/where', 'jsonWhere');
-                        Route::post('/search', 'jsonSearch');
-                        Route::post('/clone', 'jsonClone');
-                        Route::post('/toggle', 'jsonToggle');
-                        Route::post('/delete', 'jsonDelete');
-                        Route::post('/dropdown', 'jsonDropdown');
-                    });
+                    Route::prefix("ajax/{$entity}/json")
+                        ->controller(\Visnsstudio\VisnsPackages\Controllers\DynamicJsonController::class)
+                        ->group(function () use ($entity) {
+                            Route::post('/sortList', 'jsonSortList');
+                            Route::post('/sortUpdate', 'jsonSortUpdate');
+                            Route::post('/table', 'jsonTable');
+                            Route::post('/get', 'jsonGet');
+                            Route::post('/set', 'jsonSet');
+                            Route::post('/push', 'jsonPush');
+                            Route::post('/where', 'jsonWhere');
+                            Route::post('/search', 'jsonSearch');
+                            Route::post('/clone', 'jsonClone');
+                            Route::post('/toggle', 'jsonToggle');
+                            Route::post('/delete', 'jsonDelete');
+                            Route::post('/dropdown', 'jsonDropdown');
+                        });
+                }
             }
         }
     }
