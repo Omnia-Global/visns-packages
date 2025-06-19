@@ -84,6 +84,16 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             'visns-packages-migrations'
         );
 
+        // Publish seeders
+        $this->publishes(
+            [
+                __DIR__ . '/../database/seeders' => database_path(
+                    'seeders'
+                ),
+            ],
+            'visns-packages-seeders'
+        );
+
         // Publish config
         $this->publishes(
             [

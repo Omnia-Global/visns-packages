@@ -92,6 +92,7 @@ php artisan db:seed --class="Visnsstudio\VisnsPackages\Database\Seeders\DefaultP
 
 # Publish proposal migrations and seeders
 php artisan vendor:publish --tag=visns-packages-migrations
+php artisan vendor:publish --tag=visns-packages-seeders
 
 # Run migrations to create proposal tables
 php artisan migrate
@@ -131,6 +132,9 @@ php artisan visns:publish-migrations
 
 # Or using standard Laravel command
 php artisan vendor:publish --tag=visns-packages-migrations
+
+# Publish seeders
+php artisan vendor:publish --tag=visns-packages-seeders
 
 # Publish configuration
 php artisan vendor:publish --tag=visns-packages-config

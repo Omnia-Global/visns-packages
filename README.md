@@ -91,6 +91,12 @@ Or using Laravel's vendor:publish command:
 php artisan vendor:publish --tag=visns-packages-migrations
 ```
 
+Optionally, publish the seeders:
+
+```bash
+php artisan vendor:publish --tag=visns-packages-seeders
+```
+
 Optionally, publish the configuration file:
 
 ```bash
