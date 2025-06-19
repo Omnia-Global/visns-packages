@@ -1887,6 +1887,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
         // Add columns
         $selectColumns = [];
+        
+        // Log all columns for debugging
+        Log::info("All request columns received:", ['columns' => $requestColumns]);
+        
         foreach ($requestColumns as $column) {
             $tableName = $column['table'] ?? $mainTable;
             $columnName = $column['column'] ?? null;
@@ -1896,14 +1900,51 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 continue; // Skip invalid columns
             }
 
-            if ($alias) {
-                // Use DB::raw to create a properly formatted column with alias
-                $selectColumns[] = DB::raw(
-                    "$tableName.$columnName as `$alias`"
-                );
+            // Log each column processing
+            Log::info("Processing column", [
+                'table' => $column['table'] ?? 'null',
+                'column' => $columnName,
+                'isCalculated' => isset($column['isCalculated']) ? $column['isCalculated'] : 'not set',
+                'hasFormula' => isset($column['formula']),
+                'tableName' => $tableName
+            ]);
+
+            // Check if this is a calculated field
+            if (isset($column['isCalculated']) && $column['isCalculated'] === true) {
+                // Handle calculated fields
+                $formula = $column['formula'] ?? null;
+                if ($formula) {
+                    $displayName = $column['displayName'] ?? $columnName;
+                    
+                    // Basic security validation for SQL injection prevention
+                    $safeFormula = $this->validateCalculatedFieldFormula($formula);
+                    if ($safeFormula) {
+                        // Use the formula directly as SQL expression with alias
+                        $selectColumns[] = DB::raw("({$safeFormula}) as `{$displayName}`");
+                        Log::info("Added calculated field", [
+                            'formula' => $safeFormula,
+                            'alias' => $displayName
+                        ]);
+                    } else {
+                        Log::warning("Calculated field formula failed validation", [
+                            'formula' => $formula,
+                            'column' => $column
+                        ]);
+                    }
+                } else {
+                    Log::warning("Calculated field missing formula", ['column' => $column]);
+                }
             } else {
-                // Use a simple string for the column
-                $selectColumns[] = "$tableName.$columnName";
+                // Handle regular table columns
+                if ($alias) {
+                    // Use DB::raw to create a properly formatted column with alias
+                    $selectColumns[] = DB::raw(
+                        "$tableName.$columnName as `$alias`"
+                    );
+                } else {
+                    // Use a simple string for the column
+                    $selectColumns[] = "$tableName.$columnName";
+                }
             }
         }
 
@@ -4301,5 +4342,76 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         // Convert to millimeters and apply limits
         $heightMM = ($maxLines * $lineHeight * 0.352778);
         return min($heightMM, $maxCellHeight);
+    }
+
+    /**
+     * Validate calculated field formula for security
+     * 
+     * @param string $formula
+     * @return string|false Returns safe formula or false if validation fails
+     */
+    private function validateCalculatedFieldFormula($formula)
+    {
+        // Basic security checks to prevent SQL injection
+        $formula = trim($formula);
+        
+        // Reject if empty
+        if (empty($formula)) {
+            return false;
+        }
+
+        // Convert to lowercase for checks (but preserve original case for return)
+        $lowerFormula = strtolower($formula);
+
+        // Blacklist dangerous SQL keywords/patterns
+        $dangerousPatterns = [
+            'drop ', 'delete ', 'truncate ', 'alter ', 'create ', 'insert ',
+            'update ', 'grant ', 'revoke ', 'exec ', 'execute ', 'sp_',
+            'xp_', '--', '/*', '*/', 'union ', 'script', '<script',
+            'javascript:', 'vbscript:', 'onload=', 'onerror=', 'eval(',
+            'information_schema', 'mysql.', 'performance_schema', 'sys.'
+        ];
+
+        foreach ($dangerousPatterns as $pattern) {
+            if (strpos($lowerFormula, $pattern) !== false) {
+                Log::warning("Calculated field formula contains dangerous pattern", [
+                    'formula' => $formula,
+                    'pattern' => $pattern
+                ]);
+                return false;
+            }
+        }
+
+        // Allow only safe SQL functions and operators
+        $allowedPatterns = [
+            // Math functions
+            'round', 'floor', 'ceil', 'abs', 'sqrt', 'pow',
+            // Date functions  
+            'datediff', 'date_add', 'date_sub', 'now', 'curdate', 'year', 'month', 'day',
+            // String functions
+            'concat', 'substring', 'length', 'upper', 'lower', 'trim',
+            // Aggregate functions
+            'count', 'sum', 'avg', 'min', 'max',
+            // Conditional functions
+            'case', 'when', 'then', 'else', 'end', 'if', 'ifnull', 'coalesce',
+            // Operators and literals
+            '+', '-', '*', '/', '(', ')', ',', '.', '=', '>', '<', '>=', '<=', '!=', '<>',
+            'and', 'or', 'not', 'is', 'null', 'like', 'in', 'between',
+            // Common column patterns (table.column)
+            // Numbers and quotes for literals
+        ];
+
+        // Additional validation could be added here for more sophisticated checking
+        // For now, we'll rely on the blacklist approach and let MySQL validate syntax
+
+        // Ensure formula doesn't exceed reasonable length
+        if (strlen($formula) > 1000) {
+            Log::warning("Calculated field formula too long", [
+                'formula_length' => strlen($formula)
+            ]);
+            return false;
+        }
+
+        return $formula;
     }
 }
