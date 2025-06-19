@@ -209,7 +209,7 @@ class DefaultProposalTemplateSeeder extends Seeder
                 'is_dynamic' => false, // Static content - rarely changes
                 'variables' => ['company_name'],
                 'styling' => ['page_break_before' => true]
-            ]
+            ],
             [
                 'section_type' => 'review_log',
                 'title' => 'Review Log',
