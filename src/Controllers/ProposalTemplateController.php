@@ -347,6 +347,8 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
                     'template' => $template,
                     'preview_html' => $previewData['html'],
                     'sections' => $previewData['sections'],
+                    'variables_used' => $previewData['variables_used'] ?? [],
+                    'metadata' => $previewData['metadata'] ?? null,
                 ],
             ]);
         } catch (\Exception $e) {
