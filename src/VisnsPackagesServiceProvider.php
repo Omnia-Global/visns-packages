@@ -349,6 +349,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                             Route::post('/dropdown', 'dropdown');
                             Route::get('/{id}/preview', 'preview');
                             Route::post('/{id}/duplicate', 'duplicate');
+                            Route::post('/{id}/pdf', 'generatePDF');
                             Route::get('/variables/available', 'getAvailableVariables');
                             Route::get('/variables/intelligent', 'getIntelligentVariables');
                             

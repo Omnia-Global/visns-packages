@@ -34,9 +34,13 @@ class ProposalAssemblyService
             // Generate HTML content
             $html = $this->assembleHTML($sections, $branding, $proposalData);
 
+            // Extract variables used in the content
+            $variablesUsed = $this->extractVariablesUsed($sections);
+
             return [
                 'html' => $html,
                 'sections' => $sections,
+                'variables_used' => $variablesUsed,
                 'metadata' => [
                     'template' => $template,
                     'branding' => $branding,
@@ -1092,5 +1096,34 @@ class ProposalAssemblyService
             ['title' => 'Agreement Signature', 'page' => ''],
             ['title' => 'Terms and Conditions', 'page' => ''],
         ];
+    }
+
+    /**
+     * Extract variables used in section content
+     *
+     * @param array $sections
+     * @return array
+     */
+    private function extractVariablesUsed(array $sections): array
+    {
+        $variablesUsed = [];
+        
+        foreach ($sections as $section) {
+            $content = $section['content'] ?? '';
+            
+            // Find all variables in the format {{variable_name}}
+            preg_match_all('/\{\{([^}]+)\}\}/', $content, $matches);
+            
+            if (!empty($matches[1])) {
+                foreach ($matches[1] as $variable) {
+                    $variable = trim($variable);
+                    if (!in_array($variable, $variablesUsed)) {
+                        $variablesUsed[] = $variable;
+                    }
+                }
+            }
+        }
+        
+        return $variablesUsed;
     }
 }

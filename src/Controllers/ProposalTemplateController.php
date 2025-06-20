@@ -641,6 +641,47 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
                 'sections' => $template->sections->toArray(),
             ]);
 
+            // Check if request wants HTML response (for direct browser access)
+            if ($request->header('Accept') && 
+                str_contains($request->header('Accept'), 'text/html') && 
+                !$request->ajax() && 
+                !$request->wantsJson()) {
+                
+                // Return HTML response for direct browser access
+                $html = '<!DOCTYPE html>
+<html>
+<head>
+    <title>Proposal Template Preview - ' . htmlspecialchars($template->name) . '</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        .preview-container { max-width: 800px; margin: 0 auto; background: white; padding: 40px; box-shadow: 0 0 20px rgba(0,0,0,0.1); }
+        .preview-header { margin-bottom: 30px; padding-bottom: 20px; border-bottom: 2px solid #eee; }
+        .preview-title { color: #333; margin: 0 0 10px 0; }
+        .preview-subtitle { color: #666; margin: 0; }
+        .section { margin-bottom: 30px; }
+        .section-title { color: #2563eb; margin-bottom: 15px; padding-bottom: 5px; border-bottom: 1px solid #ddd; }
+        table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #f8f9fa; }
+    </style>
+</head>
+<body>
+    <div class="preview-container">
+        <div class="preview-header">
+            <h1 class="preview-title">Preview: ' . htmlspecialchars($template->name) . '</h1>
+            <p class="preview-subtitle">This is a preview of your proposal template with sample data</p>
+        </div>
+        ' . $previewData['html'] . '
+    </div>
+</body>
+</html>';
+                
+                return response($html, 200, ['Content-Type' => 'text/html']);
+            }
+
+            // Return JSON response for AJAX requests
             return response()->json([
                 'success' => true,
                 'data' => [
@@ -706,6 +747,70 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
                 [
                     'success' => false,
                     'message' => 'Error duplicating template',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
+
+    /**
+     * Generate PDF from template
+     *
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\Response
+     */
+    public function generatePDF(Request $request, $id)
+    {
+        try {
+            $template = ProposalTemplate::with('sections')->findOrFail($id);
+
+            // Get sample data for PDF generation (similar to preview)
+            $sampleData = [
+                'customer_name' => 'Sample Customer Ltd',
+                'customer_address' => '123 Business St, Sydney NSW 2000',
+                'quote_number' => 'Q-2024-001',
+                'quote_date' => date('Y-m-d'),
+                'current_date' => date('Y-m-d'),
+                'total_amount' => '$15,500.00',
+                'company_name' => 'VISNS Studio',
+                'company_address' => 'Sydney, NSW',
+                'project_manager' => 'John Smith',
+            ];
+
+            // Use the proposal assembly service to build content
+            $proposalService = app(
+                \Visnsstudio\VisnsPackages\Services\ProposalAssemblyService::class
+            );
+
+            $proposalData = $proposalService->assembleProposal([
+                'template_id' => $id,
+                'proposal_data' => $sampleData,
+                'sections' => $template->sections->toArray(),
+            ]);
+
+            // Use PDFController to generate the PDF
+            $pdfController = app(\Visnsstudio\VisnsPackages\Controllers\PDFController::class);
+            
+            $pdfRequest = new \Illuminate\Http\Request();
+            $pdfRequest->merge([
+                'html' => $proposalData['html'],
+                'filename' => 'proposal-template-' . $template->id . '.pdf',
+                'options' => [
+                    'format' => 'A4',
+                    'orientation' => 'portrait',
+                ]
+            ]);
+
+            return $pdfController->generatePDFFromHTML($pdfRequest);
+
+        } catch (\Exception $e) {
+            Log::error('Error generating PDF from template: ' . $e->getMessage());
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error generating PDF',
                     'error' => $e->getMessage(),
                 ],
                 500
