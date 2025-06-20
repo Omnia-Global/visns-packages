@@ -19,24 +19,31 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
     public function index(Request $request)
     {
         try {
-            $profiles = BrandingProfile::when($request->search, function ($query, $search) {
-                    $query->where('name', 'like', "%{$search}%")
-                          ->orWhere('company_name', 'like', "%{$search}%");
-                })
+            $profiles = BrandingProfile::when($request->search, function (
+                $query,
+                $search
+            ) {
+                $query
+                    ->where('name', 'like', "%{$search}%")
+                    ->orWhere('company_name', 'like', "%{$search}%");
+            })
                 ->orderBy('name')
                 ->get();
 
             return response()->json([
                 'success' => true,
-                'data' => $profiles
+                'data' => $profiles,
             ]);
         } catch (\Exception $e) {
             Log::error('Error fetching branding profiles: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error fetching branding profiles',
-                'error' => $e->getMessage()
-            ], 500);
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error fetching branding profiles',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
         }
     }
 
@@ -54,18 +61,28 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
             // Apply search if provided
             if ($request->filled('search')) {
                 $search = $request->search;
-                $query->where(function($q) use ($search) {
-                    $q->where('name', 'like', "%{$search}%")
-                      ->orWhere('company_name', 'like', "%{$search}%");
+                $query->where(function ($q) use ($search) {
+                    $q->where('name', 'like', "%{$search}%")->orWhere(
+                        'company_name',
+                        'like',
+                        "%{$search}%"
+                    );
                 });
             }
 
             // Apply sorting
             $sortBy = $request->get('sortBy', 'name');
             $sortOrder = $request->get('sort', 'asc');
-            
+
             // Validate sort column for security
-            $allowedSortColumns = ['id', 'name', 'company_name', 'is_default', 'created_at', 'updated_at'];
+            $allowedSortColumns = [
+                'id',
+                'name',
+                'company_name',
+                'is_default',
+                'created_at',
+                'updated_at',
+            ];
             if (in_array($sortBy, $allowedSortColumns)) {
                 $query->orderBy($sortBy, $sortOrder);
             }
@@ -85,12 +102,17 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
 
             return response()->json($profiles);
         } catch (\Exception $e) {
-            Log::error('Error fetching branding profiles table: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error fetching branding profiles table',
-                'error' => $e->getMessage()
-            ], 500);
+            Log::error(
+                'Error fetching branding profiles table: ' . $e->getMessage()
+            );
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error fetching branding profiles table',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
         }
     }
 
@@ -105,8 +127,9 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
         try {
             $profiles = BrandingProfile::select('id', 'name', 'company_name')
                 ->when($request->search, function ($query, $search) {
-                    $query->where('name', 'like', "%{$search}%")
-                          ->orWhere('company_name', 'like', "%{$search}%");
+                    $query
+                        ->where('name', 'like', "%{$search}%")
+                        ->orWhere('company_name', 'like', "%{$search}%");
                 })
                 ->orderBy('name')
                 ->get()
@@ -114,21 +137,26 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
                     return [
                         'id' => $profile->id,
                         'name' => $profile->name,
-                        'company_name' => $profile->company_name
+                        'company_name' => $profile->company_name,
                     ];
                 });
 
             return response()->json([
                 'success' => true,
-                'data' => $profiles
+                'data' => $profiles,
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching branding profile dropdown: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error fetching branding profile dropdown',
-                'error' => $e->getMessage()
-            ], 500);
+            Log::error(
+                'Error fetching branding profile dropdown: ' . $e->getMessage()
+            );
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error fetching branding profile dropdown',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
         }
     }
 
@@ -143,17 +171,17 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
         try {
             $profile = BrandingProfile::findOrFail($id);
 
-            return response()->json([
-                'success' => true,
-                'data' => $profile
-            ]);
+            return response()->json($profile);
         } catch (\Exception $e) {
             Log::error('Error fetching branding profile: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error fetching branding profile',
-                'error' => $e->getMessage()
-            ], 500);
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error fetching branding profile',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
         }
     }
 
@@ -172,7 +200,8 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
                 'logo' => 'nullable|image|mimes:jpeg,png,jpg,svg|max:2048',
                 'colors' => 'nullable|array',
                 'colors.primary' => 'nullable|string|regex:/^#[0-9A-Fa-f]{6}$/',
-                'colors.secondary' => 'nullable|string|regex:/^#[0-9A-Fa-f]{6}$/',
+                'colors.secondary' =>
+                    'nullable|string|regex:/^#[0-9A-Fa-f]{6}$/',
                 'colors.accent' => 'nullable|string|regex:/^#[0-9A-Fa-f]{6}$/',
                 'fonts' => 'nullable|array',
                 'fonts.heading' => 'nullable|string',
@@ -196,7 +225,9 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
 
             // If setting as default, unset other defaults
             if ($validated['is_default'] ?? false) {
-                BrandingProfile::where('is_default', true)->update(['is_default' => false]);
+                BrandingProfile::where('is_default', true)->update([
+                    'is_default' => false,
+                ]);
             }
 
             $profile = BrandingProfile::create([
@@ -209,18 +240,24 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
                 'is_default' => $validated['is_default'] ?? false,
             ]);
 
-            return response()->json([
-                'success' => true,
-                'data' => $profile,
-                'message' => 'Branding profile created successfully'
-            ], 201);
+            return response()->json(
+                [
+                    'success' => true,
+                    'data' => $profile,
+                    'message' => 'Branding profile created successfully',
+                ],
+                201
+            );
         } catch (\Exception $e) {
             Log::error('Error creating branding profile: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error creating branding profile',
-                'error' => $e->getMessage()
-            ], 500);
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error creating branding profile',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
         }
     }
 
@@ -242,7 +279,8 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
                 'logo' => 'nullable|image|mimes:jpeg,png,jpg,svg|max:2048',
                 'colors' => 'nullable|array',
                 'colors.primary' => 'nullable|string|regex:/^#[0-9A-Fa-f]{6}$/',
-                'colors.secondary' => 'nullable|string|regex:/^#[0-9A-Fa-f]{6}$/',
+                'colors.secondary' =>
+                    'nullable|string|regex:/^#[0-9A-Fa-f]{6}$/',
                 'colors.accent' => 'nullable|string|regex:/^#[0-9A-Fa-f]{6}$/',
                 'fonts' => 'nullable|array',
                 'fonts.heading' => 'nullable|string',
@@ -281,15 +319,18 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
             return response()->json([
                 'success' => true,
                 'data' => $profile,
-                'message' => 'Branding profile updated successfully'
+                'message' => 'Branding profile updated successfully',
             ]);
         } catch (\Exception $e) {
             Log::error('Error updating branding profile: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error updating branding profile',
-                'error' => $e->getMessage()
-            ], 500);
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error updating branding profile',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
         }
     }
 
@@ -303,13 +344,16 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
     {
         try {
             $profile = BrandingProfile::findOrFail($id);
-            
+
             // Don't allow deletion of default profile
             if ($profile->is_default) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Cannot delete default branding profile'
-                ], 400);
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' => 'Cannot delete default branding profile',
+                    ],
+                    400
+                );
             }
 
             // Delete logo file if exists
@@ -322,15 +366,18 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Branding profile deleted successfully'
+                'message' => 'Branding profile deleted successfully',
             ]);
         } catch (\Exception $e) {
             Log::error('Error deleting branding profile: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error deleting branding profile',
-                'error' => $e->getMessage()
-            ], 500);
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error deleting branding profile',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
         }
     }
 
@@ -352,34 +399,39 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
                     'colors' => [
                         'primary' => '#2563eb',
                         'secondary' => '#64748b',
-                        'accent' => '#059669'
+                        'accent' => '#059669',
                     ],
                     'fonts' => [
                         'heading' => 'Arial, sans-serif',
-                        'body' => 'Arial, sans-serif'
+                        'body' => 'Arial, sans-serif',
                     ],
                     'company_info' => [
                         'address' => '',
                         'phone' => '',
                         'email' => '',
                         'website' => '',
-                        'abn' => ''
+                        'abn' => '',
                     ],
-                    'is_default' => true
+                    'is_default' => true,
                 ]);
             }
 
             return response()->json([
                 'success' => true,
-                'data' => $profile
+                'data' => $profile,
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching default branding profile: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error fetching default branding profile',
-                'error' => $e->getMessage()
-            ], 500);
+            Log::error(
+                'Error fetching default branding profile: ' . $e->getMessage()
+            );
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error fetching default branding profile',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
         }
     }
 
@@ -408,16 +460,19 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
                 'success' => true,
                 'data' => [
                     'html' => $brandedHtml,
-                    'branding' => $profile
-                ]
+                    'branding' => $profile,
+                ],
             ]);
         } catch (\Exception $e) {
             Log::error('Error applying branding: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error applying branding',
-                'error' => $e->getMessage()
-            ], 500);
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error applying branding',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
         }
     }
 
@@ -438,16 +493,21 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
                 'success' => true,
                 'data' => [
                     'profile' => $profile,
-                    'preview_html' => $sampleHtml
-                ]
+                    'preview_html' => $sampleHtml,
+                ],
             ]);
         } catch (\Exception $e) {
-            Log::error('Error previewing branding profile: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error previewing branding profile',
-                'error' => $e->getMessage()
-            ], 500);
+            Log::error(
+                'Error previewing branding profile: ' . $e->getMessage()
+            );
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error previewing branding profile',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
         }
     }
 
@@ -461,7 +521,7 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
     {
         try {
             $original = BrandingProfile::findOrFail($id);
-            
+
             $duplicate = BrandingProfile::create([
                 'name' => $original->name . ' (Copy)',
                 'company_name' => $original->company_name,
@@ -475,15 +535,20 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
             return response()->json([
                 'success' => true,
                 'data' => $duplicate,
-                'message' => 'Branding profile duplicated successfully'
+                'message' => 'Branding profile duplicated successfully',
             ]);
         } catch (\Exception $e) {
-            Log::error('Error duplicating branding profile: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error duplicating branding profile',
-                'error' => $e->getMessage()
-            ], 500);
+            Log::error(
+                'Error duplicating branding profile: ' . $e->getMessage()
+            );
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error duplicating branding profile',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
         }
     }
 
@@ -499,14 +564,25 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
         $colors = $profile->colors ?? [];
         $fonts = $profile->fonts ?? [];
 
-        $styles = "
+        $styles =
+            "
         <style>
             :root {
-                --primary-color: " . ($colors['primary'] ?? '#2563eb') . ";
-                --secondary-color: " . ($colors['secondary'] ?? '#64748b') . ";
-                --accent-color: " . ($colors['accent'] ?? '#059669') . ";
-                --heading-font: " . ($fonts['heading'] ?? 'Arial, sans-serif') . ";
-                --body-font: " . ($fonts['body'] ?? 'Arial, sans-serif') . ";
+                --primary-color: " .
+            ($colors['primary'] ?? '#2563eb') .
+            ";
+                --secondary-color: " .
+            ($colors['secondary'] ?? '#64748b') .
+            ";
+                --accent-color: " .
+            ($colors['accent'] ?? '#059669') .
+            ";
+                --heading-font: " .
+            ($fonts['heading'] ?? 'Arial, sans-serif') .
+            ";
+                --body-font: " .
+            ($fonts['body'] ?? 'Arial, sans-serif') .
+            ";
             }
             
             body {
@@ -552,11 +628,14 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
      */
     private function generateSampleHTML($profile)
     {
-        $logoHtml = $profile->logo_url ? 
-            '<img src="' . $profile->logo_url . '" alt="Company Logo" class="company-logo">' : 
-            '<div class="primary-bg" style="width: 80px; height: 80px; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">LOGO</div>';
+        $logoHtml = $profile->logo_url
+            ? '<img src="' .
+                $profile->logo_url .
+                '" alt="Company Logo" class="company-logo">'
+            : '<div class="primary-bg" style="width: 80px; height: 80px; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">LOGO</div>';
 
-        $html = '
+        $html =
+            '
         <!DOCTYPE html>
         <html>
         <head>
@@ -566,9 +645,15 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
         <body>
             <div style="padding: 20px; max-width: 800px; margin: 0 auto;">
                 <header style="text-align: center; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 2px solid var(--primary-color);">
-                    ' . $logoHtml . '
-                    <h1 class="primary-text" style="margin: 10px 0;">' . $profile->company_name . '</h1>
-                    <p class="secondary-text">' . ($profile->company_info['address'] ?? 'Company Address') . '</p>
+                    ' .
+            $logoHtml .
+            '
+                    <h1 class="primary-text" style="margin: 10px 0;">' .
+            $profile->company_name .
+            '</h1>
+                    <p class="secondary-text">' .
+            ($profile->company_info['address'] ?? 'Company Address') .
+            '</p>
                 </header>
                 
                 <main>
@@ -604,7 +689,13 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
                 </main>
                 
                 <footer style="margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--secondary-color); text-align: center; color: var(--secondary-color);">
-                    <p>' . $profile->company_name . ' | ' . ($profile->company_info['phone'] ?? 'Phone') . ' | ' . ($profile->company_info['email'] ?? 'Email') . '</p>
+                    <p>' .
+            $profile->company_name .
+            ' | ' .
+            ($profile->company_info['phone'] ?? 'Phone') .
+            ' | ' .
+            ($profile->company_info['email'] ?? 'Email') .
+            '</p>
                 </footer>
             </div>
         </body>
