@@ -169,7 +169,7 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
         try {
             $template = ProposalTemplate::with('sections')->findOrFail($id);
 
-            return response()->json(template);
+            return response()->json($template);
         } catch (\Exception $e) {
             Log::error('Error fetching proposal template: ' . $e->getMessage());
             return response()->json(
