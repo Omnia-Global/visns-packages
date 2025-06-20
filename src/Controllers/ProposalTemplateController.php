@@ -408,6 +408,204 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
     }
 
     /**
+     * Get intelligent model-based variables for templates
+     * Introspects configured Laravel models and returns their fields as available variables
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getIntelligentVariables()
+    {
+        try {
+            // Get configured models from project config
+            $configuredModels = config('visns-packages.proposal.intelligent_variables.models', []);
+            
+            $variables = [];
+
+            foreach ($configuredModels as $modelClass => $config) {
+                // Validate that the model class exists
+                if (!class_exists($modelClass)) {
+                    Log::warning("Model class {$modelClass} not found for intelligent variables");
+                    continue;
+                }
+
+                try {
+                    // Create model instance to introspect
+                    $model = new $modelClass();
+                    
+                    // Get table name for column inspection
+                    $tableName = $model->getTable();
+                    
+                    // Get fillable fields (safe fields that can be mass assigned)
+                    $fillableFields = $model->getFillable();
+                    
+                    // Get table columns using schema
+                    $columns = \Illuminate\Support\Facades\Schema::getColumnListing($tableName);
+                    
+                    // Filter columns based on configuration
+                    $allowedFields = [];
+                    $excludeFields = $config['exclude'] ?? ['password', 'remember_token', 'email_verified_at'];
+                    $includeFields = $config['include'] ?? [];
+                    
+                    // If include fields are specified, only use those
+                    if (!empty($includeFields)) {
+                        $allowedFields = array_intersect($columns, $includeFields);
+                    } else {
+                        // Otherwise, use all columns except excluded ones
+                        $allowedFields = array_diff($columns, $excludeFields);
+                    }
+                    
+                    // Build category information
+                    $categoryName = $config['name'] ?? class_basename($modelClass);
+                    $categoryIcon = $config['icon'] ?? 'FileText';
+                    
+                    $categoryVariables = [];
+                    
+                    foreach ($allowedFields as $field) {
+                        // Generate human-readable description
+                        $description = $this->generateFieldDescription($field, $categoryName);
+                        
+                        // Generate variable name (with model prefix)
+                        $variableName = strtolower(class_basename($modelClass)) . '_' . $field;
+                        
+                        $categoryVariables[] = [
+                            'name' => $variableName,
+                            'description' => $description,
+                            'field_type' => $this->getFieldType($tableName, $field),
+                            'original_field' => $field
+                        ];
+                    }
+                    
+                    // Add relationships if configured
+                    if (isset($config['relationships'])) {
+                        foreach ($config['relationships'] as $relationshipName => $relationshipConfig) {
+                            $relationshipVariables = $this->getRelationshipVariables(
+                                $model, 
+                                $relationshipName, 
+                                $relationshipConfig,
+                                $categoryName
+                            );
+                            $categoryVariables = array_merge($categoryVariables, $relationshipVariables);
+                        }
+                    }
+                    
+                    if (!empty($categoryVariables)) {
+                        $variables[] = [
+                            'category' => $categoryName,
+                            'icon' => $categoryIcon,
+                            'model_class' => $modelClass,
+                            'variables' => $categoryVariables
+                        ];
+                    }
+                    
+                } catch (\Exception $modelError) {
+                    Log::warning("Error processing model {$modelClass}: " . $modelError->getMessage());
+                    continue;
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'variables' => $variables,
+                'total_categories' => count($variables),
+                'total_variables' => array_sum(array_map(function($cat) { 
+                    return count($cat['variables']); 
+                }, $variables))
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Error fetching intelligent variables: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Error fetching intelligent variables',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Generate human-readable description for a field
+     */
+    private function generateFieldDescription($field, $categoryName)
+    {
+        // Convert snake_case to Title Case
+        $readable = str_replace('_', ' ', $field);
+        $readable = ucwords($readable);
+        
+        // Add category context if it doesn't already contain it
+        if (stripos($readable, $categoryName) === false) {
+            return "{$categoryName} {$readable}";
+        }
+        
+        return $readable;
+    }
+
+    /**
+     * Get field type from database schema
+     */
+    private function getFieldType($tableName, $fieldName)
+    {
+        try {
+            $columnType = \Illuminate\Support\Facades\DB::getSchemaBuilder()
+                ->getColumnType($tableName, $fieldName);
+            return $columnType;
+        } catch (\Exception $e) {
+            return 'string'; // Default fallback
+        }
+    }
+
+    /**
+     * Get variables from model relationships
+     */
+    private function getRelationshipVariables($model, $relationshipName, $relationshipConfig, $categoryName)
+    {
+        $variables = [];
+        
+        try {
+            // Check if relationship method exists
+            if (!method_exists($model, $relationshipName)) {
+                return $variables;
+            }
+            
+            // Get the related model class
+            $relation = $model->$relationshipName();
+            $relatedModel = $relation->getRelated();
+            $relatedClass = get_class($relatedModel);
+            
+            // Get fields to include from relationship config
+            $includeFields = $relationshipConfig['include'] ?? ['name', 'title', 'id'];
+            $excludeFields = $relationshipConfig['exclude'] ?? [];
+            
+            // Get table columns for the related model
+            $relatedColumns = \Illuminate\Support\Facades\Schema::getColumnListing($relatedModel->getTable());
+            
+            // Filter fields
+            $allowedFields = array_diff(
+                array_intersect($relatedColumns, $includeFields),
+                $excludeFields
+            );
+            
+            foreach ($allowedFields as $field) {
+                $description = $this->generateFieldDescription($field, $relationshipConfig['name'] ?? $relationshipName);
+                $variableName = strtolower($relationshipName) . '_' . $field;
+                
+                $variables[] = [
+                    'name' => $variableName,
+                    'description' => $description,
+                    'field_type' => $this->getFieldType($relatedModel->getTable(), $field),
+                    'original_field' => $field,
+                    'relationship' => $relationshipName,
+                    'related_model' => $relatedClass
+                ];
+            }
+            
+        } catch (\Exception $e) {
+            Log::warning("Error processing relationship {$relationshipName}: " . $e->getMessage());
+        }
+        
+        return $variables;
+    }
+
+    /**
      * Preview a template with sample data
      *
      * @param Request $request

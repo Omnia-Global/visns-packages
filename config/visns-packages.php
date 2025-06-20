@@ -524,6 +524,107 @@ return [
 
         /*
         |--------------------------------------------------------------------------
+        | Intelligent Variables Configuration
+        |--------------------------------------------------------------------------
+        |
+        | Configuration for automatically generating variables from Laravel models.
+        | The system will introspect these models and their fields to create
+        | available variables for proposal templates.
+        |
+        */
+        'intelligent_variables' => [
+            'enabled' => env('VISNS_PROPOSAL_INTELLIGENT_VARIABLES', true),
+            
+            /*
+            |--------------------------------------------------------------------------
+            | Model Configuration
+            |--------------------------------------------------------------------------
+            |
+            | Each model class can be configured with specific settings for variable
+            | generation. The key is the full model class name, and the value is an
+            | array of configuration options.
+            |
+            */
+            'models' => [
+                // Examples (to be configured per project):
+                // 'App\\Models\\Customer' => [
+                //     'name' => 'Customer Information',
+                //     'icon' => 'User',
+                //     'include' => ['name', 'email', 'phone', 'address', 'abn'],
+                //     'exclude' => ['password', 'remember_token', 'created_at', 'updated_at'],
+                //     'relationships' => [
+                //         'primaryContact' => [
+                //             'name' => 'Primary Contact',
+                //             'include' => ['name', 'email', 'phone'],
+                //             'exclude' => []
+                //         ]
+                //     ]
+                // ],
+                // 'App\\Models\\Quote' => [
+                //     'name' => 'Quote Details',
+                //     'icon' => 'FileText',
+                //     'include' => ['quote_number', 'total', 'subtotal', 'tax', 'valid_until'],
+                //     'exclude' => ['created_at', 'updated_at']
+                // ],
+                // 'App\\Models\\User' => [
+                //     'name' => 'Sales Representative',
+                //     'icon' => 'DollarSign',
+                //     'include' => ['firstname', 'lastname', 'email', 'phone'],
+                //     'exclude' => ['password', 'remember_token', 'email_verified_at']
+                // ]
+            ],
+            
+            /*
+            |--------------------------------------------------------------------------
+            | Global Field Exclusions
+            |--------------------------------------------------------------------------
+            |
+            | Fields that should be excluded from all models by default for security
+            | and data privacy reasons.
+            |
+            */
+            'global_exclusions' => [
+                'password',
+                'remember_token',
+                'email_verified_at',
+                'two_factor_secret',
+                'two_factor_recovery_codes',
+                'two_factor_confirmed_at',
+                'api_token',
+            ],
+            
+            /*
+            |--------------------------------------------------------------------------
+            | Variable Naming Convention
+            |--------------------------------------------------------------------------
+            |
+            | Configure how variable names are generated from model fields.
+            |
+            */
+            'naming' => [
+                'use_model_prefix' => true,
+                'prefix_separator' => '_',
+                'convert_to_snake_case' => true,
+                'remove_model_suffix' => true, // Remove 'Model' from class names
+            ],
+            
+            /*
+            |--------------------------------------------------------------------------
+            | Caching Configuration
+            |--------------------------------------------------------------------------
+            |
+            | Cache variable introspection results to improve performance.
+            |
+            */
+            'cache' => [
+                'enabled' => env('VISNS_PROPOSAL_CACHE_VARIABLES', true),
+                'ttl' => env('VISNS_PROPOSAL_CACHE_TTL', 3600), // 1 hour
+                'key_prefix' => 'visns_proposal_variables',
+            ]
+        ],
+
+        /*
+        |--------------------------------------------------------------------------
         | Feature Flags
         |--------------------------------------------------------------------------
         |

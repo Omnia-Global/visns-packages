@@ -350,6 +350,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                             Route::get('/{id}/preview', 'preview');
                             Route::post('/{id}/duplicate', 'duplicate');
                             Route::get('/variables/available', 'getAvailableVariables');
+                            Route::get('/variables/intelligent', 'getIntelligentVariables');
                             
                             // Section management routes
                             Route::get('/{id}/sections', 'getSections');
