@@ -1,6 +1,6 @@
 <?php
 
-namespace Visnsstudio\VisnsPackages\Database\Seeders;
+namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use Visnsstudio\VisnsPackages\Models\ProposalTemplate;
@@ -16,16 +16,22 @@ class DefaultProposalTemplateSeeder extends Seeder
     public function run()
     {
         // Check if default template already exists
-        $existingTemplate = ProposalTemplate::where('name', 'Default Business Proposal')->first();
+        $existingTemplate = ProposalTemplate::where(
+            'name',
+            'Default Business Proposal'
+        )->first();
         if ($existingTemplate) {
-            $this->command->info('Default proposal template already exists, skipping...');
+            $this->command->info(
+                'Default proposal template already exists, skipping...'
+            );
             return;
         }
 
         // Create the default template
         $template = ProposalTemplate::create([
             'name' => 'Standard Business Proposal',
-            'description' => 'Professional business proposal template with OMNIA Global Group branding, including cover page, executive summary, pricing, and comprehensive terms & conditions.',
+            'description' =>
+                'Professional business proposal template with OMNIA Global Group branding, including cover page, executive summary, pricing, and comprehensive terms & conditions.',
             'is_default' => true,
             'variables' => [
                 '{{document_title}}' => 'Document Title',
@@ -37,8 +43,9 @@ class DefaultProposalTemplateSeeder extends Seeder
                 'font_family' => 'Arial, sans-serif',
                 'header_color' => '#2563eb',
                 'accent_color' => '#3cbf7d',
-                'cover_background' => 'linear-gradient(135deg, #1e293b 0%, #0f4c3a 100%)',
-            ]
+                'cover_background' =>
+                    'linear-gradient(135deg, #1e293b 0%, #0f4c3a 100%)',
+            ],
         ]);
 
         // Create sections with OMNIA Global Group branding and comprehensive content
@@ -67,7 +74,7 @@ class DefaultProposalTemplateSeeder extends Seeder
                 'sort_order' => 1,
                 'is_dynamic' => true,
                 'variables' => ['document_title'],
-                'styling' => ['page_break_after' => true]
+                'styling' => ['page_break_after' => true],
             ],
             [
                 'section_type' => 'toc',
@@ -76,7 +83,7 @@ class DefaultProposalTemplateSeeder extends Seeder
                 'sort_order' => 2,
                 'is_dynamic' => true,
                 'variables' => [],
-                'styling' => ['page_break_after' => false]
+                'styling' => ['page_break_after' => false],
             ],
             [
                 'section_type' => 'content',
@@ -89,7 +96,7 @@ class DefaultProposalTemplateSeeder extends Seeder
                 'sort_order' => 3,
                 'is_dynamic' => true,
                 'variables' => ['customer_name'],
-                'styling' => ['page_break_after' => false]
+                'styling' => ['page_break_after' => false],
             ],
             [
                 'section_type' => 'quote_items',
@@ -98,7 +105,7 @@ class DefaultProposalTemplateSeeder extends Seeder
                 'sort_order' => 4,
                 'is_dynamic' => true,
                 'variables' => [],
-                'styling' => ['page_break_after' => false]
+                'styling' => ['page_break_after' => false],
             ],
             [
                 'section_type' => 'terms_conditions',
@@ -107,19 +114,30 @@ class DefaultProposalTemplateSeeder extends Seeder
                 'sort_order' => 5,
                 'is_dynamic' => false,
                 'variables' => [],
-                'styling' => ['page_break_before' => true]
-            ]
+                'styling' => ['page_break_before' => true],
+            ],
         ];
 
         // Create the sections
         foreach ($sections as $sectionData) {
-            ProposalTemplateSection::create(array_merge([
-                'template_id' => $template->id,
-            ], $sectionData));
+            ProposalTemplateSection::create(
+                array_merge(
+                    [
+                        'template_id' => $template->id,
+                    ],
+                    $sectionData
+                )
+            );
         }
 
-        $this->command->info('Default proposal template created successfully with ' . count($sections) . ' sections.');
-        $this->command->info('Template: ' . $template->name . ' (ID: ' . $template->id . ')');
+        $this->command->info(
+            'Default proposal template created successfully with ' .
+                count($sections) .
+                ' sections.'
+        );
+        $this->command->info(
+            'Template: ' . $template->name . ' (ID: ' . $template->id . ')'
+        );
     }
 
     /**
