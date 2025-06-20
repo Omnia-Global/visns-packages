@@ -265,7 +265,7 @@ class ProposalAssemblyService
         }
 
         return '
-        <div class="omnia-cover-page" style="page-break-after: always; padding: 40px; font-family: Arial, sans-serif;">
+        <div class="omnia-cover-page" style="page-break-after: always; padding: 50px; font-family: Arial, sans-serif;">
             <div class="header" style="text-align: center; margin-bottom: 40px;">
                 <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 10px;">' . ($proposalData['document_title'] ?? '[Document Title]') . '</h1>
                 <p style="font-size: 14px; margin-bottom: 30px;">OMNIA GLOBAL GROUP PTY LTD ACN: 674 383 987</p>
@@ -347,15 +347,15 @@ class ProposalAssemblyService
     private function renderPricingSection(array $section, array $proposalData): string
     {
         $html = '
-        <div class="pricing-section" style="padding: 40px; page-break-after: avoid;">
+        <div class="pricing-section" style="padding: 50px; page-break-after: avoid;">
             <h1 style="font-size: 20px; font-weight: bold; margin-bottom: 20px;">' . $section['title'] . '</h1>
             <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
                 <thead>
                     <tr style="background-color: #f5f5f5;">
-                        <th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Description</th>
-                        <th style="border: 1px solid #ddd; padding: 10px; text-align: right;">Price</th>
-                        <th style="border: 1px solid #ddd; padding: 10px; text-align: center;">Qty</th>
-                        <th style="border: 1px solid #ddd; padding: 10px; text-align: right;">Amount</th>
+                        <th style="border: 1px solid #ddd; padding: 15px; text-align: left;">Description</th>
+                        <th style="border: 1px solid #ddd; padding: 15px; text-align: right;">Price</th>
+                        <th style="border: 1px solid #ddd; padding: 15px; text-align: center;">Qty</th>
+                        <th style="border: 1px solid #ddd; padding: 15px; text-align: right;">Amount</th>
                     </tr>
                 </thead>
                 <tbody>';
@@ -376,10 +376,10 @@ class ProposalAssemblyService
         if (empty($allItems)) {
             $html .= '
                     <tr>
-                        <td style="border: 1px solid #ddd; padding: 10px;">Development</td>
-                        <td style="border: 1px solid #ddd; padding: 10px; text-align: right;"></td>
-                        <td style="border: 1px solid #ddd; padding: 10px; text-align: center;"></td>
-                        <td style="border: 1px solid #ddd; padding: 10px; text-align: right;"></td>
+                        <td style="border: 1px solid #ddd; padding: 15px;">Development</td>
+                        <td style="border: 1px solid #ddd; padding: 15px; text-align: right;"></td>
+                        <td style="border: 1px solid #ddd; padding: 15px; text-align: center;"></td>
+                        <td style="border: 1px solid #ddd; padding: 15px; text-align: right;"></td>
                     </tr>';
         } else {
             foreach ($allItems as $item) {
@@ -388,10 +388,10 @@ class ProposalAssemblyService
                 $total = $qty * $rate;
                 $html .= '
                     <tr>
-                        <td style="border: 1px solid #ddd; padding: 10px;">' . ($item['description'] ?? '') . '</td>
-                        <td style="border: 1px solid #ddd; padding: 10px; text-align: right;">$' . number_format($rate, 2) . '</td>
-                        <td style="border: 1px solid #ddd; padding: 10px; text-align: center;">' . $qty . '</td>
-                        <td style="border: 1px solid #ddd; padding: 10px; text-align: right;">$' . number_format($total, 2) . '</td>
+                        <td style="border: 1px solid #ddd; padding: 15px;">' . ($item['description'] ?? '') . '</td>
+                        <td style="border: 1px solid #ddd; padding: 15px; text-align: right;">$' . number_format($rate, 2) . '</td>
+                        <td style="border: 1px solid #ddd; padding: 15px; text-align: center;">' . $qty . '</td>
+                        <td style="border: 1px solid #ddd; padding: 15px; text-align: right;">$' . number_format($total, 2) . '</td>
                     </tr>';
             }
         }
@@ -686,7 +686,7 @@ class ProposalAssemblyService
                     font-family: var(--body-font);
                     line-height: 1.6;
                     color: #333;
-                    padding: 20px;
+                    padding: 30px;
                 }
                 
                 h1, h2, h3, h4, h5, h6 {
@@ -731,7 +731,7 @@ class ProposalAssemblyService
                 .items-table th,
                 .items-table td {
                     border: 1px solid #ddd;
-                    padding: 10px;
+                    padding: 15px;
                 }
                 
                 .items-table th {
@@ -745,8 +745,22 @@ class ProposalAssemblyService
                 }
                 
                 @media print {
-                    body { padding: 0; }
-                    .page-break { page-break-before: always; }
+                    @page {
+                        margin: 25mm;
+                    }
+                    body { 
+                        padding: 20px;
+                        margin: 0;
+                    }
+                    .page-break { 
+                        page-break-before: always; 
+                    }
+                    .cover-page, 
+                    .pricing-section, 
+                    .terms-conditions-section, 
+                    .overview-section {
+                        padding: 30px 20px;
+                    }
                 }
             </style>
         </head>
