@@ -24,73 +24,67 @@ class DefaultProposalTemplateSeeder extends Seeder
 
         // Create the default template
         $template = ProposalTemplate::create([
-            'name' => 'OMNIA Global Group Proposal Template',
-            'description' => 'Default template matching the exact OMNIA Global Group proposal format with Change Log, Overview, Acceptance, Pricing, Payment Terms, Agreement Signature, and Terms & Conditions.',
+            'name' => 'Standard Business Proposal',
+            'description' => 'Professional business proposal template with OMNIA Global Group branding, including cover page, executive summary, pricing, and comprehensive terms & conditions.',
             'is_default' => true,
             'variables' => [
-                '{{company_logo}}' => 'Company Logo URL',
-                '{{proposal_title}}' => 'Proposal Title',
-                '{{client_logo}}' => 'Client Logo URL (if applicable)',
+                '{{document_title}}' => 'Document Title',
+                '{{customer_name}}' => 'Customer Name',
+                '{{company_name}}' => 'Company Name',
             ],
             'styling' => [
                 'page_margins' => '40px',
                 'font_family' => 'Arial, sans-serif',
                 'header_color' => '#2563eb',
-                'accent_color' => '#059669',
+                'accent_color' => '#3cbf7d',
+                'cover_background' => 'linear-gradient(135deg, #1e293b 0%, #0f4c3a 100%)',
             ]
         ]);
 
-        // Create sections matching the exact OMNIA template structure
+        // Create sections with OMNIA Global Group branding and comprehensive content
         $sections = [
             [
                 'section_type' => 'cover_page',
-                'title' => '[Document Title]',
-                'content' => '<div class="cover-page">
-                    <div class="header">
-                        <h1 style="text-align: center; font-size: 24px; margin-bottom: 10px;">[Document Title]</h1>
-                        <p style="text-align: center; font-size: 14px; margin-bottom: 30px;">OMNIA GLOBAL GROUP PTY LTD ACN: 674 383 987</p>
+                'title' => 'Proposal Cover',
+                'content' => '<div class="cover-page" style="height: 100vh; background: linear-gradient(135deg, #1e293b 0%, #0f4c3a 100%); color: white; display: flex; flex-direction: column; justify-content: space-between; padding: 60px;">
+                    <div class="header" style="text-align: center;">
+                        <div class="logo" style="margin-bottom: 40px;">
+                            <svg width="200" height="50" viewBox="0 0 400 100" style="fill: white;">
+                                <circle cx="50" cy="50" r="30" stroke="white" stroke-width="4" fill="none"/>
+                                <circle cx="50" cy="50" r="20" fill="#3cbf7d"/>
+                                <text x="100" y="35" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="white">Omnia</text>
+                                <text x="100" y="65" font-family="Arial, sans-serif" font-size="24" font-weight="normal" fill="#3cbf7d">Global</text>
+                            </svg>
+                        </div>
                     </div>
-                    <div class="contents-section">
-                        <h2 style="font-size: 18px; margin-bottom: 20px;">Contents</h2>
-                        <div class="toc-placeholder"><!-- Table of contents will be auto-generated --></div>
+                    <div class="title-section" style="text-align: center; flex-grow: 1; display: flex; align-items: center; justify-content: center;">
+                        <h1 style="font-size: 48px; margin: 0; color: #3cbf7d; text-shadow: 0 2px 4px rgba(0,0,0,0.3);">{{document_title}}</h1>
+                    </div>
+                    <div class="footer" style="text-align: center; font-size: 14px; color: rgba(255,255,255,0.8);">
+                        <p style="margin: 0;">OMNIA GLOBAL GROUP PTY LTD &nbsp;&nbsp;|&nbsp;&nbsp; ACN: 674 383 987</p>
                     </div>
                 </div>',
                 'sort_order' => 1,
                 'is_dynamic' => true,
                 'variables' => ['document_title'],
-                'styling' => ['page_break_after' => true, 'text_align' => 'left']
+                'styling' => ['page_break_after' => true]
             ],
             [
-                'section_type' => 'review_log',
-                'title' => 'Change Log',
-                'content' => '<div class="change-log">
-                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
-                        <thead>
-                            <tr style="background-color: #f5f5f5;">
-                                <th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Version</th>
-                                <th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Description</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td style="border: 1px solid #ddd; padding: 10px;">1.0</td>
-                                <td style="border: 1px solid #ddd; padding: 10px;">Initial Document</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>',
+                'section_type' => 'toc',
+                'title' => 'Table of Contents',
+                'content' => 'No content',
                 'sort_order' => 2,
                 'is_dynamic' => true,
-                'variables' => ['current_date'],
+                'variables' => [],
                 'styling' => ['page_break_after' => false]
             ],
             [
-                'section_type' => 'overview',
-                'title' => 'Overview',
-                'content' => '<div class="overview-section">
-                    <h1>[Heading 1]</h1>
-                    <h2>[Heading 2]</h2>
-                    <p>[Paragraph text]</p>
+                'section_type' => 'content',
+                'title' => 'Executive Summary',
+                'content' => '<div class="executive-summary">
+                    <p>We appreciate the opportunity to present our proposal for {{customer_name}}. Our team has carefully analyzed your requirements and developed a comprehensive solution that addresses your specific needs.</p>
+                    
+                    <p>This proposal outlines our recommended approach, detailed pricing, and the value we can deliver to your organization. We are confident that our solution will meet your expectations and provide excellent return on investment.</p>
                 </div>',
                 'sort_order' => 3,
                 'is_dynamic' => true,
@@ -98,275 +92,21 @@ class DefaultProposalTemplateSeeder extends Seeder
                 'styling' => ['page_break_after' => false]
             ],
             [
-                'section_type' => 'acceptance',
-                'title' => 'Acceptance',
-                'content' => '<div class="acceptance-section">
-                    <!-- Acceptance content will be populated dynamically -->
-                </div>',
+                'section_type' => 'quote_items',
+                'title' => 'Proposed Solution & Pricing',
+                'content' => '<!-- Dynamic pricing table will be generated -->',
                 'sort_order' => 4,
                 'is_dynamic' => true,
                 'variables' => [],
                 'styling' => ['page_break_after' => false]
             ],
             [
-                'section_type' => 'quote_items',
-                'title' => 'Pricing',
-                'content' => '<div class="pricing-section">
-                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-                        <thead>
-                            <tr style="background-color: #f5f5f5;">
-                                <th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Description</th>
-                                <th style="border: 1px solid #ddd; padding: 10px; text-align: right;">Price</th>
-                                <th style="border: 1px solid #ddd; padding: 10px; text-align: center;">Qty</th>
-                                <th style="border: 1px solid #ddd; padding: 10px; text-align: right;">Amount</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td style="border: 1px solid #ddd; padding: 10px;">Development</td>
-                                <td style="border: 1px solid #ddd; padding: 10px; text-align: right;"></td>
-                                <td style="border: 1px solid #ddd; padding: 10px; text-align: center;"></td>
-                                <td style="border: 1px solid #ddd; padding: 10px; text-align: right;"></td>
-                            </tr>
-                        </tbody>
-                        <tfoot>
-                            <tr><td colspan="4" style="border: 1px solid #ddd; padding: 10px; text-align: right;"><strong>Sub Total:</strong></td></tr>
-                            <tr><td colspan="4" style="border: 1px solid #ddd; padding: 10px; text-align: right;"><strong>Tax:</strong></td></tr>
-                            <tr><td colspan="4" style="border: 1px solid #ddd; padding: 10px; text-align: right;"><strong>Total:</strong></td></tr>
-                        </tfoot>
-                    </table>
-                </div>',
-                'sort_order' => 5,
-                'is_dynamic' => true,
-                'variables' => ['items_onceoff', 'items_monthly_subscription', 'items_yearly_subscription', 'total_amount'],
-                'styling' => ['page_break_after' => false]
-            ],
-            [
-                'section_type' => 'payment_terms',
-                'title' => 'Payment Terms',
-                'content' => '<div class="payment-terms">
-                    <p>50% of the total cost is due upon acceptance of the quote.</p>
-                    <p>25% is payable upon reaching 50% project completion.</p>
-                    <p>The remaining 25% is due upon final project completion.</p>
-                    <p>Monthly subscription payments will commence upon the deployment of the web application, even if other components, such as the mobile app, are completed at a later stage.</p>
-                    <p>Monthly finance amounts are subject to change and funding criteria, funding is provided by a 3rd party company.</p>
-                </div>',
-                'sort_order' => 6,
-                'is_dynamic' => true,
-                'variables' => ['due_date'],
-                'styling' => ['page_break_after' => false]
-            ],
-            [
-                'section_type' => 'agreement_signature',
-                'title' => 'Agreement Signature',
-                'content' => '<div class="agreement-signature">
-                    <p>We are excited about the opportunity to work with you on this project and deliver a solution that meets your needs and exceeds your expectations. To proceed, please review the details of the proposal and provide your acceptance by signing below.</p>
-                    <p>By signing this document, you agree to the scope outlined in this proposal and authorize us to commence work on the project as described.</p>
-                    <div class="signature-block" style="margin-top: 40px;">
-                        <p><strong>Client Name:</strong> ____________________________________</p>
-                        <br>
-                        <p><strong>Signature:</strong> ______________________________________</p>
-                        <br>
-                        <p><strong>Date:</strong> ________________________________________</p>
-                    </div>
-                    <p style="margin-top: 30px;">We look forward to a successful collaboration.</p>
-                </div>',
-                'sort_order' => 7,
-                'is_dynamic' => false,
-                'variables' => ['company_name'],
-                'styling' => ['page_break_before' => false]
-            ],
-            [
                 'section_type' => 'terms_conditions',
                 'title' => 'Terms and Conditions',
-                'content' => '<div class="terms-conditions" style="font-size: 12px; line-height: 1.4;">
-                    <p>This agreement is for the provision of items/services captured in the "Summary" Table and include the provision of technical services/consulting in relation to technology. Any monthly and or project work amount listed in the summary is due prior to any commencement of work and monthly in advance for the period listed above labelled Term. This monthly amount may be altered by Omnia Global Group Pty Ltd should the work being requested is outside of scope, requires reasonable additional time and to be agreed by client in writing. All costs are ex GST. Should hardware be required/requested and approved by the Client, a cost will be provided to the client for acceptance and a separate invoice will be levied.</p>
-                    
-                    <p><strong>"Confidential Information"</strong> means all information (in whatever format) designated as such by the Customer or Omnia Global Group Pty Ltd, together with such information which relates to the business affairs, customers, products, developments, trade secrets, know-how and personnel of either party and which may reasonably be regarded as the confidential information of the disclosing party and expressly includes the SERVICE AGREEMENT and any Service agreements.</p>
-                    
-                    <p><strong>"Consulting Services"</strong> mean human resources provided by Omnia Global Group Pty Ltd to give domain-specific advice or aid by performing work as defined in this SERVICE AGREEMENT.</p>
-                    
-                    <p><strong>"Fees"</strong> means fees for the Services performed by Omnia Global Group Pty Ltd has agreed by the parties in the Service agreement and excludes out of pocket expenses.</p>
-                    
-                    <p><strong>"Intellectual Property Rights"</strong> means all intellectual property or all intellectual property rights, registered or unregistered including but not limited to copyright (including software), trademarks, service marks, trade secrets, patents, patent applications, designs, know-how, inventions moral rights other proprietary rights and any application or right to apply for registration of any rights referred to herein.</p>
-                    
-                    <p><strong>"Omnia Global Group Pty Ltd"</strong> means Omnia Global Group Pty Ltd, ABN: 65 635 109 787 of 24 Hasler Road, Osborne Park, 6017, WA</p>
-                    
-                    <p><strong>"Services"</strong> means services, provided to Customer pursuant to a Service agreement executed by the parties and could include all or part of Colocation Services, Maintenance Services, and Consulting Services.</p>
-                    
-                    <p><strong>"Term"</strong> means the term of the SERVICE AGREEMENT that extends from the Effective date as specified in the Service agreement and shall remain in effect for a period of 7 years or as specified in a Service agreement.</p>
-                    
-                    <h3>Purchasing products and services</h3>
-                    <p>If the parties have executed a Service agreement, then Omnia Global Group Pty Ltd will perform the Services in accordance with the Service agreement. The Customer shall in a timely manner and at its own expense actively co-operate with Omnia Global Group Pty Ltd and provide or make available to Omnia Global Group Pty Ltd all relevant resources, including, without limitation, all relevant information, documentation, and staff reasonably required by Omnia Global Group Pty Ltd to enable Omnia Global Group Pty Ltd to perform its obligation under the Service agreement.</p>
-                    
-                    <h3>Limitation of Liability</h3>
-                    <p>Each party"s total cumulative liability, whether in contract or tort, negligence or otherwise, (a) in connection with any Service provided under a Service agreement, will not exceed one (1) times the amount of fees paid to Omnia Global Group Pty Ltd under such Service agreement per month, regardless of the total claimed liability.</p>
-                    
-                    <h3>Governing Law and Venue</h3>
-                    <p>The SERVICE AGREEMENT and any claims related to them will be governed by the laws of jurisdiction of Western Australia and, regarding Intellectual Property Rights or confidentiality, by Australian Commonwealth laws. Any dispute action or dispute proceeding arising from or relating to any SERVICE AGREEMENT must be brought in Perth, Western Australia.</p>
-                </div>',
-                'sort_order' => 8,
-                'is_dynamic' => false, // Static content - rarely changes
-                'variables' => ['company_name'],
-                'styling' => ['page_break_before' => true]
-            ],
-            [
-                'section_type' => 'review_log',
-                'title' => 'Review Log',
-                'content' => '<!-- Dynamic review log populated from proposal data -->',
-                'sort_order' => 4,
-                'is_dynamic' => true,
-                'variables' => ['current_date', 'project_manager'],
-                'styling' => []
-            ],
-            [
-                'section_type' => 'overview',
-                'title' => 'Overview',
-                'content' => '<div class="overview-section">
-                    <h1>Executive Summary</h1>
-                    <p>This proposal outlines our comprehensive solution for {{customer_name}}. We have carefully analyzed your requirements and designed a tailored approach that addresses your specific business needs.</p>
-                    
-                    <h2>Project Overview</h2>
-                    <p>Our proposed solution encompasses the following key areas:</p>
-                    <ul>
-                        <li>Strategic planning and implementation</li>
-                        <li>Technical solution delivery</li>
-                        <li>Ongoing support and maintenance</li>
-                        <li>Quality assurance and testing</li>
-                    </ul>
-                    
-                    <h3>Key Benefits</h3>
-                    <ul>
-                        <li>Improved operational efficiency</li>
-                        <li>Cost-effective solution delivery</li>
-                        <li>Scalable architecture for future growth</li>
-                        <li>Comprehensive support and documentation</li>
-                        <li>Risk mitigation and quality assurance</li>
-                    </ul>
-                    
-                    <h2>Implementation Approach</h2>
-                    <p>Our implementation methodology follows industry best practices and includes:</p>
-                    <ul>
-                        <li>Detailed project planning and timeline development</li>
-                        <li>Regular milestone reviews and progress reporting</li>
-                        <li>Quality assurance and testing protocols</li>
-                        <li>Knowledge transfer and training programs</li>
-                        <li>Post-implementation support and optimization</li>
-                    </ul>
-                    
-                    <h3>Timeline & Milestones</h3>
-                    <p>The proposed implementation timeline allows for thorough planning, execution, and testing to ensure successful delivery of all project components within the agreed timeframe.</p>
-                    
-                    <h2>Why Choose {{company_name}}</h2>
-                    <h3>Experience & Expertise</h3>
-                    <p>Our team brings extensive experience in delivering similar solutions, ensuring you receive the highest quality service and results.</p>
-                    
-                    <h3>Proven Methodology</h3>
-                    <p>We follow established methodologies and best practices that have been refined through successful project deliveries.</p>
-                </div>',
+                'content' => $this->getTermsAndConditionsContent(),
                 'sort_order' => 5,
-                'is_dynamic' => true, // Dynamic content with H1, H2, H3 headers
-                'variables' => ['customer_name', 'company_name'],
-                'styling' => ['page_break_before' => true]
-            ],
-            [
-                'section_type' => 'quote_items',
-                'title' => 'Proposed Solution & Pricing',
-                'content' => '<!-- Auto-generated pricing following original quote structure -->',
-                'sort_order' => 6,
-                'is_dynamic' => true,
-                'variables' => ['items_onceoff', 'items_monthly_subscription', 'items_yearly_subscription', 'total_amount'],
-                'styling' => ['page_break_before' => true]
-            ],
-            [
-                'section_type' => 'payment_terms',
-                'title' => 'Payment Terms',
-                'content' => '<div class="payment-terms">
-                    <h3>Payment Schedule</h3>
-                    <p>Payment is due within 30 days of invoice date unless otherwise specified in the agreement.</p>
-                    
-                    <h3>Payment Methods</h3>
-                    <p>We accept payment via:</p>
-                    <ul>
-                        <li>Electronic Funds Transfer (EFT) - preferred method</li>
-                        <li>Credit card (processing fees may apply)</li>
-                        <li>Company cheque</li>
-                        <li>Direct debit (for ongoing services)</li>
-                    </ul>
-                    
-                    <h3>Late Payment</h3>
-                    <p>A 1.5% monthly service charge may be applied to accounts that remain outstanding beyond the payment terms. We reserve the right to suspend services for accounts more than 60 days overdue.</p>
-                    
-                    <h3>Proposal Validity</h3>
-                    <p>This proposal expires on {{due_date}}. Prices are subject to change after this date due to market conditions and resource availability.</p>
-                    
-                    <h3>Deposits & Milestones</h3>
-                    <p>A deposit of 50% may be required before commencement of work, with progress payments aligned to project milestones. The final balance is due upon completion and acceptance of deliverables.</p>
-                    
-                    <h3>Currency & GST</h3>
-                    <p>All prices are quoted in Australian Dollars (AUD) and include GST where applicable. International clients may be subject to different tax arrangements.</p>
-                </div>',
-                'sort_order' => 7,
-                'is_dynamic' => true, // Dynamic payment terms
-                'variables' => ['due_date'],
-                'styling' => []
-            ],
-            [
-                'section_type' => 'agreement_signature',
-                'title' => 'Agreement & Signatures',
-                'content' => '<div class="agreement-section">
-                    <h3>Client Acceptance</h3>
-                    <p>By signing below, the client accepts this proposal and agrees to the terms and conditions outlined herein. This signature constitutes a binding agreement between the parties for the services described in this proposal.</p>
-                    
-                    <div class="signature-section" style="margin-top: 60px;">
-                        <div class="client-signature" style="margin-bottom: 60px;">
-                            <h4>Client Acceptance:</h4>
-                            <div style="margin-top: 40px;">
-                                <div style="border-bottom: 2px solid #000; width: 350px; display: inline-block; margin-right: 100px;"></div>
-                                <div style="border-bottom: 2px solid #000; width: 150px; display: inline-block;"></div>
-                            </div>
-                            <div style="margin-top: 10px;">
-                                <span style="margin-right: 150px; font-weight: bold;">Authorized Signature</span>
-                                <span style="margin-left: 100px; font-weight: bold;">Date</span>
-                            </div>
-                            <div style="margin-top: 30px;">
-                                <div style="border-bottom: 1px solid #666; width: 350px; display: inline-block; margin-right: 100px;"></div>
-                                <div style="border-bottom: 1px solid #666; width: 150px; display: inline-block;"></div>
-                            </div>
-                            <div style="margin-top: 10px;">
-                                <span style="margin-right: 180px;">Print Name</span>
-                                <span style="margin-left: 120px;">Title</span>
-                            </div>
-                        </div>
-                        
-                        <div class="company-signature">
-                            <h4>{{company_name}} Representative:</h4>
-                            <div style="margin-top: 40px;">
-                                <div style="border-bottom: 2px solid #000; width: 350px; display: inline-block; margin-right: 100px;"></div>
-                                <div style="border-bottom: 2px solid #000; width: 150px; display: inline-block;"></div>
-                            </div>
-                            <div style="margin-top: 10px;">
-                                <span style="margin-right: 150px; font-weight: bold;">Authorized Signature</span>
-                                <span style="margin-left: 100px; font-weight: bold;">Date</span>
-                            </div>
-                            <div style="margin-top: 30px;">
-                                <div style="border-bottom: 1px solid #666; width: 350px; display: inline-block; margin-right: 100px;"></div>
-                                <div style="border-bottom: 1px solid #666; width: 150px; display: inline-block;"></div>
-                            </div>
-                            <div style="margin-top: 10px;">
-                                <span style="margin-right: 180px;">Print Name</span>
-                                <span style="margin-left: 120px;">Title</span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="agreement-footer" style="margin-top: 60px; padding: 20px; background-color: #f8f9fa; border-left: 4px solid #2563eb;">
-                        <p style="font-style: italic; margin: 0; font-size: 14px;">This agreement becomes effective upon signature by both parties and supersedes all previous negotiations, representations, or agreements relating to the subject matter herein. Any modifications must be made in writing and signed by both parties.</p>
-                    </div>
-                </div>',
-                'sort_order' => 8,
-                'is_dynamic' => false, // Static agreement signature section
-                'variables' => ['company_name'],
+                'is_dynamic' => false,
+                'variables' => [],
                 'styling' => ['page_break_before' => true]
             ]
         ];
@@ -380,5 +120,75 @@ class DefaultProposalTemplateSeeder extends Seeder
 
         $this->command->info('Default proposal template created successfully with ' . count($sections) . ' sections.');
         $this->command->info('Template: ' . $template->name . ' (ID: ' . $template->id . ')');
+    }
+
+    /**
+     * Get the comprehensive terms and conditions content
+     *
+     * @return string
+     */
+    private function getTermsAndConditionsContent(): string
+    {
+        return '<div class="terms-conditions" style="font-size: 11px; line-height: 1.4;">
+            <p>This agreement is for the provision of items/services captured in the "Summary" Table and include the provision of technical services/consulting in relation to technology. Any monthly and or project work amount listed in the summary is due prior to any commencement of work and monthly in advance for the period listed above labelled Term. This monthly amount may be altered by Omnia Global Group Pty Ltd should the work being requested is outside of scope, requires reasonable additional time and to be agreed by client in writing. All costs are ex GST. Should hardware be required/requested and approved by the Client, a cost will be provided to the client for acceptance and a separate invoice will be levied.</p>
+
+            <h4>Definitions</h4>
+            <p><strong>"Confidential Information"</strong> means all information (in whatever format) designated as such by the Customer or Omnia Global Group Pty Ltd, together with such information which relates to the business affairs, customers, products, developments, trade secrets, know-how and personnel of either party and which may reasonably be regarded as the confidential information of the disclosing party and expressly includes the SERVICE AGREEMENT and any Service agreements.</p>
+            
+            <p><strong>"Consulting Services"</strong> mean human resources provided by Omnia Global Group Pty Ltd to give domain-specific advice or aid by performing work as defined in this SERVICE AGREEMENT.</p>
+            
+            <p><strong>"Documentation"</strong> means the user and other technical manuals provided to the Customer with the Services.</p>
+            
+            <p><strong>"Fees"</strong> means fees for the Services performed by Omnia Global Group Pty Ltd has agreed by the parties in the Service agreement and excludes out of pocket expenses.</p>
+            
+            <p><strong>"Intellectual Property Rights"</strong> means all intellectual property or all intellectual property rights, registered or unregistered including but not limited to copyright (including software), trademarks, service marks, trade secrets, patents, patent applications, designs, know-how, inventions moral rights other proprietary rights and any application or right to apply for registration of any rights referred to herein.</p>
+            
+            <p><strong>"Omnia Global Group Pty Ltd"</strong> means Omnia Global Group Pty Ltd, ABN: 65 635 109 787 of 24 Hasler Road, Osborne Park, 6017, WA</p>
+            
+            <p><strong>"Services"</strong> means services, provided to Customer pursuant to a Service agreement executed by the parties and could include all or part of Colocation Services, Maintenance Services, and Consulting Services.</p>
+            
+            <p><strong>"Term"</strong> means the term of the SERVICE AGREEMENT that extends from the Effective date as specified in the Service agreement and shall remain in effect for a period of 7 years or as specified in a Service agreement.</p>
+
+            <h4>Purchasing Products and Services</h4>
+            <p>If the parties have executed a Service agreement, then Omnia Global Group Pty Ltd will perform the Services in accordance with the Service agreement. The Customer shall in a timely manner and at its own expense actively co-operate with Omnia Global Group Pty Ltd and provide or make available to Omnia Global Group Pty Ltd all relevant resources, including, without limitation, all relevant information, documentation, and staff reasonably required by Omnia Global Group Pty Ltd to enable Omnia Global Group Pty Ltd to perform its obligation under the Service agreement.</p>
+            
+            <p>If either party proposes in writing a change to the scope or timing of the Services, the proposing party shall submit a copy of the proposed variations to the other party. The other party will be reasonable and in good faith consider and discuss with the proposing party the proposed change and a revised estimate for the costs for such change.</p>
+
+            <h4>Payment Terms</h4>
+            <p>Customer shall pay the Fees and related charges set forth in a Service agreement, and for any other amounts coming due hereafter, monthly in advance. Customer will reimburse Omnia Global Group Pty Ltd for all reasonable out of pocket expenses (including travel and accommodation expenses) incurred by Omnia Global Group Pty Ltd in providing the Services within 30 days from the date of Omnia Global Group Pty Ltd invoice.</p>
+            
+            <p>The Fees are exclusive of all applicable Taxes and Customer will pay any applicable Tax in addition to the Fees.</p>
+
+            <h4>Services</h4>
+            <p>Omnia Global Group Pty Ltd and its Suppliers do not warrant or represent the performance, accuracy, reliability or continued availability of the Services and the Network or that the Services and the Network will operate free from faults, errors or interruptions.</p>
+            
+            <p>Omnia Global Group Pty Ltd will use reasonable efforts to rectify identified Faults within a reasonable period.</p>
+
+            <h4>Warranties</h4>
+            <p>Omnia Global Group Pty Ltd warrants that it has the right to enter this SERVICE AGREEMENT and any related terms in Service agreement. Customer warrants that it has the right to enter this SERVICE AGREEMENT and any related Service agreement.</p>
+            
+            <p>Omnia Global Group Pty Ltd warrants that any Services provided to Customer under a Service agreement will be performed with due care in a professional and workman like manner and will conform in all material aspects to the applicable contract.</p>
+
+            <h4>Limitation of Liability</h4>
+            <p>Each party\'s total cumulative liability, whether in contract or tort, negligence or otherwise, in connection with any Service provided under a Service agreement, will not exceed one (1) times the amount of fees paid to Omnia Global Group Pty Ltd under such Service agreement per month, regardless of the total claimed liability.</p>
+            
+            <p>In no event will either party be liable for any consequential, indirect, exemplary, special, or incidental damages, or any lost data, lost profits, lost revenue, loss of anticipated saving, loss of production, business interruption, or lost opportunity, arising from or relating to the SERVICE AGREEMENT or any Service agreement, regardless of whether the loss was within the contemplation of the parties at the time of entering into the Service agreement or not.</p>
+
+            <h4>Confidentiality</h4>
+            <p>Except as expressly permitted or required by this SERVICE AGREEMENT, Customer and Omnia Global Group Pty Ltd must not use any of the other\'s Confidential Information for any purpose other than performance of its obligations or exercise of its rights under this SERVICE AGREEMENT.</p>
+            
+            <p>Customer and Omnia Global Group Pty Ltd must establish and maintain effective security measures to prevent any unauthorised use or disclosure of, or unauthorised access, loss or damage to, any of the other\'s Confidential Information under its possession or control.</p>
+
+            <h4>Intellectual Property Rights</h4>
+            <p>The parties agree that all rights or title to or interest in all Intellectual Property which is created prior to or independent of the SERVICE AGREEMENT or a Service agreement shall remain the sole and exclusive property of Omnia Global Group Pty Ltd or the Customer unless expressly provided in the Service agreement. Any Intellectual Property developed during the performance of Services, and all worldwide Intellectual Property Rights therein are the exclusive property of Omnia Global Group Pty Ltd and its Suppliers.</p>
+
+            <h4>Governing Law and Venue</h4>
+            <p>The SERVICE AGREEMENT and any claims related to them will be governed by the laws of jurisdiction of Western Australia and, regarding Intellectual Property Rights or confidentiality, by Australian Commonwealth laws. Any dispute action or dispute proceeding arising from or relating to any SERVICE AGREEMENT must be brought in Perth, Western Australia.</p>
+
+            <h4>General</h4>
+            <p>This SERVICE AGREEMENT shall remain in effect for the Term unless terminated as provided in this section. Customer reserves the right to terminate this monthly rolling agreement by providing 21 calendar days written notice by email.</p>
+            
+            <p>Neither party shall be liable for any delays in performance of any of the obligations hereunder due to causes beyond its reasonable control including, without limitation, fire, strike, war, acts of terrorism, riots, acts of any civil or military authority, acts of God, computer viruses, internet failures, judicial action.</p>
+        </div>';
     }
 }
