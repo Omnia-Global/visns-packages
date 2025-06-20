@@ -21,23 +21,29 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
         try {
             $templates = ProposalTemplate::with('sections')
                 ->when($request->search, function ($query, $search) {
-                    $query->where('name', 'like', "%{$search}%")
-                          ->orWhere('description', 'like', "%{$search}%");
+                    $query
+                        ->where('name', 'like', "%{$search}%")
+                        ->orWhere('description', 'like', "%{$search}%");
                 })
                 ->orderBy('name')
                 ->get();
 
             return response()->json([
                 'success' => true,
-                'data' => $templates
+                'data' => $templates,
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching proposal templates: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error fetching proposal templates',
-                'error' => $e->getMessage()
-            ], 500);
+            Log::error(
+                'Error fetching proposal templates: ' . $e->getMessage()
+            );
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error fetching proposal templates',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
         }
     }
 
@@ -55,18 +61,28 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
             // Apply search if provided
             if ($request->filled('search')) {
                 $search = $request->search;
-                $query->where(function($q) use ($search) {
-                    $q->where('name', 'like', "%{$search}%")
-                      ->orWhere('description', 'like', "%{$search}%");
+                $query->where(function ($q) use ($search) {
+                    $q->where('name', 'like', "%{$search}%")->orWhere(
+                        'description',
+                        'like',
+                        "%{$search}%"
+                    );
                 });
             }
 
             // Apply sorting
             $sortBy = $request->get('sortBy', 'name');
             $sortOrder = $request->get('sort', 'asc');
-            
+
             // Validate sort column for security
-            $allowedSortColumns = ['id', 'name', 'description', 'is_default', 'created_at', 'updated_at'];
+            $allowedSortColumns = [
+                'id',
+                'name',
+                'description',
+                'is_default',
+                'created_at',
+                'updated_at',
+            ];
             if (in_array($sortBy, $allowedSortColumns)) {
                 $query->orderBy($sortBy, $sortOrder);
             }
@@ -86,12 +102,17 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
 
             return response()->json($templates);
         } catch (\Exception $e) {
-            Log::error('Error fetching proposal templates table: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error fetching proposal templates table',
-                'error' => $e->getMessage()
-            ], 500);
+            Log::error(
+                'Error fetching proposal templates table: ' . $e->getMessage()
+            );
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error fetching proposal templates table',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
         }
     }
 
@@ -114,21 +135,26 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
                     return [
                         'id' => $template->id,
                         'name' => $template->name,
-                        'description' => $template->description
+                        'description' => $template->description,
                     ];
                 });
 
             return response()->json([
                 'success' => true,
-                'data' => $templates
+                'data' => $templates,
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching proposal template dropdown: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error fetching proposal template dropdown',
-                'error' => $e->getMessage()
-            ], 500);
+            Log::error(
+                'Error fetching proposal template dropdown: ' . $e->getMessage()
+            );
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error fetching proposal template dropdown',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
         }
     }
 
@@ -143,17 +169,17 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
         try {
             $template = ProposalTemplate::with('sections')->findOrFail($id);
 
-            return response()->json([
-                'success' => true,
-                'data' => $template
-            ]);
+            return response()->json(template);
         } catch (\Exception $e) {
             Log::error('Error fetching proposal template: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error fetching proposal template',
-                'error' => $e->getMessage()
-            ], 500);
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error fetching proposal template',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
         }
     }
 
@@ -177,7 +203,9 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
 
             // If setting as default, unset other defaults
             if ($validated['is_default'] ?? false) {
-                ProposalTemplate::where('is_default', true)->update(['is_default' => false]);
+                ProposalTemplate::where('is_default', true)->update([
+                    'is_default' => false,
+                ]);
             }
 
             $template = ProposalTemplate::create($validated);
@@ -197,18 +225,24 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
                 }
             }
 
-            return response()->json([
-                'success' => true,
-                'data' => $template->load('sections'),
-                'message' => 'Proposal template created successfully'
-            ], 201);
+            return response()->json(
+                [
+                    'success' => true,
+                    'data' => $template->load('sections'),
+                    'message' => 'Proposal template created successfully',
+                ],
+                201
+            );
         } catch (\Exception $e) {
             Log::error('Error creating proposal template: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error creating proposal template',
-                'error' => $e->getMessage()
-            ], 500);
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error creating proposal template',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
         }
     }
 
@@ -246,7 +280,7 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
             if (isset($validated['sections'])) {
                 // Delete existing sections
                 $template->sections()->delete();
-                
+
                 // Create new sections
                 foreach ($validated['sections'] as $index => $section) {
                     $template->sections()->create([
@@ -264,15 +298,18 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
             return response()->json([
                 'success' => true,
                 'data' => $template->load('sections'),
-                'message' => 'Proposal template updated successfully'
+                'message' => 'Proposal template updated successfully',
             ]);
         } catch (\Exception $e) {
             Log::error('Error updating proposal template: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error updating proposal template',
-                'error' => $e->getMessage()
-            ], 500);
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error updating proposal template',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
         }
     }
 
@@ -286,28 +323,34 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
     {
         try {
             $template = ProposalTemplate::findOrFail($id);
-            
+
             // Don't allow deletion of default template
             if ($template->is_default) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Cannot delete default template'
-                ], 400);
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' => 'Cannot delete default template',
+                    ],
+                    400
+                );
             }
 
             $template->delete();
 
             return response()->json([
                 'success' => true,
-                'message' => 'Proposal template deleted successfully'
+                'message' => 'Proposal template deleted successfully',
             ]);
         } catch (\Exception $e) {
             Log::error('Error deleting proposal template: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error deleting proposal template',
-                'error' => $e->getMessage()
-            ], 500);
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error deleting proposal template',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
         }
     }
 
@@ -337,22 +380,30 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
             ];
 
             // Get custom variables from config if available
-            $customVariables = config('visns-packages.proposal.custom_variables', []);
+            $customVariables = config(
+                'visns-packages.proposal.custom_variables',
+                []
+            );
 
             return response()->json([
                 'success' => true,
                 'data' => [
                     'system' => $systemVariables,
-                    'custom' => $customVariables
-                ]
+                    'custom' => $customVariables,
+                ],
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching available variables: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error fetching available variables',
-                'error' => $e->getMessage()
-            ], 500);
+            Log::error(
+                'Error fetching available variables: ' . $e->getMessage()
+            );
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error fetching available variables',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
         }
     }
 
@@ -382,12 +433,14 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
             ];
 
             // Use the proposal assembly service to build preview
-            $proposalService = app(\Visnsstudio\VisnsPackages\Services\ProposalAssemblyService::class);
-            
+            $proposalService = app(
+                \Visnsstudio\VisnsPackages\Services\ProposalAssemblyService::class
+            );
+
             $previewData = $proposalService->assembleProposal([
                 'template_id' => $id,
                 'proposal_data' => $sampleData,
-                'sections' => $template->sections->toArray()
+                'sections' => $template->sections->toArray(),
             ]);
 
             return response()->json([
@@ -395,16 +448,19 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
                 'data' => [
                     'template' => $template,
                     'preview_html' => $previewData['html'],
-                    'sections' => $previewData['sections']
-                ]
+                    'sections' => $previewData['sections'],
+                ],
             ]);
         } catch (\Exception $e) {
             Log::error('Error previewing template: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error previewing template',
-                'error' => $e->getMessage()
-            ], 500);
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error previewing template',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
         }
     }
 
@@ -418,7 +474,7 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
     {
         try {
             $original = ProposalTemplate::with('sections')->findOrFail($id);
-            
+
             // Create new template
             $duplicate = ProposalTemplate::create([
                 'name' => $original->name . ' (Copy)',
@@ -444,15 +500,18 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
             return response()->json([
                 'success' => true,
                 'data' => $duplicate->load('sections'),
-                'message' => 'Template duplicated successfully'
+                'message' => 'Template duplicated successfully',
             ]);
         } catch (\Exception $e) {
             Log::error('Error duplicating template: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Error duplicating template',
-                'error' => $e->getMessage()
-            ], 500);
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error duplicating template',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
         }
     }
 }
