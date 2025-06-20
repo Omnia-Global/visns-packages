@@ -31,7 +31,7 @@ class ProposalTemplate extends Model implements Auditable
 
     protected $appends = ['sections_count'];
 
-    public function loadableRelation()
+    public function loadableRelations()
     {
         return ['sections'];
     }

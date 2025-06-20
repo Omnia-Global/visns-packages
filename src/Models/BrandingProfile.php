@@ -33,7 +33,7 @@ class BrandingProfile extends Model implements Auditable
 
     protected $dates = ['deleted_at'];
 
-    public function loadableRelation()
+    public function loadableRelations()
     {
         return ['file'];
     }
