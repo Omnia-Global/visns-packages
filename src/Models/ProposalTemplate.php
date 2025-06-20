@@ -31,12 +31,24 @@ class ProposalTemplate extends Model implements Auditable
         'deleted_at',
     ];
 
+    protected $appends = [
+        'sections_count',
+    ];
+
     /**
      * Relationship to proposal template sections
      */
     public function sections()
     {
         return $this->hasMany(ProposalTemplateSection::class, 'template_id')->orderBy('sort_order');
+    }
+
+    /**
+     * Get the sections count virtual attribute
+     */
+    public function getSectionsCountAttribute()
+    {
+        return $this->sections()->count();
     }
 
     /**
