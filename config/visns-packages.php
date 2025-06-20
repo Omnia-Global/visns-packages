@@ -101,25 +101,37 @@ return [
     */
     'entity_config' => [
         'proposalTemplates' => [
-            'controller' => \Visnsstudio\VisnsPackages\Controllers\ProposalTemplateController::class,
             'middleware' => ['auth', 'permission:Settings'],
             'model' => \Visnsstudio\VisnsPackages\Models\ProposalTemplate::class,
             'table_endpoint' => true,
             'dropdown_endpoint' => true,
-            'preview_endpoint' => true,
-            'duplicate_endpoint' => true,
             'soft_deletes' => true,
+            // Custom endpoints still handled by ProposalTemplateController
+            'custom_routes' => [
+                'variables/available' => ['get' => 'getAvailableVariables'],
+                'variables/intelligent' => ['get' => 'getIntelligentVariables'],
+                '{id}/preview' => ['get' => 'preview'],
+                '{id}/duplicate' => ['post' => 'duplicate'],
+                '{id}/pdf' => ['post' => 'generatePDF'],
+                '{id}/sections' => ['get' => 'getSections', 'post' => 'addSection'],
+                '{id}/sections/{sectionId}' => ['put' => 'updateSection', 'delete' => 'deleteSection'],
+                '{id}/sections/reorder' => ['post' => 'reorderSections'],
+            ],
         ],
         'brandingProfiles' => [
-            'controller' => \Visnsstudio\VisnsPackages\Controllers\BrandingProfileController::class,
             'middleware' => ['auth', 'permission:Settings'],
             'model' => \Visnsstudio\VisnsPackages\Models\BrandingProfile::class,
             'table_endpoint' => true,
             'dropdown_endpoint' => true,
-            'preview_endpoint' => true,
-            'duplicate_endpoint' => true,
             'file_upload' => true,
             'soft_deletes' => true,
+            // Custom endpoints still handled by BrandingProfileController
+            'custom_routes' => [
+                'default' => ['get' => 'getDefault'],
+                'apply-branding' => ['post' => 'applyBranding'],
+                '{id}/preview' => ['get' => 'preview'],
+                '{id}/duplicate' => ['post' => 'duplicate'],
+            ],
         ],
     ],
 

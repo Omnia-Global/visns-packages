@@ -2,7 +2,7 @@
 
 namespace Visnsstudio\VisnsPackages\Controllers;
 
-use App\Models\File;
+use Visnsstudio\VisnsPackages\Models\File;
 
 use Illuminate\Http\Request;
 use Illuminate\Database\Eloquent\Model;
@@ -80,11 +80,17 @@ class DynamicController extends \App\Http\Controllers\Controller
             : null;
 
         // Generate the fully qualified class name of the model
-        $modelClass = $modelName ? "App\\Models\\{$modelName}" : null;
+        // Check App\Models first, then package models as fallback
+        $appModelClass = $modelName ? "App\\Models\\{$modelName}" : null;
+        $packageModelClass = $modelName ? "Visnsstudio\\VisnsPackages\\Models\\{$modelName}" : null;
 
         // Check if the model class exists and instantiate it if it does
-        if ($modelClass && class_exists($modelClass)) {
-            $this->model = new $modelClass();
+        if ($appModelClass && class_exists($appModelClass)) {
+            $this->model = new $appModelClass();
+            $this->folder = $modelName;
+            $this->original = $modelNameSegment;
+        } elseif ($packageModelClass && class_exists($packageModelClass)) {
+            $this->model = new $packageModelClass();
             $this->folder = $modelName;
             $this->original = $modelNameSegment;
         } else {

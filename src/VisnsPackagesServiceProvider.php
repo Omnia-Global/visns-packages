@@ -336,47 +336,8 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                             Route::post('/generate-proposal-html', 'generateProposalHTML');
                         });
 
-                    // Proposal Template routes (backward compatible)
-                    Route::prefix('ajax/proposal-templates')
-                        ->controller(ProposalTemplateController::class)
-                        ->group(function () {
-                            Route::get('/', 'index');
-                            Route::post('/', 'store');
-                            Route::get('/{id}', 'show');
-                            Route::put('/{id}', 'update');
-                            Route::delete('/{id}', 'destroy');
-                            Route::post('/table', 'table');
-                            Route::post('/dropdown', 'dropdown');
-                            Route::get('/{id}/preview', 'preview');
-                            Route::post('/{id}/duplicate', 'duplicate');
-                            Route::post('/{id}/pdf', 'generatePDF');
-                            Route::get('/variables/available', 'getAvailableVariables');
-                            Route::get('/variables/intelligent', 'getIntelligentVariables');
-                            
-                            // Section management routes
-                            Route::get('/{id}/sections', 'getSections');
-                            Route::post('/{id}/sections', 'addSection');
-                            Route::put('/{id}/sections/{sectionId}', 'updateSection');
-                            Route::delete('/{id}/sections/{sectionId}', 'deleteSection');
-                            Route::post('/{id}/sections/reorder', 'reorderSections');
-                        });
-
-                    // Branding Profile routes (backward compatible)  
-                    Route::prefix('ajax/branding-profiles')
-                        ->controller(BrandingProfileController::class)
-                        ->group(function () {
-                            Route::get('/', 'index');
-                            Route::post('/', 'store');
-                            Route::get('/{id}', 'show');
-                            Route::put('/{id}', 'update');
-                            Route::delete('/{id}', 'destroy');
-                            Route::post('/table', 'table');
-                            Route::post('/dropdown', 'dropdown');
-                            Route::get('/default', 'getDefault');
-                            Route::post('/apply-branding', 'applyBranding');
-                            Route::get('/{id}/preview', 'preview');
-                            Route::post('/{id}/duplicate', 'duplicate');
-                        });
+                    // Custom route groups for entities with specific custom methods
+                    $this->registerCustomEntityRoutes();
 
                     Route::controller(AuthController::class)->group(
                         function () {
@@ -471,50 +432,132 @@ class VisnsPackagesServiceProvider extends ServiceProvider
     protected function registerDynamicEntityRoutes()
     {
         $dynamicEntities = config('visns-packages.dynamic_entities', []);
-        $entityConfig = config('visns-packages.entity_config', []);
         
         if (!empty($dynamicEntities)) {
             foreach ($dynamicEntities as $entity) {
-                // Check if entity has a specific controller defined in entity_config
-                $hasSpecificController = isset($entityConfig[$entity]) && isset($entityConfig[$entity]['controller']);
-                
-                // Only register dynamic routes for entities that don't have specific controllers
-                if (!$hasSpecificController) {
-                    Route::prefix("ajax/{$entity}")
-                        ->controller(\Visnsstudio\VisnsPackages\Controllers\DynamicController::class)
-                        ->group(function () use ($entity) {
-                            Route::get('/', 'index');
-                            Route::post('/', 'store');
-                            Route::get('/{id}', 'show');
-                            Route::put('/{id}', 'update');
-                            Route::post('/updateGallery/{id}', 'updateGallery');
-                            Route::post('/{id}/clone', 'clone');
-                            Route::post('/merge', 'mergeModels');
-                            Route::post('/detect-duplicates', 'detectDuplicates');
-                            Route::delete('/{id}', 'destroy');
-                            Route::post('/table', 'table');
-                            Route::post('/dropdown', 'dropdown');
-                        });
+                // Register dynamic routes for all entities (controller is now determined by DynamicController)
+                Route::prefix("ajax/{$entity}")
+                    ->controller(\Visnsstudio\VisnsPackages\Controllers\DynamicController::class)
+                    ->group(function () use ($entity) {
+                        Route::get('/', 'index');
+                        Route::post('/', 'store');
+                        Route::get('/{id}', 'show');
+                        Route::put('/{id}', 'update');
+                        Route::post('/updateGallery/{id}', 'updateGallery');
+                        Route::post('/{id}/clone', 'clone');
+                        Route::post('/merge', 'mergeModels');
+                        Route::post('/detect-duplicates', 'detectDuplicates');
+                        Route::delete('/{id}', 'destroy');
+                        Route::post('/table', 'table');
+                        Route::post('/dropdown', 'dropdown');
+                    });
 
-                    Route::prefix("ajax/{$entity}/json")
-                        ->controller(\Visnsstudio\VisnsPackages\Controllers\DynamicJsonController::class)
-                        ->group(function () use ($entity) {
-                            Route::post('/sortList', 'jsonSortList');
-                            Route::post('/sortUpdate', 'jsonSortUpdate');
-                            Route::post('/table', 'jsonTable');
-                            Route::post('/get', 'jsonGet');
-                            Route::post('/set', 'jsonSet');
-                            Route::post('/push', 'jsonPush');
-                            Route::post('/where', 'jsonWhere');
-                            Route::post('/search', 'jsonSearch');
-                            Route::post('/clone', 'jsonClone');
-                            Route::post('/toggle', 'jsonToggle');
-                            Route::post('/delete', 'jsonDelete');
-                            Route::post('/dropdown', 'jsonDropdown');
+                Route::prefix("ajax/{$entity}/json")
+                    ->controller(\Visnsstudio\VisnsPackages\Controllers\DynamicJsonController::class)
+                    ->group(function () use ($entity) {
+                        Route::post('/sortList', 'jsonSortList');
+                        Route::post('/sortUpdate', 'jsonSortUpdate');
+                        Route::post('/table', 'jsonTable');
+                        Route::post('/get', 'jsonGet');
+                        Route::post('/set', 'jsonSet');
+                        Route::post('/push', 'jsonPush');
+                        Route::post('/where', 'jsonWhere');
+                        Route::post('/search', 'jsonSearch');
+                        Route::post('/clone', 'jsonClone');
+                        Route::post('/toggle', 'jsonToggle');
+                        Route::post('/delete', 'jsonDelete');
+                        Route::post('/dropdown', 'jsonDropdown');
+                    });
+            }
+        }
+    }
+
+    /**
+     * Register custom routes for entities with specific custom methods
+     *
+     * @return void
+     */
+    protected function registerCustomEntityRoutes()
+    {
+        $entityConfig = config('visns-packages.entity_config', []);
+        
+        foreach ($entityConfig as $entity => $config) {
+            if (isset($config['custom_routes'])) {
+                // Map entity names to controller classes
+                $controllerClass = $this->getControllerClassForEntity($entity);
+                
+                if ($controllerClass) {
+                    Route::prefix("ajax/{$entity}")
+                        ->controller($controllerClass)
+                        ->group(function () use ($config) {
+                            foreach ($config['custom_routes'] as $route => $methods) {
+                                if (is_array($methods)) {
+                                    // Handle multiple HTTP methods for the same route
+                                    foreach ($methods as $httpVerb => $methodName) {
+                                        Route::{$httpVerb}($route, $methodName);
+                                    }
+                                } else {
+                                    // Single method, determine HTTP verb from route pattern
+                                    $httpVerb = $this->determineHttpVerb($route, $methods);
+                                    Route::{$httpVerb}($route, $methods);
+                                }
+                            }
                         });
                 }
             }
         }
+    }
+
+    /**
+     * Get the controller class for a specific entity
+     *
+     * @param string $entity
+     * @return string|null
+     */
+    protected function getControllerClassForEntity(string $entity): ?string
+    {
+        $controllerMap = [
+            'proposalTemplates' => ProposalTemplateController::class,
+            'brandingProfiles' => BrandingProfileController::class,
+        ];
+
+        return $controllerMap[$entity] ?? null;
+    }
+
+    /**
+     * Determine the appropriate HTTP verb for a route
+     *
+     * @param string $route
+     * @param string $method
+     * @return string
+     */
+    protected function determineHttpVerb(string $route, string $method): string
+    {
+        // If route contains {id} and method contains update/edit, use PUT
+        if (str_contains($route, '{id}') && 
+            (str_contains(strtolower($method), 'update') || str_contains(strtolower($method), 'edit'))) {
+            return 'put';
+        }
+        
+        // If route contains {id} and method contains delete/destroy, use DELETE
+        if (str_contains($route, '{id}') && 
+            (str_contains(strtolower($method), 'delete') || str_contains(strtolower($method), 'destroy'))) {
+            return 'delete';
+        }
+        
+        // If method contains create/store/add/generate, use POST
+        if (str_contains(strtolower($method), 'create') || 
+            str_contains(strtolower($method), 'store') ||
+            str_contains(strtolower($method), 'add') ||
+            str_contains(strtolower($method), 'generate') ||
+            str_contains(strtolower($method), 'duplicate') ||
+            str_contains(strtolower($method), 'apply') ||
+            str_contains(strtolower($method), 'reorder')) {
+            return 'post';
+        }
+        
+        // Default to GET for all other methods
+        return 'get';
     }
 
     /**
