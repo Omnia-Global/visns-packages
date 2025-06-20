@@ -220,7 +220,7 @@ class ProposalAssemblyService
     {
         switch ($section['type']) {
             case 'cover_page':
-                return $this->renderCoverPageWithTOC($section, $branding, $proposalData);
+                return $this->renderCoverPage($section, $branding, $proposalData);
             case 'toc':
                 return $this->renderTableOfContents($section, $proposalData);
             case 'terms_conditions':
@@ -245,37 +245,33 @@ class ProposalAssemblyService
     }
 
     /**
-     * Render cover page with table of contents (OMNIA format)
+     * Render clean cover page (OMNIA format)
      *
      * @param array $section
      * @param BrandingProfile $branding
      * @param array $proposalData
      * @return string
      */
-    private function renderCoverPageWithTOC(array $section, $branding, array $proposalData): string
+    private function renderCoverPage(array $section, $branding, array $proposalData): string
     {
-        // Generate TOC items for embedding in cover page
-        $tocItems = $this->generateTOCItems($proposalData);
-        $tocHtml = '';
-        foreach ($tocItems as $item) {
-            $tocHtml .= '<div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px dotted #ccc;">';
-            $tocHtml .= '<span>' . $item['title'] . '</span>';
-            $tocHtml .= '<span>' . str_repeat('*', 20) . '_' . str_repeat('_', 10) . str_repeat('*', 20) . '</span>';
-            $tocHtml .= '</div>';
-        }
-
         return '
-        <div class="omnia-cover-page" style="page-break-after: always; padding: 50px; font-family: Arial, sans-serif;">
-            <div class="header" style="text-align: center; margin-bottom: 40px;">
-                <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 10px;">' . ($proposalData['document_title'] ?? '[Document Title]') . '</h1>
-                <p style="font-size: 14px; margin-bottom: 30px;">OMNIA GLOBAL GROUP PTY LTD ACN: 674 383 987</p>
+        <div class="omnia-cover-page" style="page-break-after: always; padding: 60px; background: linear-gradient(135deg, #1a4b3a 0%, #2d6a4f 100%); color: white; min-height: calc(100vh - 120px); display: flex; flex-direction: column; justify-content: space-between; font-family: Arial, sans-serif;">
+            <div class="cover-header" style="text-align: center; margin-top: 100px;">
+                <div class="logo-section" style="margin-bottom: 60px;">
+                    <div style="width: 200px; height: 80px; background: white; border-radius: 10px; margin: 0 auto; display: flex; align-items: center; justify-content: center;">
+                        <span style="color: #2d6a4f; font-size: 24px; font-weight: bold;">OmniaGlobal</span>
+                    </div>
+                </div>
             </div>
             
-            <div class="contents-section">
-                <h2 style="font-size: 18px; margin-bottom: 20px; font-weight: bold;">Contents</h2>
-                <div class="toc-items">
-                    ' . $tocHtml . '
+            <div class="cover-content" style="text-align: center; flex-grow: 1; display: flex; align-items: center; justify-content: center;">
+                <div>
+                    <h1 style="font-size: 48px; font-weight: bold; margin-bottom: 20px; color: #4ade80;">' . ($proposalData['document_title'] ?? '[Document Title]') . '</h1>
                 </div>
+            </div>
+            
+            <div class="cover-footer" style="text-align: center; margin-bottom: 40px;">
+                <p style="font-size: 14px; color: #a3a3a3;">OMNIA GLOBAL GROUP PTY LTD &nbsp;&nbsp; ACN: 674 383 987</p>
             </div>
         </div>';
     }
@@ -292,9 +288,9 @@ class ProposalAssemblyService
         $tocItems = $section['toc_items'] ?? [];
         
         $tocHtml = '
-        <div class="table-of-contents" style="page-break-after: always; padding: 40px 0;">
-            <h1 class="primary-text" style="text-align: center; margin-bottom: 40px;">' . $section['title'] . '</h1>
-            <div class="toc-content">';
+        <div class="table-of-contents" style="page-break-after: always; padding: 80px;">
+            <h1 style="font-size: 32px; font-weight: bold; margin-bottom: 40px; text-align: left;">Contents</h1>
+            <div class="toc-content" style="margin-top: 40px;">';
 
         foreach ($tocItems as $item) {
             $tocHtml .= '
@@ -329,7 +325,7 @@ class ProposalAssemblyService
     private function renderAcceptanceSection(array $section, $branding, array $proposalData): string
     {
         return '
-        <div class="acceptance-section" style="padding: 40px; page-break-after: avoid;">
+        <div class="acceptance-section" style="padding: 60px; page-break-after: avoid;">
             <h1 style="font-size: 20px; font-weight: bold; margin-bottom: 20px;">' . $section['title'] . '</h1>
             <div class="acceptance-content">
                 ' . $this->replaceVariables($section['content'], $proposalData) . '
@@ -347,7 +343,7 @@ class ProposalAssemblyService
     private function renderPricingSection(array $section, array $proposalData): string
     {
         $html = '
-        <div class="pricing-section" style="padding: 50px; page-break-after: avoid;">
+        <div class="pricing-section" style="padding: 70px; page-break-after: avoid;">
             <h1 style="font-size: 20px; font-weight: bold; margin-bottom: 20px;">' . $section['title'] . '</h1>
             <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
                 <thead>
@@ -515,7 +511,7 @@ class ProposalAssemblyService
     private function renderTermsConditions(array $section, $branding): string
     {
         return '
-        <div class="terms-conditions-section" style="page-break-before: always; padding: 40px 0;">
+        <div class="terms-conditions-section" style="page-break-before: always; padding: 60px 0;">
             <h1 class="primary-text" style="margin-bottom: 30px;">' . $section['title'] . '</h1>
             <div class="terms-content">
                 ' . $section['content'] . '
@@ -541,7 +537,7 @@ class ProposalAssemblyService
         ];
 
         $html = '
-        <div class="change-log-section" style="padding: 40px; page-break-after: avoid;">
+        <div class="change-log-section" style="padding: 60px; page-break-after: avoid;">
             <h1 style="font-size: 20px; font-weight: bold; margin-bottom: 20px;">' . $section['title'] . '</h1>
             <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
                 <thead>
@@ -581,7 +577,7 @@ class ProposalAssemblyService
         $content = $this->replaceVariables($section['content'], $proposalData);
         
         return '
-        <div class="overview-section" style="page-break-before: always; padding: 40px 0;">
+        <div class="overview-section" style="page-break-before: always; padding: 60px 0;">
             <div class="overview-content">
                 ' . $content . '
             </div>
@@ -601,7 +597,7 @@ class ProposalAssemblyService
         $content = $this->replaceVariables($section['content'], $proposalData);
         
         return '
-        <div class="payment-terms-section" style="padding: 40px 0;">
+        <div class="payment-terms-section" style="padding: 60px 0;">
             <h1 class="primary-text" style="margin-bottom: 30px;">' . $section['title'] . '</h1>
             <div class="payment-content">
                 ' . $content . '
@@ -622,7 +618,7 @@ class ProposalAssemblyService
         $content = $this->replaceVariables($section['content'], $proposalData);
         
         return '
-        <div class="agreement-signature-section" style="page-break-before: always; padding: 40px 0;">
+        <div class="agreement-signature-section" style="page-break-before: always; padding: 60px 0;">
             <h1 class="primary-text" style="margin-bottom: 30px;">' . $section['title'] . '</h1>
             <div class="agreement-content">
                 ' . $content . '
@@ -642,7 +638,7 @@ class ProposalAssemblyService
         $pageBreak = in_array($section['type'], ['terms']) ? 'page-break-before: always;' : '';
         
         return '
-        <div class="content-section" style="' . $pageBreak . ' padding: 40px 0;">
+        <div class="content-section" style="' . $pageBreak . ' padding: 60px 0;">
             <h1 class="primary-text" style="margin-bottom: 30px;">' . $section['title'] . '</h1>
             <div class="section-content">
                 ' . $section['content'] . '
@@ -686,7 +682,7 @@ class ProposalAssemblyService
                     font-family: var(--body-font);
                     line-height: 1.6;
                     color: #333;
-                    padding: 30px;
+                    padding: 50px;
                 }
                 
                 h1, h2, h3, h4, h5, h6 {
@@ -746,10 +742,10 @@ class ProposalAssemblyService
                 
                 @media print {
                     @page {
-                        margin: 25mm;
+                        margin: 30mm;
                     }
                     body { 
-                        padding: 20px;
+                        padding: 40px;
                         margin: 0;
                     }
                     .page-break { 
@@ -759,7 +755,7 @@ class ProposalAssemblyService
                     .pricing-section, 
                     .terms-conditions-section, 
                     .overview-section {
-                        padding: 30px 20px;
+                        padding: 50px 40px;
                     }
                 }
             </style>
