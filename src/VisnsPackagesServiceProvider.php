@@ -336,9 +336,6 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                             Route::post('/generate-proposal-html', 'generateProposalHTML');
                         });
 
-                    // Custom route groups for entities with specific custom methods
-                    $this->registerCustomEntityRoutes();
-
                     Route::controller(AuthController::class)->group(
                         function () {
                             Route::post('/login', 'login_api');
@@ -419,8 +416,11 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                         });
                 });
 
-            // Register dynamic entity routes if configured
+            // Register dynamic entity routes first (they will be more general)
             $this->registerDynamicEntityRoutes();
+            
+            // Register custom routes after (they will override/supplement dynamic routes)
+            $this->registerCustomEntityRoutes();
         }
     }
 
