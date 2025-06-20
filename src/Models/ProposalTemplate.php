@@ -34,7 +34,7 @@ class ProposalTemplate extends Model implements Auditable
 
     public function loadableRelations()
     {
-        return ['sections', 'brandingProfile'];
+        return ['sections', 'brandingProfile.file'];
     }
 
     public function validationRules($context = 'store', $requestData = null)
