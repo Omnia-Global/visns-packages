@@ -26,7 +26,7 @@ class ProposalAssemblyService
 
             // Load template and branding
             $template = $templateId ? ProposalTemplate::with('sections')->find($templateId) : null;
-            $branding = $brandingId ? BrandingProfile::find($brandingId) : $this->getDefaultBranding();
+            $branding = $brandingId ? BrandingProfile::with('file')->find($brandingId) : $this->getDefaultBranding();
 
             // Build sections array
             $sections = $this->buildSections($template, $customSections, $proposalData, $branding);
@@ -254,13 +254,14 @@ class ProposalAssemblyService
      */
     private function renderCoverPage(array $section, $branding, array $proposalData): string
     {
+        // Get logo from branding profile
+        $logoHtml = $this->renderBrandingLogo($branding);
+        
         return '
         <div class="omnia-cover-page" style="page-break-after: always; padding: 60px; background: linear-gradient(135deg, #1a4b3a 0%, #2d6a4f 100%); color: white; min-height: calc(100vh - 120px); display: flex; flex-direction: column; justify-content: space-between; font-family: Arial, sans-serif;">
             <div class="cover-header" style="text-align: center; margin-top: 100px;">
                 <div class="logo-section" style="margin-bottom: 60px;">
-                    <div style="width: 200px; height: 80px; background: white; border-radius: 10px; margin: 0 auto; display: flex; align-items: center; justify-content: center;">
-                        <span style="color: #2d6a4f; font-size: 24px; font-weight: bold;">OmniaGlobal</span>
-                    </div>
+                    ' . $logoHtml . '
                 </div>
             </div>
             
@@ -271,8 +272,45 @@ class ProposalAssemblyService
             </div>
             
             <div class="cover-footer" style="text-align: center; margin-bottom: 40px;">
-                <p style="font-size: 14px; color: #a3a3a3;">OMNIA GLOBAL GROUP PTY LTD &nbsp;&nbsp; ACN: 674 383 987</p>
+                <p style="font-size: 14px; color: #a3a3a3;">' . ($branding->company_name ?? 'OMNIA GLOBAL GROUP PTY LTD') . ' &nbsp;&nbsp; ' . ($branding->company_info['acn'] ?? 'ACN: 674 383 987') . '</p>
             </div>
+        </div>';
+    }
+
+    /**
+     * Render branding logo from file relationship
+     *
+     * @param BrandingProfile $branding
+     * @return string
+     */
+    private function renderBrandingLogo($branding): string
+    {
+        // Try to get logo from file relationship
+        if ($branding && $branding->file && $branding->file->file_url) {
+            $logoUrl = $branding->file->file_url;
+            $companyName = $branding->company_name ?? 'Company Logo';
+            
+            return '
+            <div style="width: 200px; height: 80px; background: white; border-radius: 10px; margin: 0 auto; display: flex; align-items: center; justify-content: center; padding: 10px;">
+                <img src="' . $logoUrl . '" alt="' . $companyName . '" style="max-width: 180px; max-height: 60px; object-fit: contain;" />
+            </div>';
+        }
+        
+        // Try to use logo_url field if file relationship doesn't exist
+        if ($branding && $branding->logo_url) {
+            $companyName = $branding->company_name ?? 'Company Logo';
+            
+            return '
+            <div style="width: 200px; height: 80px; background: white; border-radius: 10px; margin: 0 auto; display: flex; align-items: center; justify-content: center; padding: 10px;">
+                <img src="' . $branding->logo_url . '" alt="' . $companyName . '" style="max-width: 180px; max-height: 60px; object-fit: contain;" />
+            </div>';
+        }
+        
+        // Fallback to company name text if no logo available
+        $companyName = $branding->company_name ?? 'OmniaGlobal';
+        return '
+        <div style="width: 200px; height: 80px; background: white; border-radius: 10px; margin: 0 auto; display: flex; align-items: center; justify-content: center;">
+            <span style="color: #2d6a4f; font-size: 24px; font-weight: bold;">' . $companyName . '</span>
         </div>';
     }
 
