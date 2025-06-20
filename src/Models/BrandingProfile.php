@@ -31,9 +31,24 @@ class BrandingProfile extends Model implements Auditable
         'is_default' => 'boolean',
     ];
 
-    protected $dates = [
-        'deleted_at',
-    ];
+    protected $dates = ['deleted_at'];
+
+    public function loadableRelation()
+    {
+        return ['file'];
+    }
+
+    public function file()
+    {
+        return $this->morphOne(File::class, 'fileable');
+    }
+
+    public function validationRules($context = 'store', $requestData = null)
+    {
+        $rules = [];
+
+        return $rules;
+    }
 
     /**
      * Scope for custom ordering (integrates with dynamic entity system)
@@ -73,7 +88,7 @@ class BrandingProfile extends Model implements Auditable
     public static function getDefault()
     {
         $default = static::where('is_default', true)->first();
-        
+
         if (!$default) {
             // Create a basic default profile if none exists
             $default = static::create([
@@ -82,20 +97,20 @@ class BrandingProfile extends Model implements Auditable
                 'colors' => [
                     'primary' => '#2563eb',
                     'secondary' => '#64748b',
-                    'accent' => '#059669'
+                    'accent' => '#059669',
                 ],
                 'fonts' => [
                     'heading' => 'Arial, sans-serif',
-                    'body' => 'Arial, sans-serif'
+                    'body' => 'Arial, sans-serif',
                 ],
                 'company_info' => [
                     'address' => '',
                     'phone' => '',
                     'email' => '',
                     'website' => '',
-                    'abn' => ''
+                    'abn' => '',
                 ],
-                'is_default' => true
+                'is_default' => true,
             ]);
         }
 
@@ -109,10 +124,10 @@ class BrandingProfile extends Model implements Auditable
     {
         // Unset other defaults
         static::where('id', '!=', $this->id)->update(['is_default' => false]);
-        
+
         // Set this as default
         $this->update(['is_default' => true]);
-        
+
         return $this;
     }
 
@@ -171,7 +186,7 @@ class BrandingProfile extends Model implements Auditable
     public function getContactInfo()
     {
         $info = $this->company_info ?? [];
-        
+
         return [
             'phone' => $info['phone'] ?? '',
             'email' => $info['email'] ?? '',
@@ -200,7 +215,7 @@ class BrandingProfile extends Model implements Auditable
     public function getInlineCSS()
     {
         $variables = $this->getCSSVariables();
-        
+
         $css = ":root {\n";
         foreach ($variables as $property => $value) {
             $css .= "    {$property}: {$value};\n";
@@ -240,12 +255,22 @@ class BrandingProfile extends Model implements Auditable
     public function getLogoHTML($className = 'company-logo')
     {
         if ($this->logo_url) {
-            return '<img src="' . $this->logo_url . '" alt="' . htmlspecialchars($this->company_name) . ' Logo" class="' . $className . '">';
+            return '<img src="' .
+                $this->logo_url .
+                '" alt="' .
+                htmlspecialchars($this->company_name) .
+                ' Logo" class="' .
+                $className .
+                '">';
         }
 
         // Fallback to company initials
         $initials = strtoupper(substr($this->company_name, 0, 3));
-        return '<div class="logo-placeholder primary-bg ' . $className . '">' . $initials . '</div>';
+        return '<div class="logo-placeholder primary-bg ' .
+            $className .
+            '">' .
+            $initials .
+            '</div>';
     }
 
     /**
@@ -254,7 +279,7 @@ class BrandingProfile extends Model implements Auditable
     public function duplicate($newName = null)
     {
         $newName = $newName ?? $this->name . ' (Copy)';
-        
+
         return static::create([
             'name' => $newName,
             'company_name' => $this->company_name,
@@ -320,8 +345,15 @@ class BrandingProfile extends Model implements Auditable
         if (!empty($this->colors)) {
             foreach (['primary', 'secondary', 'accent'] as $colorType) {
                 if (isset($this->colors[$colorType])) {
-                    if (!preg_match('/^#[0-9A-Fa-f]{6}$/', $this->colors[$colorType])) {
-                        $errors[] = ucfirst($colorType) . ' color must be a valid hex color code';
+                    if (
+                        !preg_match(
+                            '/^#[0-9A-Fa-f]{6}$/',
+                            $this->colors[$colorType]
+                        )
+                    ) {
+                        $errors[] =
+                            ucfirst($colorType) .
+                            ' color must be a valid hex color code';
                     }
                 }
             }
@@ -329,14 +361,18 @@ class BrandingProfile extends Model implements Auditable
 
         // Validate email if provided
         if (!empty($this->company_info['email'])) {
-            if (!filter_var($this->company_info['email'], FILTER_VALIDATE_EMAIL)) {
+            if (
+                !filter_var($this->company_info['email'], FILTER_VALIDATE_EMAIL)
+            ) {
                 $errors[] = 'Company email must be a valid email address';
             }
         }
 
         // Validate website if provided
         if (!empty($this->company_info['website'])) {
-            if (!filter_var($this->company_info['website'], FILTER_VALIDATE_URL)) {
+            if (
+                !filter_var($this->company_info['website'], FILTER_VALIDATE_URL)
+            ) {
                 $errors[] = 'Company website must be a valid URL';
             }
         }
@@ -350,22 +386,22 @@ class BrandingProfile extends Model implements Auditable
     public function getColorPalette()
     {
         $colors = $this->colors ?? [];
-        
+
         return [
             'primary' => [
                 'hex' => $colors['primary'] ?? '#2563eb',
                 'name' => 'Primary',
-                'usage' => 'Headers, buttons, primary elements'
+                'usage' => 'Headers, buttons, primary elements',
             ],
             'secondary' => [
                 'hex' => $colors['secondary'] ?? '#64748b',
                 'name' => 'Secondary',
-                'usage' => 'Text, borders, secondary elements'
+                'usage' => 'Text, borders, secondary elements',
             ],
             'accent' => [
                 'hex' => $colors['accent'] ?? '#059669',
                 'name' => 'Accent',
-                'usage' => 'Highlights, call-to-action elements'
+                'usage' => 'Highlights, call-to-action elements',
             ],
         ];
     }
@@ -380,14 +416,14 @@ class BrandingProfile extends Model implements Auditable
             'company' => [
                 'name' => $this->company_name,
                 'logo_url' => $this->logo_url,
-                'info' => $this->company_info ?? []
+                'info' => $this->company_info ?? [],
             ],
             'design' => [
                 'colors' => $this->colors ?? [],
-                'fonts' => $this->fonts ?? []
+                'fonts' => $this->fonts ?? [],
             ],
             'css_variables' => $this->getCSSVariables(),
-            'exported_at' => now()->toISOString()
+            'exported_at' => now()->toISOString(),
         ];
     }
 }

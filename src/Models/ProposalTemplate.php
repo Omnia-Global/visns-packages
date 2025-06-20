@@ -27,20 +27,31 @@ class ProposalTemplate extends Model implements Auditable
         'is_default' => 'boolean',
     ];
 
-    protected $dates = [
-        'deleted_at',
-    ];
+    protected $dates = ['deleted_at'];
 
-    protected $appends = [
-        'sections_count',
-    ];
+    protected $appends = ['sections_count'];
+
+    public function loadableRelation()
+    {
+        return ['sections'];
+    }
+
+    public function validationRules($context = 'store', $requestData = null)
+    {
+        $rules = [];
+
+        return $rules;
+    }
 
     /**
      * Relationship to proposal template sections
      */
     public function sections()
     {
-        return $this->hasMany(ProposalTemplateSection::class, 'template_id')->orderBy('sort_order');
+        return $this->hasMany(
+            ProposalTemplateSection::class,
+            'template_id'
+        )->orderBy('sort_order');
     }
 
     /**
@@ -98,10 +109,10 @@ class ProposalTemplate extends Model implements Auditable
     {
         // Unset other defaults
         static::where('id', '!=', $this->id)->update(['is_default' => false]);
-        
+
         // Set this as default
         $this->update(['is_default' => true]);
-        
+
         return $this;
     }
 
@@ -137,7 +148,7 @@ class ProposalTemplate extends Model implements Auditable
     public function duplicate($newName = null)
     {
         $newName = $newName ?? $this->name . ' (Copy)';
-        
+
         $duplicate = static::create([
             'name' => $newName,
             'description' => $this->description,
@@ -199,7 +210,7 @@ class ProposalTemplate extends Model implements Auditable
 
         // Check for required section types
         $sectionTypes = $this->sections->pluck('section_type')->toArray();
-        
+
         $requiredSections = ['cover_page', 'toc', 'overview', 'quote_items'];
         foreach ($requiredSections as $required) {
             if (!in_array($required, $sectionTypes)) {
@@ -218,15 +229,21 @@ class ProposalTemplate extends Model implements Auditable
         return [
             'cover_page' => [
                 'name' => 'Cover Page',
-                'description' => 'Title page with company branding and proposal title (emulates existing template)',
-                'required_variables' => ['customer_name', 'company_name', 'quote_number'],
+                'description' =>
+                    'Title page with company branding and proposal title (emulates existing template)',
+                'required_variables' => [
+                    'customer_name',
+                    'company_name',
+                    'quote_number',
+                ],
                 'supports_custom_content' => true,
                 'is_static' => false,
                 'supports_dynamic_content' => true,
             ],
             'toc' => [
                 'name' => 'Table of Contents',
-                'description' => 'Auto-generated table of contents based on all sections',
+                'description' =>
+                    'Auto-generated table of contents based on all sections',
                 'required_variables' => [],
                 'supports_custom_content' => false,
                 'is_static' => false,
@@ -234,7 +251,8 @@ class ProposalTemplate extends Model implements Auditable
             ],
             'terms_conditions' => [
                 'name' => 'Terms & Conditions',
-                'description' => 'Static legal terms and conditions (rarely changes)',
+                'description' =>
+                    'Static legal terms and conditions (rarely changes)',
                 'required_variables' => [],
                 'supports_custom_content' => true,
                 'is_static' => true,
@@ -250,7 +268,8 @@ class ProposalTemplate extends Model implements Auditable
             ],
             'overview' => [
                 'name' => 'Overview Section',
-                'description' => 'Dynamic content with H1, H2, H3 headers and custom content',
+                'description' =>
+                    'Dynamic content with H1, H2, H3 headers and custom content',
                 'required_variables' => ['customer_name'],
                 'supports_custom_content' => true,
                 'is_static' => false,
@@ -259,8 +278,14 @@ class ProposalTemplate extends Model implements Auditable
             ],
             'quote_items' => [
                 'name' => 'Pricing Section',
-                'description' => 'Pricing table following original quote structure',
-                'required_variables' => ['items_onceoff', 'items_monthly_subscription', 'items_yearly_subscription', 'total_amount'],
+                'description' =>
+                    'Pricing table following original quote structure',
+                'required_variables' => [
+                    'items_onceoff',
+                    'items_monthly_subscription',
+                    'items_yearly_subscription',
+                    'total_amount',
+                ],
                 'supports_custom_content' => false,
                 'is_static' => false,
                 'supports_dynamic_content' => true,
