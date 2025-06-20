@@ -20,12 +20,14 @@ class ProposalTemplateSection extends Model implements Auditable
         'content',
         'sort_order',
         'is_dynamic',
+        'is_enabled',
         'variables',
         'styling',
     ];
 
     protected $casts = [
         'is_dynamic' => 'boolean',
+        'is_enabled' => 'boolean',
         'variables' => 'array',
         'styling' => 'array',
         'sort_order' => 'integer',
@@ -183,6 +185,7 @@ class ProposalTemplateSection extends Model implements Auditable
             'content' => $this->content,
             'sort_order' => $this->sort_order,
             'is_dynamic' => $this->is_dynamic,
+            'is_enabled' => $this->is_enabled,
             'variables' => $this->variables,
             'styling' => $this->styling,
         ]);
