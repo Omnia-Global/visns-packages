@@ -242,7 +242,7 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
 
             return response()->json(
                 [
-                    'success' => true,
+                    'error' => '',
                     'data' => $profile,
                     'message' => 'Branding profile created successfully',
                 ],
@@ -317,7 +317,7 @@ class BrandingProfileController extends \App\Http\Controllers\Controller
             $profile->update($validated);
 
             return response()->json([
-                'success' => true,
+                'error' => '',
                 'data' => $profile,
                 'message' => 'Branding profile updated successfully',
             ]);
