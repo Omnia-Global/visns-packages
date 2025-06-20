@@ -19,6 +19,7 @@ class ProposalTemplate extends Model implements Auditable
         'variables',
         'styling',
         'is_default',
+        'branding_profile_id',
     ];
 
     protected $casts = [
@@ -33,12 +34,19 @@ class ProposalTemplate extends Model implements Auditable
 
     public function loadableRelations()
     {
-        return ['sections'];
+        return ['sections', 'brandingProfile'];
     }
 
     public function validationRules($context = 'store', $requestData = null)
     {
-        $rules = [];
+        $rules = [
+            'name' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'variables' => 'nullable|array',
+            'styling' => 'nullable|array',
+            'is_default' => 'boolean',
+            'branding_profile_id' => 'nullable|exists:branding_profiles,id',
+        ];
 
         return $rules;
     }
@@ -52,6 +60,14 @@ class ProposalTemplate extends Model implements Auditable
             ProposalTemplateSection::class,
             'template_id'
         )->orderBy('sort_order');
+    }
+
+    /**
+     * Relationship to branding profile
+     */
+    public function brandingProfile()
+    {
+        return $this->belongsTo(BrandingProfile::class);
     }
 
     /**
@@ -155,6 +171,7 @@ class ProposalTemplate extends Model implements Auditable
             'variables' => $this->variables,
             'styling' => $this->styling,
             'is_default' => false,
+            'branding_profile_id' => $this->branding_profile_id,
         ]);
 
         // Duplicate sections

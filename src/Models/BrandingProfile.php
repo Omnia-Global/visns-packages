@@ -35,12 +35,20 @@ class BrandingProfile extends Model implements Auditable
 
     public function loadableRelations()
     {
-        return ['file'];
+        return ['file', 'proposalTemplates'];
     }
 
     public function file()
     {
         return $this->morphOne(File::class, 'fileable');
+    }
+
+    /**
+     * Relationship to proposal templates using this branding profile
+     */
+    public function proposalTemplates()
+    {
+        return $this->hasMany(ProposalTemplate::class);
     }
 
     public function validationRules($context = 'store', $requestData = null)

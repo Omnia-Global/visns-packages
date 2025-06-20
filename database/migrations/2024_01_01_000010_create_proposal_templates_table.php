@@ -21,6 +21,7 @@ class CreateProposalTemplatesTable extends Migration
             $table->json('variables')->nullable(); // Custom variables for this template
             $table->json('styling')->nullable(); // Custom styling options
             $table->boolean('is_default')->default(false);
+            $table->foreignId('branding_profile_id')->nullable()->constrained('branding_profiles')->onDelete('set null');
             $table->timestamps();
             $table->softDeletes();
 
