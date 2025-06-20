@@ -28,14 +28,17 @@ class ProposalAssemblyService
             $template = $templateId ? ProposalTemplate::with('sections')->find($templateId) : null;
             $branding = $brandingId ? BrandingProfile::with('file')->find($brandingId) : $this->getDefaultBranding();
 
-            // Build sections array
+            // Build sections array (without variable replacement for extraction)
+            $sectionsForExtraction = $this->buildSectionsForExtraction($template, $customSections);
+            
+            // Extract variables used in the content BEFORE replacement
+            $variablesUsed = $this->extractVariablesUsed($sectionsForExtraction);
+
+            // Build sections array with variable replacement
             $sections = $this->buildSections($template, $customSections, $proposalData, $branding);
 
             // Generate HTML content
             $html = $this->assembleHTML($sections, $branding, $proposalData);
-
-            // Extract variables used in the content
-            $variablesUsed = $this->extractVariablesUsed($sections);
 
             return [
                 'html' => $html,
@@ -52,6 +55,39 @@ class ProposalAssemblyService
             Log::error('Error assembling proposal: ' . $e->getMessage());
             throw $e;
         }
+    }
+
+    /**
+     * Build sections array for variable extraction (without replacement)
+     *
+     * @param ProposalTemplate|null $template
+     * @param array $customSections
+     * @return array
+     */
+    private function buildSectionsForExtraction($template, array $customSections): array
+    {
+        $sections = [];
+
+        if ($template && $template->sections) {
+            // Use template sections WITHOUT variable replacement
+            foreach ($template->sections as $section) {
+                $sections[] = [
+                    'id' => $section->id,
+                    'type' => $section->section_type,
+                    'title' => $section->title, // No replacement
+                    'content' => $section->content, // No replacement
+                    'sort_order' => $section->sort_order,
+                    'is_dynamic' => $section->is_dynamic,
+                    'styling' => $section->styling ?? [],
+                    'variables' => $section->variables ?? [],
+                ];
+            }
+        } else {
+            // Use custom sections or default structure
+            $sections = $this->buildDefaultSections($customSections, []);
+        }
+
+        return $sections;
     }
 
     /**
@@ -1157,13 +1193,38 @@ class ProposalAssemblyService
         $variablesUsed = [];
         
         foreach ($sections as $section) {
+            // Check both content and stored variables
             $content = $section['content'] ?? '';
+            $storedVariables = $section['variables'] ?? [];
             
-            // Find all variables in the format {{variable_name}}
+            // Find all variables in the format {{variable_name}} from content
             preg_match_all('/\{\{([^}]+)\}\}/', $content, $matches);
             
             if (!empty($matches[1])) {
                 foreach ($matches[1] as $variable) {
+                    $variable = trim($variable);
+                    if (!in_array($variable, $variablesUsed)) {
+                        $variablesUsed[] = $variable;
+                    }
+                }
+            }
+            
+            // Also include stored variables from database
+            if (!empty($storedVariables) && is_array($storedVariables)) {
+                foreach ($storedVariables as $variable) {
+                    $variable = trim($variable);
+                    if (!in_array($variable, $variablesUsed)) {
+                        $variablesUsed[] = $variable;
+                    }
+                }
+            }
+            
+            // Check title for variables too
+            $title = $section['title'] ?? '';
+            preg_match_all('/\{\{([^}]+)\}\}/', $title, $titleMatches);
+            
+            if (!empty($titleMatches[1])) {
+                foreach ($titleMatches[1] as $variable) {
                     $variable = trim($variable);
                     if (!in_array($variable, $variablesUsed)) {
                         $variablesUsed[] = $variable;
