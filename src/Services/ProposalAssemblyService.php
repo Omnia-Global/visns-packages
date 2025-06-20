@@ -410,7 +410,7 @@ class ProposalAssemblyService
                         <td colspan="4" style="border: 1px solid #ddd; padding: 10px; text-align: right; font-weight: bold;">Total: $' . number_format($total, 2) . '</td>
                     </tr>
                 </tfoot>
-            </table>'
+            </table>';
         $html .= '</div>';
 
         return $html;
