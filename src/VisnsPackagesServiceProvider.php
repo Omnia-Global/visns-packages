@@ -350,6 +350,13 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                             Route::get('/{id}/preview', 'preview');
                             Route::post('/{id}/duplicate', 'duplicate');
                             Route::get('/variables/available', 'getAvailableVariables');
+                            
+                            // Section management routes
+                            Route::get('/{id}/sections', 'getSections');
+                            Route::post('/{id}/sections', 'addSection');
+                            Route::put('/{id}/sections/{sectionId}', 'updateSection');
+                            Route::delete('/{id}/sections/{sectionId}', 'deleteSection');
+                            Route::post('/{id}/sections/reorder', 'reorderSections');
                         });
 
                     // Branding Profile routes (backward compatible)  

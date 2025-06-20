@@ -514,4 +514,199 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
             );
         }
     }
+
+    /**
+     * Get sections for a specific template
+     *
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getSections($id)
+    {
+        try {
+            $template = ProposalTemplate::with('sections')->findOrFail($id);
+
+            return response()->json([
+                'success' => true,
+                'sections' => $template->sections,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching template sections: ' . $e->getMessage());
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error fetching template sections',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
+
+    /**
+     * Add a new section to a template
+     *
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function addSection(Request $request, $id)
+    {
+        try {
+            $template = ProposalTemplate::findOrFail($id);
+
+            $validated = $request->validate([
+                'section_type' => 'required|string',
+                'title' => 'required|string',
+                'content' => 'nullable|string',
+                'sort_order' => 'nullable|integer',
+                'is_enabled' => 'nullable|boolean',
+                'is_dynamic' => 'nullable|boolean',
+                'variables' => 'nullable|array',
+                'styling' => 'nullable|array',
+            ]);
+
+            // Set default sort order if not provided
+            if (!isset($validated['sort_order'])) {
+                $maxOrder = $template->sections()->max('sort_order') ?? 0;
+                $validated['sort_order'] = $maxOrder + 1;
+            }
+
+            $section = $template->sections()->create($validated);
+
+            return response()->json([
+                'success' => true,
+                'section' => $section,
+                'message' => 'Section added successfully',
+            ], 201);
+        } catch (\Exception $e) {
+            Log::error('Error adding section: ' . $e->getMessage());
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error adding section',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
+
+    /**
+     * Update a specific section
+     *
+     * @param Request $request
+     * @param int $id
+     * @param int $sectionId
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function updateSection(Request $request, $id, $sectionId)
+    {
+        try {
+            $template = ProposalTemplate::findOrFail($id);
+            $section = $template->sections()->findOrFail($sectionId);
+
+            $validated = $request->validate([
+                'section_type' => 'sometimes|string',
+                'title' => 'sometimes|string',
+                'content' => 'nullable|string',
+                'sort_order' => 'sometimes|integer',
+                'is_enabled' => 'sometimes|boolean',
+                'is_dynamic' => 'sometimes|boolean',
+                'variables' => 'nullable|array',
+                'styling' => 'nullable|array',
+            ]);
+
+            $section->update($validated);
+
+            return response()->json([
+                'success' => true,
+                'section' => $section->fresh(),
+                'message' => 'Section updated successfully',
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error updating section: ' . $e->getMessage());
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error updating section',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
+
+    /**
+     * Delete a specific section
+     *
+     * @param int $id
+     * @param int $sectionId
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function deleteSection($id, $sectionId)
+    {
+        try {
+            $template = ProposalTemplate::findOrFail($id);
+            $section = $template->sections()->findOrFail($sectionId);
+
+            $section->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Section deleted successfully',
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error deleting section: ' . $e->getMessage());
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error deleting section',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
+
+    /**
+     * Reorder sections for a template
+     *
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function reorderSections(Request $request, $id)
+    {
+        try {
+            $template = ProposalTemplate::findOrFail($id);
+
+            $validated = $request->validate([
+                'sections' => 'required|array',
+                'sections.*.id' => 'required|integer',
+                'sections.*.sort_order' => 'required|integer',
+            ]);
+
+            foreach ($validated['sections'] as $sectionData) {
+                $template->sections()
+                    ->where('id', $sectionData['id'])
+                    ->update(['sort_order' => $sectionData['sort_order']]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Sections reordered successfully',
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error reordering sections: ' . $e->getMessage());
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error reordering sections',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
 }
