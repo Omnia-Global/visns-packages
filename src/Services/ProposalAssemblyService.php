@@ -1071,56 +1071,26 @@ class ProposalAssemblyService
     private function getDefaultAgreementSignature(): string
     {
         return '
-        <div class="agreement-section">
-            <h3>Client Acceptance</h3>
-            <p>By signing below, the client accepts this proposal and agrees to the terms and conditions outlined herein. This signature constitutes a binding agreement between the parties.</p>
-            
-            <div class="signature-blocks" style="margin-top: 50px;">
-                <div class="client-signature" style="margin-bottom: 50px;">
-                    <h4>Client Acceptance:</h4>
-                    <div style="margin-top: 30px;">
-                        <div style="border-bottom: 1px solid #000; width: 300px; display: inline-block; margin-right: 50px;"></div>
-                        <div style="border-bottom: 1px solid #000; width: 150px; display: inline-block;"></div>
-                    </div>
-                    <div style="margin-top: 10px;">
-                        <span style="margin-right: 100px;">Authorized Signature</span>
-                        <span style="margin-left: 120px;">Date</span>
-                    </div>
-                    <div style="margin-top: 20px;">
-                        <div style="border-bottom: 1px solid #000; width: 300px; display: inline-block; margin-right: 50px;"></div>
-                        <div style="border-bottom: 1px solid #000; width: 150px; display: inline-block;"></div>
-                    </div>
-                    <div style="margin-top: 10px;">
-                        <span style="margin-right: 120px;">Print Name</span>
-                        <span style="margin-left: 140px;">Title</span>
-                    </div>
-                </div>
-                
-                <div class="company-signature">
-                    <h4>{{company_name}} Representative:</h4>
-                    <div style="margin-top: 30px;">
-                        <div style="border-bottom: 1px solid #000; width: 300px; display: inline-block; margin-right: 50px;"></div>
-                        <div style="border-bottom: 1px solid #000; width: 150px; display: inline-block;"></div>
-                    </div>
-                    <div style="margin-top: 10px;">
-                        <span style="margin-right: 100px;">Authorized Signature</span>
-                        <span style="margin-left: 120px;">Date</span>
-                    </div>
-                    <div style="margin-top: 20px;">
-                        <div style="border-bottom: 1px solid #000; width: 300px; display: inline-block; margin-right: 50px;"></div>
-                        <div style="border-bottom: 1px solid #000; width: 150px; display: inline-block;"></div>
-                    </div>
-                    <div style="margin-top: 10px;">
-                        <span style="margin-right: 120px;">Print Name</span>
-                        <span style="margin-left: 140px;">Title</span>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="agreement-footer" style="margin-top: 50px; padding: 20px; background-color: #f5f5f5; border-left: 4px solid var(--primary-color);">
-                <p style="font-style: italic; margin: 0;">This agreement becomes effective upon signature by both parties and supersedes all previous negotiations, representations, or agreements relating to the subject matter herein.</p>
-            </div>
-        </div>';
+        <p style="margin-bottom: 30px; line-height: 1.6;">We are excited about the opportunity to work with you on this project and deliver a solution that meets your needs and exceeds your expectations. To proceed, please review the details of the proposal and provide your acceptance by signing below.</p>
+        
+        <p style="margin-bottom: 50px; line-height: 1.6;">By signing this document, you agree to the scope outlined in this proposal and authorize us to commence work on the project as described.</p>
+        
+        <div style="margin-bottom: 80px;">
+            <strong style="font-size: 16px;">Client Name:</strong>
+            <span style="border-bottom: 2px solid #000; display: inline-block; width: 400px; margin-left: 20px; height: 20px;"></span>
+        </div>
+        
+        <div style="margin-bottom: 80px;">
+            <strong style="font-size: 16px;">Signature:</strong>
+            <span style="border-bottom: 2px solid #000; display: inline-block; width: 400px; margin-left: 35px; height: 20px;"></span>
+        </div>
+        
+        <div style="margin-bottom: 80px;">
+            <strong style="font-size: 16px;">Date:</strong>
+            <span style="border-bottom: 2px solid #000; display: inline-block; width: 400px; margin-left: 80px; height: 20px;"></span>
+        </div>
+        
+        <p style="margin-top: 50px; line-height: 1.6; font-weight: normal;">We look forward to a successful collaboration.</p>';
     }
 
     /**
