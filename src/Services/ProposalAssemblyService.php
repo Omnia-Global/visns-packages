@@ -325,8 +325,8 @@ class ProposalAssemblyService
             $companyName = $branding->company_name ?? 'Company Logo';
             
             return '
-            <div style="margin: 0 auto; display: flex; align-items: center; justify-content: center;">
-                <img src="' . $logoUrl . '" alt="' . $companyName . '" style="max-width: 300px; max-height: 120px; object-fit: contain;" />
+            <div style="margin: 0 auto; text-align: center;">
+                <img src="' . $logoUrl . '" alt="' . $companyName . '" style="max-width: 450px; max-height: 180px; object-fit: contain;" />
             </div>';
         }
         
@@ -335,8 +335,8 @@ class ProposalAssemblyService
             $companyName = $branding->company_name ?? 'Company Logo';
             
             return '
-            <div style="margin: 0 auto; display: flex; align-items: center; justify-content: center;">
-                <img src="' . $branding->logo_url . '" alt="' . $companyName . '" style="max-width: 300px; max-height: 120px; object-fit: contain;" />
+            <div style="margin: 0 auto; text-align: center;">
+                <img src="' . $branding->logo_url . '" alt="' . $companyName . '" style="max-width: 450px; max-height: 180px; object-fit: contain;" />
             </div>';
         }
         
