@@ -1088,17 +1088,17 @@ class ProposalAssemblyService
         <p style="margin-bottom: 50px; line-height: 1.6;">By signing this document, you agree to the scope outlined in this proposal and authorize us to commence work on the project as described.</p>
         
         <div style="margin-bottom: 80px;">
-            <strong style="font-size: 16px;">Client Name:</strong>
+            <span style="font-weight: bold; font-size: inherit;">Client Name:</span>
             <span style="border-bottom: 2px solid #000; display: inline-block; width: 400px; margin-left: 20px; height: 20px;"></span>
         </div>
         
         <div style="margin-bottom: 80px;">
-            <strong style="font-size: 16px;">Signature:</strong>
+            <span style="font-weight: bold; font-size: inherit;">Signature:</span>
             <span style="border-bottom: 2px solid #000; display: inline-block; width: 400px; margin-left: 35px; height: 20px;"></span>
         </div>
         
         <div style="margin-bottom: 80px;">
-            <strong style="font-size: 16px;">Date:</strong>
+            <span style="font-weight: bold; font-size: inherit;">Date:</span>
             <span style="border-bottom: 2px solid #000; display: inline-block; width: 400px; margin-left: 80px; height: 20px;"></span>
         </div>
         
