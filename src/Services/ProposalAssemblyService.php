@@ -362,18 +362,18 @@ class ProposalAssemblyService
         $tocHtml = '
         <div class="table-of-contents" style="page-break-after: always; padding: 80px;">
             <h1 style="font-size: 32px; font-weight: bold; margin-bottom: 40px; text-align: left;">Contents</h1>
-            <div class="toc-content" style="margin-top: 40px;">';
+            <table class="toc-table" style="width: 100%; border-collapse: collapse; margin-top: 40px;">';
 
         foreach ($tocItems as $item) {
             $tocHtml .= '
-                <div class="toc-item" style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px dotted #ccc;">
-                    <span class="toc-title">' . $item['title'] . '</span>
-                    <span class="toc-page">' . ($item['page'] ?? '') . '</span>
-                </div>';
+                <tr class="toc-item" style="border-bottom: 1px dotted #ccc;">
+                    <td class="toc-title" style="padding: 10px 0; border: none; text-align: left;">' . $item['title'] . '</td>
+                    <td class="toc-page" style="padding: 10px 0; border: none; text-align: right; width: 50px;">' . ($item['page'] ?? '') . '</td>
+                </tr>';
         }
 
         $tocHtml .= '
-            </div>
+            </table>
         </div>';
 
         return $tocHtml;
@@ -415,15 +415,15 @@ class ProposalAssemblyService
     private function renderPricingSection(array $section, array $proposalData): string
     {
         $html = '
-        <div class="pricing-section" style="padding: 70px; page-break-after: avoid;">
+        <div class="pricing-section" style="padding: 70px; page-break-inside: avoid;">
             <h1 style="font-size: 20px; font-weight: bold; margin-bottom: 20px;">' . $section['title'] . '</h1>
             <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
                 <thead>
                     <tr style="background-color: #f5f5f5;">
-                        <th style="border: 1px solid #ddd; padding: 15px; text-align: left;">Description</th>
-                        <th style="border: 1px solid #ddd; padding: 15px; text-align: right;">Price</th>
-                        <th style="border: 1px solid #ddd; padding: 15px; text-align: center;">Qty</th>
-                        <th style="border: 1px solid #ddd; padding: 15px; text-align: right;">Amount</th>
+                        <th style="border: 1px solid #ddd; padding: 15px; text-align: left; vertical-align: top;">Description</th>
+                        <th style="border: 1px solid #ddd; padding: 15px; text-align: right; vertical-align: top; width: 80px;">Price</th>
+                        <th style="border: 1px solid #ddd; padding: 15px; text-align: center; vertical-align: top; width: 50px;">Qty</th>
+                        <th style="border: 1px solid #ddd; padding: 15px; text-align: right; vertical-align: top; width: 80px;">Amount</th>
                     </tr>
                 </thead>
                 <tbody>';
@@ -473,13 +473,16 @@ class ProposalAssemblyService
                 </tbody>
                 <tfoot>
                     <tr>
-                        <td colspan="4" style="border: 1px solid #ddd; padding: 10px; text-align: right; font-weight: bold;">Sub Total: $' . number_format($subtotal, 2) . '</td>
+                        <td colspan="3" style="border: 1px solid #ddd; padding: 10px; text-align: right; font-weight: bold; background-color: #f9f9f9;">Sub Total:</td>
+                        <td style="border: 1px solid #ddd; padding: 10px; text-align: right; font-weight: bold; background-color: #f9f9f9;">$' . number_format($subtotal, 2) . '</td>
                     </tr>
                     <tr>
-                        <td colspan="4" style="border: 1px solid #ddd; padding: 10px; text-align: right; font-weight: bold;">Tax: $' . number_format($taxAmount, 2) . '</td>
+                        <td colspan="3" style="border: 1px solid #ddd; padding: 10px; text-align: right; font-weight: bold; background-color: #f9f9f9;">Tax (10%):</td>
+                        <td style="border: 1px solid #ddd; padding: 10px; text-align: right; font-weight: bold; background-color: #f9f9f9;">$' . number_format($taxAmount, 2) . '</td>
                     </tr>
                     <tr>
-                        <td colspan="4" style="border: 1px solid #ddd; padding: 10px; text-align: right; font-weight: bold;">Total: $' . number_format($total, 2) . '</td>
+                        <td colspan="3" style="border: 2px solid #333; padding: 12px; text-align: right; font-weight: bold; background-color: #e9e9e9;">Total:</td>
+                        <td style="border: 2px solid #333; padding: 12px; text-align: right; font-weight: bold; background-color: #e9e9e9; font-size: 18px;">$' . number_format($total, 2) . '</td>
                     </tr>
                 </tfoot>
             </table>';
@@ -583,9 +586,9 @@ class ProposalAssemblyService
     private function renderTermsConditions(array $section, $branding): string
     {
         return '
-        <div class="terms-conditions-section" style="page-break-before: always; padding: 60px 0;">
-            <h1 class="primary-text" style="margin-bottom: 30px;">' . $section['title'] . '</h1>
-            <div class="terms-content">
+        <div class="terms-conditions-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
+            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
+            <div class="terms-content" style="line-height: 1.6;">
                 ' . $section['content'] . '
             </div>
         </div>';
@@ -649,8 +652,8 @@ class ProposalAssemblyService
         $content = $this->replaceVariables($section['content'], $proposalData);
         
         return '
-        <div class="overview-section" style="page-break-before: always; padding: 60px 0;">
-            <div class="overview-content">
+        <div class="overview-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
+            <div class="overview-content" style="line-height: 1.6;">
                 ' . $content . '
             </div>
         </div>';
@@ -669,9 +672,9 @@ class ProposalAssemblyService
         $content = $this->replaceVariables($section['content'], $proposalData);
         
         return '
-        <div class="payment-terms-section" style="padding: 60px 0;">
-            <h1 class="primary-text" style="margin-bottom: 30px;">' . $section['title'] . '</h1>
-            <div class="payment-content">
+        <div class="payment-terms-section" style="padding: 60px; page-break-inside: avoid;">
+            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
+            <div class="payment-content" style="line-height: 1.6;">
                 ' . $content . '
             </div>
         </div>';
@@ -690,9 +693,9 @@ class ProposalAssemblyService
         $content = $this->replaceVariables($section['content'], $proposalData);
         
         return '
-        <div class="agreement-signature-section" style="page-break-before: always; padding: 60px 0;">
-            <h1 class="primary-text" style="margin-bottom: 30px;">' . $section['title'] . '</h1>
-            <div class="agreement-content">
+        <div class="agreement-signature-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
+            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
+            <div class="agreement-content" style="line-height: 1.6;">
                 ' . $content . '
             </div>
         </div>';
@@ -710,9 +713,9 @@ class ProposalAssemblyService
         $pageBreak = in_array($section['type'], ['terms']) ? 'page-break-before: always;' : '';
         
         return '
-        <div class="content-section" style="' . $pageBreak . ' padding: 60px 0;">
-            <h1 class="primary-text" style="margin-bottom: 30px;">' . $section['title'] . '</h1>
-            <div class="section-content">
+        <div class="content-section" style="' . $pageBreak . ' padding: 60px; page-break-inside: avoid;">
+            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
+            <div class="section-content" style="line-height: 1.6;">
                 ' . $section['content'] . '
             </div>
         </div>';
@@ -736,40 +739,28 @@ class ProposalAssemblyService
             <meta charset="utf-8">
             <title>Proposal</title>
             <style>
-                :root {
-                    --primary-color: ' . ($colors['primary'] ?? '#2563eb') . ';
-                    --secondary-color: ' . ($colors['secondary'] ?? '#64748b') . ';
-                    --accent-color: ' . ($colors['accent'] ?? '#059669') . ';
-                    --heading-font: ' . ($fonts['heading'] ?? 'Arial, sans-serif') . ';
-                    --body-font: ' . ($fonts['body'] ?? 'Arial, sans-serif') . ';
-                }
-                
-                * {
-                    margin: 0;
-                    padding: 0;
-                    box-sizing: border-box;
-                }
-                
                 body {
-                    font-family: var(--body-font);
+                    font-family: ' . ($fonts['body'] ?? 'Arial, sans-serif') . ';
                     line-height: 1.6;
                     color: #333;
-                    padding: 50px;
+                    margin: 0;
+                    padding: 0;
                 }
                 
                 h1, h2, h3, h4, h5, h6 {
-                    font-family: var(--heading-font);
+                    font-family: ' . ($fonts['heading'] ?? 'Arial, sans-serif') . ';
                     line-height: 1.2;
                     margin-bottom: 15px;
+                    margin-top: 0;
                 }
                 
-                .primary-bg { background-color: var(--primary-color); }
-                .secondary-bg { background-color: var(--secondary-color); }
-                .accent-bg { background-color: var(--accent-color); }
+                .primary-bg { background-color: ' . ($colors['primary'] ?? '#2563eb') . '; }
+                .secondary-bg { background-color: ' . ($colors['secondary'] ?? '#64748b') . '; }
+                .accent-bg { background-color: ' . ($colors['accent'] ?? '#059669') . '; }
                 
-                .primary-text { color: var(--primary-color); }
-                .secondary-text { color: var(--secondary-color); }
-                .accent-text { color: var(--accent-color); }
+                .primary-text { color: ' . ($colors['primary'] ?? '#2563eb') . '; }
+                .secondary-text { color: ' . ($colors['secondary'] ?? '#64748b') . '; }
+                .accent-text { color: ' . ($colors['accent'] ?? '#059669') . '; }
                 
                 .company-logo {
                     max-height: 80px;
@@ -781,55 +772,51 @@ class ProposalAssemblyService
                 .logo-placeholder {
                     width: 80px;
                     height: 80px;
-                    border-radius: 50%;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
+                    border-radius: 40px;
+                    text-align: center;
+                    vertical-align: middle;
                     color: white;
                     font-weight: bold;
                     font-size: 20px;
                     margin: 0 auto;
+                    background-color: ' . ($colors['primary'] ?? '#2563eb') . ';
+                    line-height: 80px;
                 }
                 
                 table {
                     border-collapse: collapse;
                     width: 100%;
+                    margin-bottom: 20px;
                 }
                 
-                .items-table th,
-                .items-table td {
+                table th,
+                table td {
                     border: 1px solid #ddd;
-                    padding: 15px;
+                    padding: 12px;
+                    text-align: left;
+                    vertical-align: top;
                 }
                 
-                .items-table th {
-                    background-color: var(--secondary-color);
+                table th {
+                    background-color: ' . ($colors['secondary'] ?? '#64748b') . ';
                     color: white;
                     font-weight: bold;
                 }
                 
-                .items-table tr:nth-child(even) {
+                table tr:nth-child(even) {
                     background-color: #f9f9f9;
                 }
                 
-                @media print {
-                    @page {
-                        margin: 30mm;
-                    }
-                    body { 
-                        padding: 40px;
-                        margin: 0;
-                    }
-                    .page-break { 
-                        page-break-before: always; 
-                    }
-                    .cover-page, 
-                    .pricing-section, 
-                    .terms-conditions-section, 
-                    .overview-section {
-                        padding: 50px 40px;
-                    }
-                }
+                .text-center { text-align: center; }
+                .text-right { text-align: right; }
+                .text-left { text-align: left; }
+                
+                .page-break { page-break-before: always; }
+                .no-break { page-break-inside: avoid; }
+                
+                p { margin: 10px 0; }
+                ul, ol { margin: 10px 0; padding-left: 30px; }
+                li { margin-bottom: 5px; }
             </style>
         </head>
         <body>';
