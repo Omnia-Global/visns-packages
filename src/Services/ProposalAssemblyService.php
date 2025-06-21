@@ -838,12 +838,17 @@ class ProposalAssemblyService
     /**
      * Replace variables in content with actual values
      *
-     * @param string $content
+     * @param string|null $content
      * @param array $data
      * @return string
      */
-    private function replaceVariables(string $content, array $data): string
+    private function replaceVariables(?string $content, array $data): string
     {
+        // Handle null content
+        if ($content === null) {
+            return '';
+        }
+
         foreach ($data as $key => $value) {
             $placeholder = '{{' . $key . '}}';
             $content = str_replace($placeholder, $value, $content);
