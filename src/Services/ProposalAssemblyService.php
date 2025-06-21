@@ -294,9 +294,9 @@ class ProposalAssemblyService
         $logoHtml = $this->renderBrandingLogo($branding);
         
         return '
-        <div class="omnia-cover-page" style="page-break-after: always; padding: 60px; background: linear-gradient(135deg, #1a4b3a 0%, #2d6a4f 100%); color: white; min-height: calc(100vh - 120px); display: flex; flex-direction: column; justify-content: space-between; font-family: Arial, sans-serif;">
+        <div class="omnia-cover-page" style="page-break-after: always; padding: 0; background: linear-gradient(135deg, #1a4b3a 0%, #2d6a4f 100%); color: white; height: 100vh; position: relative; font-family: Arial, sans-serif;">
             
-            <div class="cover-content" style="text-align: center; flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+            <div class="cover-content" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 100%;">
                 <div class="logo-section" style="margin-bottom: 60px;">
                     ' . $logoHtml . '
                 </div>
@@ -305,7 +305,7 @@ class ProposalAssemblyService
                 </div>
             </div>
             
-            <div class="cover-footer" style="text-align: center; margin-bottom: 40px;">
+            <div class="cover-footer" style="position: absolute; bottom: 40px; left: 0; right: 0; text-align: center;">
                 <p style="font-size: 14px; color: #a3a3a3; margin: 0;">' . ($branding->company_name ?? 'OMNIA GLOBAL GROUP PTY LTD') . ' &nbsp;&nbsp; ' . ($branding->company_info['acn'] ?? 'ACN: 674 383 987') . '</p>
             </div>
         </div>';
