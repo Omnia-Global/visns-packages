@@ -585,11 +585,18 @@ class ProposalAssemblyService
      */
     private function renderTermsConditions(array $section, $branding): string
     {
+        $content = $section['content'];
+        
+        // Use default content if section content is empty
+        if (empty(trim($content))) {
+            $content = $this->getDefaultTermsConditions();
+        }
+        
         return '
         <div class="terms-conditions-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
             <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
             <div class="terms-content" style="line-height: 1.6;">
-                ' . $section['content'] . '
+                ' . $content . '
             </div>
         </div>';
     }
@@ -691,6 +698,11 @@ class ProposalAssemblyService
     private function renderAgreementSignature(array $section, $branding, array $proposalData): string
     {
         $content = $this->replaceVariables($section['content'], $proposalData);
+        
+        // Use default content if section content is empty
+        if (empty(trim($content))) {
+            $content = $this->getDefaultAgreementSignature();
+        }
         
         return '
         <div class="agreement-signature-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
