@@ -295,20 +295,18 @@ class ProposalAssemblyService
         
         return '
         <div class="omnia-cover-page" style="page-break-after: always; padding: 60px; background: linear-gradient(135deg, #1a4b3a 0%, #2d6a4f 100%); color: white; min-height: calc(100vh - 120px); display: flex; flex-direction: column; justify-content: space-between; font-family: Arial, sans-serif;">
-            <div class="cover-header" style="text-align: center; margin-top: 100px;">
+            
+            <div class="cover-content" style="text-align: center; flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;">
                 <div class="logo-section" style="margin-bottom: 60px;">
                     ' . $logoHtml . '
                 </div>
-            </div>
-            
-            <div class="cover-content" style="text-align: center; flex-grow: 1; display: flex; align-items: center; justify-content: center;">
                 <div>
-                    <h1 style="font-size: 48px; font-weight: bold; margin-bottom: 20px; color: #4ade80;">' . ($proposalData['document_title'] ?? '[Document Title]') . '</h1>
+                    <h1 style="font-size: 48px; font-weight: bold; margin: 0; color: #4ade80;">' . ($proposalData['document_title'] ?? '[Document Title]') . '</h1>
                 </div>
             </div>
             
             <div class="cover-footer" style="text-align: center; margin-bottom: 40px;">
-                <p style="font-size: 14px; color: #a3a3a3;">' . ($branding->company_name ?? 'OMNIA GLOBAL GROUP PTY LTD') . ' &nbsp;&nbsp; ' . ($branding->company_info['acn'] ?? 'ACN: 674 383 987') . '</p>
+                <p style="font-size: 14px; color: #a3a3a3; margin: 0;">' . ($branding->company_name ?? 'OMNIA GLOBAL GROUP PTY LTD') . ' &nbsp;&nbsp; ' . ($branding->company_info['acn'] ?? 'ACN: 674 383 987') . '</p>
             </div>
         </div>';
     }
