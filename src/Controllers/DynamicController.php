@@ -1454,15 +1454,12 @@ class DynamicController extends \App\Http\Controllers\Controller
                 $request->input('uuid') . '.' . $request->input('extension');
             $path = $this->folder . '/' . $unique_name;
 
-            Storage::copy(
+            // Use the project's configured disk (respecting host project configuration)
+            $disk = config('filesystems.default', 's3');
+            
+            Storage::disk($disk)->copy(
                 $request->input('key'),
-                str_replace(
-                    'tmp/',
-                    $this->folder . '/',
-                    $request->input('key')
-                ) .
-                    '.' .
-                    $request->input('extension')
+                $path
             );
 
             $file = new File([
@@ -1500,16 +1497,11 @@ class DynamicController extends \App\Http\Controllers\Controller
                         $uploadedFile['extension'];
                     $path = $this->folder . '/' . $unique_name;
 
-                    if (Storage::exists($uploadedFile['key'])) {
-                        Storage::copy(
+                    $disk = config('filesystems.default', 's3');
+                    if (Storage::disk($disk)->exists($uploadedFile['key'])) {
+                        Storage::disk($disk)->copy(
                             $uploadedFile['key'],
-                            str_replace(
-                                'tmp/',
-                                $this->folder . '/',
-                                $uploadedFile['key']
-                            ) .
-                                '.' .
-                                $uploadedFile['extension']
+                            $path
                         );
 
                         $file = new File([
@@ -1547,8 +1539,9 @@ class DynamicController extends \App\Http\Controllers\Controller
                     $uniqueName = Str::uuid() . '.' . $extension; // You can also use \Str::random(40) for a random string
                     $filePath = $this->folder . '/' . $uniqueName;
 
-                    // Upload file to S3
-                    Storage::put(
+                    // Upload file to configured disk
+                    $disk = config('filesystems.default', 's3');
+                    Storage::disk($disk)->put(
                         $this->folder . '/' . $uniqueName,
                         file_get_contents($fileUpload)
                     );
@@ -1743,15 +1736,12 @@ class DynamicController extends \App\Http\Controllers\Controller
                 $request->input('uuid') . '.' . $request->input('extension');
             $path = $this->folder . '/' . $unique_name;
 
-            Storage::copy(
+            // Use the project's configured disk (respecting host project configuration)
+            $disk = config('filesystems.default', 's3');
+            
+            Storage::disk($disk)->copy(
                 $request->input('key'),
-                str_replace(
-                    'tmp/',
-                    $this->folder . '/',
-                    $request->input('key')
-                ) .
-                    '.' .
-                    $request->input('extension')
+                $path
             );
 
             $file = new File([
@@ -1802,7 +1792,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                 foreach ($existingFiles as $file) {
                     if (!in_array($file->file_name, $uploadedFilenames)) {
                         $file->delete(); // Remove the file record
-                        Storage::delete($file->file_path); // Remove the physical file
+                        $disk = config('filesystems.default', 's3');
+                        Storage::disk($disk)->delete($file->file_path); // Remove the physical file
                     }
                 }
 
@@ -1833,16 +1824,11 @@ class DynamicController extends \App\Http\Controllers\Controller
                             )
                         ) {
                             // Copy the file if it exists in the storage
-                            if (Storage::exists($uploadedFile['key'])) {
-                                Storage::copy(
+                            $disk = config('filesystems.default', 's3');
+                            if (Storage::disk($disk)->exists($uploadedFile['key'])) {
+                                Storage::disk($disk)->copy(
                                     $uploadedFile['key'],
-                                    str_replace(
-                                        'tmp/',
-                                        $this->folder . '/',
-                                        $uploadedFile['key']
-                                    ) .
-                                        '.' .
-                                        $uploadedFile['extension']
+                                    $path
                                 );
 
                                 $file = new File([
@@ -1888,7 +1874,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                 foreach ($existingFiles as $file) {
                     if (!in_array($file->file_name, $uploadedFilenames)) {
                         $file->delete(); // Remove the file record
-                        Storage::delete($file->file_path); // Remove the physical file
+                        $disk = config('filesystems.default', 's3');
+                        Storage::disk($disk)->delete($file->file_path); // Remove the physical file
                     }
                 }
             }
@@ -1910,8 +1897,9 @@ class DynamicController extends \App\Http\Controllers\Controller
                     $uniqueName = Str::uuid() . '.' . $extension; // You can also use \Str::random(40) for a random string
                     $filePath = $this->folder . '/' . $uniqueName;
 
-                    // Upload file to S3
-                    Storage::put(
+                    // Upload file to configured disk
+                    $disk = config('filesystems.default', 's3');
+                    Storage::disk($disk)->put(
                         $this->folder . '/' . $uniqueName,
                         file_get_contents($fileUpload)
                     );
@@ -2073,7 +2061,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                 '.' .
                 $request->input('extension');
 
-            Storage::copy($request->input('key'), $destinationPath);
+            $disk = config('filesystems.default', 's3');
+            Storage::disk($disk)->copy($request->input('key'), $destinationPath);
 
             $nextOrder = File::where('fileable_id', $resource->id)
                 ->where('fileable_field', $request->input('fileable_field'))
