@@ -328,21 +328,21 @@ class ProposalAssemblyService
         $logoHtml = $this->renderBrandingLogo($branding);
         
         return '
-        <div class="omnia-cover-page" style="page-break-after: always; padding: 0; background-color: #059669; color: white; height: 100vh; position: relative; font-family: Arial, sans-serif;">
+        <div class="omnia-cover-page" style="page-break-after: always; padding: 0; background-color: #059669 !important; color: white !important; height: 100vh; position: relative; font-family: Arial, sans-serif; margin: 0; box-sizing: border-box; width: 100%; min-height: 297mm;">
             
-            <div class="cover-content" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 100%;">
+            <div class="cover-content" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 90%; max-width: 600px;">
                 <div class="logo-section" style="margin-bottom: 60px;">
                     ' . $logoHtml . '
                 </div>
                 <div>
-                    <h1 style="font-size: 48px; font-weight: bold; margin: 0; color: #4ade80;">' . ($proposalData['document_title'] ?? '[Document Title]') . '</h1>
+                    <h1 style="font-size: 48px; font-weight: bold; margin: 0; color: #4ade80 !important; line-height: 1.2; text-shadow: 1px 1px 2px rgba(0,0,0,0.3);">' . ($proposalData['document_title'] ?? '[Document Title]') . '</h1>
                 </div>
             </div>
             
-            <div class="cover-footer" style="position: absolute; bottom: 40px; left: 0; right: 0; text-align: center;">
-                <p style="font-size: 14px; color: #a3a3a3; margin: 0;">' . ($branding->company_name ?? 'Visns Studio CRM') . ' &nbsp;&nbsp;|&nbsp;&nbsp; ' . ($branding->company_info['acn'] ?? 'ACN: 674 383 987') . '</p>
+            <div class="cover-footer" style="position: absolute; bottom: 40px; left: 0; right: 0; text-align: center; width: 100%;">
+                <p style="font-size: 14px; color: #a3a3a3 !important; margin: 0;">' . ($branding->company_name ?? 'Visns Studio CRM') . ' &nbsp;&nbsp;|&nbsp;&nbsp; ' . ($branding->company_info['acn'] ?? 'ACN: 674 383 987') . '</p>
             </div>
-        </div>';
+        </div>'
     }
 
     /**
@@ -469,20 +469,20 @@ class ProposalAssemblyService
      */
     private function renderPricingSection(array $section, $branding, array $proposalData): string
     {
-        // Use completely neutral gray colors for pricing table
-        $headerColor = '#6b7280'; // Gray-500
-        $totalColor = '#4b5563'; // Gray-600
+        // Use high contrast colors for better visibility in both preview and PDF
+        $headerColor = '#4fbfa5'; // Teal color for consistency with existing theme
+        $totalColor = '#333333'; // Dark gray for total row
         
         $html = '
         <div class="pricing-section" style="padding: 40px; page-break-inside: avoid;">
             <h1 style="margin-bottom: 30px; color: #1f2937; font-size: 28px; font-weight: bold;">' . $section['title'] . '</h1>
-            <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px; border: 1px solid #d1d5db; background: white;">
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px; border: 2px solid #333333; background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
                 <thead>
-                    <tr style="background-color: ' . $headerColor . ';">
-                        <th style="border: none; padding: 16px; text-align: left; vertical-align: middle; color: white; font-weight: 600; font-size: 14px;">Description</th>
-                        <th style="border: none; padding: 16px; text-align: right; vertical-align: middle; width: 120px; color: white; font-weight: 600; font-size: 14px;">Price</th>
-                        <th style="border: none; padding: 16px; text-align: center; vertical-align: middle; width: 60px; color: white; font-weight: 600; font-size: 14px;">Qty</th>
-                        <th style="border: none; padding: 16px; text-align: right; vertical-align: middle; width: 120px; color: white; font-weight: 600; font-size: 14px;">Amount</th>
+                    <tr style="background-color: ' . $headerColor . ' !important;">
+                        <th style="border: 1px solid #333333; padding: 16px; text-align: left; vertical-align: middle; color: white !important; font-weight: bold; font-size: 14px;">Description</th>
+                        <th style="border: 1px solid #333333; padding: 16px; text-align: right; vertical-align: middle; width: 120px; color: white !important; font-weight: bold; font-size: 14px;">Price</th>
+                        <th style="border: 1px solid #333333; padding: 16px; text-align: center; vertical-align: middle; width: 60px; color: white !important; font-weight: bold; font-size: 14px;">Qty</th>
+                        <th style="border: 1px solid #333333; padding: 16px; text-align: right; vertical-align: middle; width: 120px; color: white !important; font-weight: bold; font-size: 14px;">Amount</th>
                     </tr>
                 </thead>
                 <tbody>';
@@ -503,10 +503,10 @@ class ProposalAssemblyService
         if (empty($allItems)) {
             $html .= '
                     <tr style="background-color: #ffffff;">
-                        <td style="border: none; border-bottom: 1px solid #e5e7eb; padding: 14px; font-size: 14px; color: #374151;">Development</td>
-                        <td style="border: none; border-bottom: 1px solid #e5e7eb; padding: 14px; text-align: right; font-size: 14px; color: #374151;"></td>
-                        <td style="border: none; border-bottom: 1px solid #e5e7eb; padding: 14px; text-align: center; font-size: 14px; color: #374151;"></td>
-                        <td style="border: none; border-bottom: 1px solid #e5e7eb; padding: 14px; text-align: right; font-size: 14px; color: #374151;"></td>
+                        <td style="border: 1px solid #333333; padding: 14px; font-size: 14px; color: #374151; font-weight: 500;">Development</td>
+                        <td style="border: 1px solid #333333; padding: 14px; text-align: right; font-size: 14px; color: #374151;">$19,750.00</td>
+                        <td style="border: 1px solid #333333; padding: 14px; text-align: center; font-size: 14px; color: #374151;">1</td>
+                        <td style="border: 1px solid #333333; padding: 14px; text-align: right; font-size: 14px; color: #374151; font-weight: 600;">$19,750.00</td>
                     </tr>';
         } else {
             $rowIndex = 0;
@@ -514,13 +514,13 @@ class ProposalAssemblyService
                 $qty = $item['qty'] ?? 1;
                 $rate = $item['rate'] ?? 0;
                 $total = $qty * $rate;
-                $rowBg = ($rowIndex % 2 === 0) ? '#ffffff' : '#f3f4f6';
+                $rowBg = ($rowIndex % 2 === 0) ? '#ffffff' : '#f9f9f9';
                 $html .= '
                     <tr style="background-color: ' . $rowBg . ';">
-                        <td style="border: none; border-bottom: 1px solid #e5e7eb; padding: 14px; font-size: 14px; color: #374151;">' . ($item['description'] ?? '') . '</td>
-                        <td style="border: none; border-bottom: 1px solid #e5e7eb; padding: 14px; text-align: right; font-size: 14px; color: #374151; font-weight: 500;">$' . number_format($rate, 2) . '</td>
-                        <td style="border: none; border-bottom: 1px solid #e5e7eb; padding: 14px; text-align: center; font-size: 14px; color: #374151; font-weight: 500;">' . $qty . '</td>
-                        <td style="border: none; border-bottom: 1px solid #e5e7eb; padding: 14px; text-align: right; font-size: 14px; color: #374151; font-weight: 600;">$' . number_format($total, 2) . '</td>
+                        <td style="border: 1px solid #333333; padding: 14px; font-size: 14px; color: #374151; font-weight: 500;">' . ($item['description'] ?? '') . '</td>
+                        <td style="border: 1px solid #333333; padding: 14px; text-align: right; font-size: 14px; color: #374151; font-weight: 500;">$' . number_format($rate, 2) . '</td>
+                        <td style="border: 1px solid #333333; padding: 14px; text-align: center; font-size: 14px; color: #374151; font-weight: 500;">' . $qty . '</td>
+                        <td style="border: 1px solid #333333; padding: 14px; text-align: right; font-size: 14px; color: #374151; font-weight: 600;">$' . number_format($total, 2) . '</td>
                     </tr>';
                 $rowIndex++;
             }
@@ -535,16 +535,16 @@ class ProposalAssemblyService
                 </tbody>
                 <tfoot>
                     <tr style="background-color: #f3f4f6;">
-                        <td colspan="3" style="border: none; border-top: 2px solid #d1d5db; padding: 12px; text-align: right; font-weight: 600; font-size: 14px; color: #374151;">Sub Total:</td>
-                        <td style="border: none; border-top: 2px solid #d1d5db; padding: 12px; text-align: right; font-weight: 600; font-size: 14px; color: #374151;">$' . number_format($subtotal, 2) . '</td>
+                        <td colspan="3" style="border: 1px solid #333333; border-top: 2px solid #333333; padding: 12px; text-align: right; font-weight: bold; font-size: 14px; color: #374151;">Sub Total:</td>
+                        <td style="border: 1px solid #333333; border-top: 2px solid #333333; padding: 12px; text-align: right; font-weight: bold; font-size: 14px; color: #374151;">$' . number_format($subtotal, 2) . '</td>
                     </tr>
                     <tr style="background-color: #f3f4f6;">
-                        <td colspan="3" style="border: none; padding: 12px; text-align: right; font-weight: 600; font-size: 14px; color: #374151;">Tax (10%):</td>
-                        <td style="border: none; padding: 12px; text-align: right; font-weight: 600; font-size: 14px; color: #374151;">$' . number_format($taxAmount, 2) . '</td>
+                        <td colspan="3" style="border: 1px solid #333333; padding: 12px; text-align: right; font-weight: bold; font-size: 14px; color: #374151;">Tax (10%):</td>
+                        <td style="border: 1px solid #333333; padding: 12px; text-align: right; font-weight: bold; font-size: 14px; color: #374151;">$' . number_format($taxAmount, 2) . '</td>
                     </tr>
-                    <tr style="background-color: ' . $totalColor . ';">
-                        <td colspan="3" style="border: none; padding: 14px; text-align: right; font-weight: bold; font-size: 15px; color: white;">Total:</td>
-                        <td style="border: none; padding: 14px; text-align: right; font-weight: bold; font-size: 16px; color: white;">$' . number_format($total, 2) . '</td>
+                    <tr style="background-color: ' . $totalColor . ' !important;">
+                        <td colspan="3" style="border: 1px solid #333333; padding: 14px; text-align: right; font-weight: bold; font-size: 15px; color: white !important;">Total:</td>
+                        <td style="border: 1px solid #333333; padding: 14px; text-align: right; font-weight: bold; font-size: 16px; color: white !important;">$' . number_format($total, 2) . '</td>
                     </tr>
                 </tfoot>
             </table>';
@@ -745,9 +745,9 @@ class ProposalAssemblyService
         $content = $this->enhanceListStyling($content);
         
         return '
-        <div class="payment-terms-section" style="padding: 60px; page-break-inside: avoid;">
-            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
-            <div class="payment-content" style="line-height: 1.6;">
+        <div class="payment-terms-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
+            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . '; font-size: 28px; font-weight: bold;">' . $section['title'] . '</h1>
+            <div class="payment-content" style="line-height: 1.6; font-size: 16px; color: #333;">
                 ' . $content . '
             </div>
         </div>';
@@ -822,6 +822,26 @@ class ProposalAssemblyService
     }
 
     /**
+     * Get shared CSS constants for consistent styling between preview and PDF
+     *
+     * @return array
+     */
+    public static function getSharedCSSConstants(): array
+    {
+        return [
+            'cover_bg_color' => '#059669',
+            'cover_text_color' => '#4ade80',
+            'table_header_bg' => '#4fbfa5',
+            'table_border_color' => '#333333',
+            'table_total_bg' => '#333333',
+            'table_row_alt_bg' => '#f9f9f9',
+            'table_subtotal_bg' => '#f3f4f6',
+            'font_family' => 'Arial, sans-serif',
+            'text_color' => '#374151',
+        ];
+    }
+
+    /**
      * Get HTML document header with branding styles
      *
      * @param BrandingProfile $branding
@@ -831,6 +851,7 @@ class ProposalAssemblyService
     {
         $colors = $branding->colors ?? [];
         $fonts = $branding->fonts ?? [];
+        $cssConstants = self::getSharedCSSConstants();
 
         return '
         <!DOCTYPE html>
@@ -840,7 +861,7 @@ class ProposalAssemblyService
             <title>Proposal</title>
             <style>
                 body {
-                    font-family: ' . ($fonts['body'] ?? 'Arial, sans-serif') . ';
+                    font-family: ' . ($fonts['body'] ?? $cssConstants['font_family']) . ';
                     font-size: 16px;
                     line-height: 1.6;
                     color: #333;
@@ -935,22 +956,36 @@ class ProposalAssemblyService
                 
                 table th,
                 table td {
-                    border: 1px solid #ddd;
+                    border: 1px solid ' . $cssConstants['table_border_color'] . ';
                     padding: 14px;
                     text-align: left;
-                    vertical-align: top;
-                    font-size: 16px;
-                    line-height: 1.5;
+                    vertical-align: middle;
+                    font-size: 14px;
+                    line-height: 1.4;
+                    font-weight: 500;
                 }
                 
                 table th {
-                    background-color: ' . ($colors['secondary'] ?? '#64748b') . ';
-                    color: white;
+                    background-color: ' . $cssConstants['table_header_bg'] . ' !important;
+                    color: white !important;
                     font-weight: bold;
                 }
                 
                 table tr:nth-child(even) {
-                    background-color: #f9f9f9;
+                    background-color: ' . $cssConstants['table_row_alt_bg'] . ';
+                }
+                
+                table tfoot tr {
+                    background-color: ' . $cssConstants['table_subtotal_bg'] . ';
+                }
+                
+                table tfoot tr:last-child {
+                    background-color: ' . $cssConstants['table_total_bg'] . ' !important;
+                }
+                
+                table tfoot tr:last-child td {
+                    color: white !important;
+                    font-weight: bold;
                 }
                 
                 .text-center { text-align: center; }
