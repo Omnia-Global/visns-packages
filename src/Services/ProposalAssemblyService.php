@@ -277,7 +277,7 @@ class ProposalAssemblyService
             case 'acceptance':
                 return $this->renderAcceptanceSection($section, $branding, $proposalData);
             case 'quote_items':
-                return $this->renderPricingSection($section, $proposalData);
+                return $this->renderPricingSection($section, $branding, $proposalData);
             case 'payment_terms':
                 return $this->renderPaymentTerms($section, $branding, $proposalData);
             case 'agreement_signature':
@@ -427,7 +427,7 @@ class ProposalAssemblyService
     {
         return '
         <div class="acceptance-section" style="padding: 60px; page-break-after: avoid;">
-            <h1 style="font-size: 20px; font-weight: bold; margin-bottom: 20px;">' . $section['title'] . '</h1>
+            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
             <div class="acceptance-content">
                 ' . $this->replaceVariables($section['content'], $proposalData) . '
             </div>
@@ -438,14 +438,15 @@ class ProposalAssemblyService
      * Render pricing section (matching OMNIA format)
      *
      * @param array $section
+     * @param BrandingProfile $branding
      * @param array $proposalData
      * @return string
      */
-    private function renderPricingSection(array $section, array $proposalData): string
+    private function renderPricingSection(array $section, $branding, array $proposalData): string
     {
         $html = '
         <div class="pricing-section" style="padding: 70px; page-break-inside: avoid;">
-            <h1 style="font-size: 20px; font-weight: bold; margin-bottom: 20px;">' . $section['title'] . '</h1>
+            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
             <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
                 <thead>
                     <tr style="background-color: #f5f5f5;">
@@ -649,7 +650,7 @@ class ProposalAssemblyService
 
         $html = '
         <div class="change-log-section" style="padding: 60px; page-break-after: avoid;">
-            <h1 style="font-size: 20px; font-weight: bold; margin-bottom: 20px;">' . $section['title'] . '</h1>
+            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
             <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
                 <thead>
                     <tr style="background-color: #f5f5f5;">
@@ -857,8 +858,15 @@ class ProposalAssemblyService
                 .no-break { page-break-inside: avoid; }
                 
                 p { margin: 10px 0; }
-                ul, ol { margin: 10px 0; padding-left: 30px; }
-                li { margin-bottom: 5px; }
+                ul, ol { 
+                    margin: 10px 0; 
+                    padding-left: 40px; 
+                    margin-left: 0;
+                }
+                li { 
+                    margin-bottom: 5px; 
+                    padding-left: 5px;
+                }
             </style>
         </head>
         <body>';
