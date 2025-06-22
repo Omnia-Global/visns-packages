@@ -784,9 +784,9 @@ class ProposalAssemblyService
         // Enhance list styling for content sections
         $content = $this->enhanceListStyling($section['content']);
         
+        // For content sections, don't render the section title - let the dynamic content control its own headings
         return '
         <div class="content-section" style="' . $pageBreak . ' padding: 60px; page-break-inside: avoid;">
-            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
             <div class="section-content" style="line-height: 1.6;">
                 ' . $content . '
             </div>
@@ -991,16 +991,15 @@ class ProposalAssemblyService
     private function insertTableOfContents(array $sections): array
     {
         $tocItems = [];
-        $pageNumber = 1;
 
         foreach ($sections as &$section) {
             if ($section['type'] === 'toc') {
-                // Generate TOC items from other sections (skip cover page and TOC itself)
+                // Generate TOC items from other sections with improved page estimation
                 foreach ($sections as $tocSection) {
                     if (!in_array($tocSection['type'], ['toc', 'cover_page'])) {
                         $tocItems[] = [
                             'title' => $tocSection['title'],
-                            'page' => $pageNumber++,
+                            'page' => $this->estimateSectionPageNumber($tocSection, $sections),
                             'type' => $tocSection['type']
                         ];
                     }
@@ -1280,7 +1279,6 @@ class ProposalAssemblyService
         $pageNumber = 1;
         
         // Get all sections from the current assembly context
-        // We need to access all sections, not just the TOC section
         $allSections = $this->getAllSectionsFromContext();
         
         foreach ($allSections as $section) {
@@ -1290,6 +1288,17 @@ class ProposalAssemblyService
             }
             
             $content = $section['content'] ?? '';
+            $sectionType = $section['type'];
+            
+            // For non-content sections, add the section title as H1 first
+            if ($sectionType !== 'content') {
+                $headings[] = [
+                    'title' => $section['title'] ?? 'Untitled Section',
+                    'level' => 1,
+                    'page' => $this->estimateSectionPageNumber($section, $allSections),
+                    'section_type' => $sectionType
+                ];
+            }
             
             // Extract H1, H2, H3 headings from content using regex
             $patterns = [
@@ -1310,33 +1319,69 @@ class ProposalAssemblyService
                             $headings[] = [
                                 'title' => $cleanHeading,
                                 'level' => $level,
-                                'page' => $pageNumber,
-                                'section_type' => $section['type']
+                                'page' => $this->estimateSectionPageNumber($section, $allSections),
+                                'section_type' => $sectionType
                             ];
                         }
                     }
                 }
             }
-            
-            // Increment page number for each section (rough estimate)
-            $pageNumber++;
-        }
-        
-        // If no headings found in content, use section titles as H1
-        if (empty($headings)) {
-            foreach ($allSections as $section) {
-                if (!in_array($section['type'], ['toc', 'cover_page'])) {
-                    $headings[] = [
-                        'title' => $section['title'] ?? 'Untitled Section',
-                        'level' => 1,
-                        'page' => $pageNumber++,
-                        'section_type' => $section['type']
-                    ];
-                }
-            }
         }
         
         return $headings;
+    }
+
+    /**
+     * Estimate page number for a section based on its position and content
+     *
+     * @param array $targetSection
+     * @param array $allSections
+     * @return int
+     */
+    private function estimateSectionPageNumber(array $targetSection, array $allSections): int
+    {
+        $pageNumber = 1;
+        $targetSortOrder = $targetSection['sort_order'] ?? 0;
+        
+        foreach ($allSections as $section) {
+            $sectionSortOrder = $section['sort_order'] ?? 0;
+            
+            // Stop when we reach the target section
+            if ($sectionSortOrder >= $targetSortOrder) {
+                break;
+            }
+            
+            // Skip cover page in page counting
+            if ($section['type'] === 'cover_page') {
+                continue;
+            }
+            
+            // Estimate pages based on section type
+            switch ($section['type']) {
+                case 'toc':
+                    $pageNumber += 1;
+                    break;
+                case 'quote_items':
+                case 'pricing':
+                    $pageNumber += 2; // Pricing sections typically longer
+                    break;
+                case 'terms_conditions':
+                case 'agreement_signature':
+                    $pageNumber += 1;
+                    break;
+                case 'content':
+                    // Estimate based on content length
+                    $contentLength = strlen($section['content'] ?? '');
+                    $estimatedPages = max(1, ceil($contentLength / 2000)); // Rough estimate
+                    $pageNumber += $estimatedPages;
+                    break;
+                default:
+                    $pageNumber += 1;
+                    break;
+            }
+        }
+        
+        return $pageNumber;
     }
 
     /**
