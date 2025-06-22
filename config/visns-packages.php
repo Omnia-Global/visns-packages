@@ -517,6 +517,20 @@ return [
                 'heading' => 'Arial, sans-serif',
                 'body' => 'Arial, sans-serif',
             ],
+            'available_fonts' => [
+                'Arial, sans-serif' => 'Arial',
+                'Helvetica, sans-serif' => 'Helvetica',
+                '"Times New Roman", serif' => 'Times New Roman',
+                'Times, serif' => 'Times',
+                'Courier, monospace' => 'Courier',
+                '"DejaVu Sans", sans-serif' => 'DejaVu Sans',
+                '"DejaVu Serif", serif' => 'DejaVu Serif',
+                '"DejaVu Sans Mono", monospace' => 'DejaVu Sans Mono',
+                'Calibri, sans-serif' => 'Calibri (Aptos alternative)',
+                'Georgia, serif' => 'Georgia',
+                'Verdana, sans-serif' => 'Verdana',
+                'Tahoma, sans-serif' => 'Tahoma',
+            ],
         ],
 
         /*

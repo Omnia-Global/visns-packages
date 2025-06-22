@@ -826,6 +826,24 @@ class ProposalAssemblyService
                     margin-top: 0;
                 }
                 
+                h1 {
+                    font-size: 16px;
+                    color: ' . ($colors['primary'] ?? '#2563eb') . ';
+                    font-weight: bold;
+                }
+                
+                h2 {
+                    font-size: 13px;
+                    color: ' . ($colors['secondary'] ?? '#64748b') . ';
+                    font-weight: bold;
+                }
+                
+                h3 {
+                    font-size: 12px;
+                    color: ' . ($colors['accent'] ?? '#059669') . ';
+                    font-weight: bold;
+                }
+                
                 .primary-bg { background-color: ' . ($colors['primary'] ?? '#2563eb') . '; }
                 .secondary-bg { background-color: ' . ($colors['secondary'] ?? '#64748b') . '; }
                 .accent-bg { background-color: ' . ($colors['accent'] ?? '#059669') . '; }
