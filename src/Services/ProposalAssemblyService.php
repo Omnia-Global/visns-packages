@@ -306,7 +306,9 @@ class ProposalAssemblyService
             case 'agreement_signature':
                 return $this->renderAgreementSignature($section, $branding, $proposalData);
             case 'content':
+                return $this->renderContentSection($section, $branding);
             case 'terms':
+                return $this->renderTermsSection($section, $branding);
             default:
                 return $this->renderContentSection($section, $branding);
         }
@@ -779,14 +781,33 @@ class ProposalAssemblyService
      */
     private function renderContentSection(array $section, $branding): string
     {
-        $pageBreak = in_array($section['type'], ['terms']) ? 'page-break-before: always;' : '';
-        
         // Enhance list styling for content sections
         $content = $this->enhanceListStyling($section['content']);
         
         // For content sections, don't render the section title - let the dynamic content control its own headings
         return '
-        <div class="content-section" style="' . $pageBreak . ' padding: 60px; page-break-inside: avoid;">
+        <div class="content-section" style="padding: 60px; page-break-inside: avoid;">
+            <div class="section-content" style="line-height: 1.6;">
+                ' . $content . '
+            </div>
+        </div>';
+    }
+
+    /**
+     * Render terms section with section title
+     *
+     * @param array $section
+     * @param BrandingProfile $branding
+     * @return string
+     */
+    private function renderTermsSection(array $section, $branding): string
+    {
+        // Enhance list styling for terms sections
+        $content = $this->enhanceListStyling($section['content']);
+        
+        return '
+        <div class="terms-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
+            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
             <div class="section-content" style="line-height: 1.6;">
                 ' . $content . '
             </div>
@@ -827,19 +848,19 @@ class ProposalAssemblyService
                 }
                 
                 h1 {
-                    font-size: 16px;
+                    font-size: 18px;
                     color: ' . ($colors['primary'] ?? '#2563eb') . ';
                     font-weight: bold;
                 }
                 
                 h2 {
-                    font-size: 13px;
+                    font-size: 15px;
                     color: ' . ($colors['secondary'] ?? '#64748b') . ';
                     font-weight: bold;
                 }
                 
                 h3 {
-                    font-size: 12px;
+                    font-size: 13px;
                     color: ' . ($colors['accent'] ?? '#059669') . ';
                     font-weight: bold;
                 }
@@ -904,7 +925,7 @@ class ProposalAssemblyService
                 .page-break { page-break-before: always; }
                 .no-break { page-break-inside: avoid; }
                 
-                p { margin: 10px 0; }
+                p { margin: 10px 0; font-size: 11px; }
                 ul, ol { 
                     margin: 15px 0; 
                     padding-left: 0; 
