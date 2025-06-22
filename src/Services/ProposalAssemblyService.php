@@ -342,7 +342,9 @@ class ProposalAssemblyService
             <div class="cover-footer" style="position: absolute; bottom: 40px; left: 0; right: 0; text-align: center; width: 100%;">
                 <p style="font-size: 14px; color: #a3a3a3 !important; margin: 0;">' . ($branding->company_name ?? 'Visns Studio CRM') . ' &nbsp;&nbsp;|&nbsp;&nbsp; ' . ($branding->company_info['acn'] ?? 'ACN: 674 383 987') . '</p>
             </div>
-        </div>'
+        </div>';
+        
+        return $html;
     }
 
     /**
