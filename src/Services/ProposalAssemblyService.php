@@ -860,18 +860,21 @@ class ProposalAssemblyService
                 p { margin: 10px 0; }
                 ul, ol { 
                     margin: 15px 0; 
-                    padding-left: 30px; 
+                    padding-left: 0; 
                     margin-left: 20px;
                     list-style-type: disc;
+                    list-style-position: outside;
                 }
                 ol {
                     list-style-type: decimal;
                 }
                 li { 
                     margin-bottom: 8px; 
-                    padding-left: 10px;
+                    padding-left: 20px;
+                    margin-left: 0;
                     line-height: 1.6;
                     display: list-item;
+                    text-indent: 0;
                 }
             </style>
         </head>
@@ -907,7 +910,19 @@ class ProposalAssemblyService
 
         foreach ($data as $key => $value) {
             $placeholder = '{{' . $key . '}}';
-            $content = str_replace($placeholder, $value, $content);
+            // Convert value to string, handle arrays and objects appropriately
+            if (is_array($value)) {
+                $stringValue = implode(', ', $value);
+            } elseif (is_object($value)) {
+                $stringValue = method_exists($value, '__toString') ? (string)$value : '[Object]';
+            } elseif (is_bool($value)) {
+                $stringValue = $value ? 'true' : 'false';
+            } elseif ($value === null) {
+                $stringValue = '';
+            } else {
+                $stringValue = (string)$value;
+            }
+            $content = str_replace($placeholder, $stringValue, $content);
         }
 
         return $content;

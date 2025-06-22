@@ -390,7 +390,15 @@ class PDFController extends \App\Http\Controllers\Controller
             // Use the proposal assembly service to build the proposal
             $proposalService = app(\Visnsstudio\VisnsPackages\Services\ProposalAssemblyService::class);
             
-            $proposalData = $proposalService->assembleProposal($validated);
+            // Build the config array for the proposal assembly service
+            $assemblyConfig = [
+                'template_id' => $validated['template_id'] ?? null,
+                'branding_id' => $validated['branding_id'] ?? null,
+                'proposal_data' => $validated['proposal_data'] ?? [],
+                'sections' => $validated['sections'] ?? [],
+            ];
+            
+            $proposalData = $proposalService->assembleProposal($assemblyConfig);
 
             // Get filename (default: proposal.pdf)
             $filename = $validated['filename'] ?? 'proposal-' . date('Y-m-d') . '.pdf';
@@ -494,7 +502,15 @@ class PDFController extends \App\Http\Controllers\Controller
             // Use the proposal assembly service to build the proposal
             $proposalService = app(\Visnsstudio\VisnsPackages\Services\ProposalAssemblyService::class);
             
-            $proposalData = $proposalService->assembleProposal($validated);
+            // Build the config array for the proposal assembly service
+            $assemblyConfig = [
+                'template_id' => $validated['template_id'] ?? null,
+                'branding_id' => $validated['branding_id'] ?? null,
+                'proposal_data' => $validated['proposal_data'] ?? [],
+                'sections' => $validated['sections'] ?? [],
+            ];
+            
+            $proposalData = $proposalService->assembleProposal($assemblyConfig);
 
             return response()->json([
                 'success' => true,
