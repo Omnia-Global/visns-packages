@@ -859,13 +859,19 @@ class ProposalAssemblyService
                 
                 p { margin: 10px 0; }
                 ul, ol { 
-                    margin: 10px 0; 
-                    padding-left: 40px; 
-                    margin-left: 0;
+                    margin: 15px 0; 
+                    padding-left: 30px; 
+                    margin-left: 20px;
+                    list-style-type: disc;
+                }
+                ol {
+                    list-style-type: decimal;
                 }
                 li { 
-                    margin-bottom: 5px; 
-                    padding-left: 5px;
+                    margin-bottom: 8px; 
+                    padding-left: 10px;
+                    line-height: 1.6;
+                    display: list-item;
                 }
             </style>
         </head>
