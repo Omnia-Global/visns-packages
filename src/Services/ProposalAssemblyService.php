@@ -689,6 +689,7 @@ class ProposalAssemblyService
         
         return '
         <div class="overview-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
+            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
             <div class="overview-content" style="line-height: 1.6;">
                 ' . $content . '
             </div>
