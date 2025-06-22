@@ -402,7 +402,7 @@ class ProposalAssemblyService
         $logoHtml = $this->renderBrandingLogo($branding);
 
         return '
-        <div class="omnia-cover-page" style="page-break-after: always; padding: 0; background-color: #059669 !important; color: white !important; height: 297mm; position: relative; font-family: Arial, sans-serif; margin: 0; box-sizing: border-box; width: 100%; overflow: hidden;">
+        <div class="omnia-cover-page" style="page-break-after: always; padding: 0; background-color: #1f2937 !important; color: white !important; height: 297mm; position: relative; font-family: Arial, sans-serif; margin: 0; box-sizing: border-box; width: 100%; overflow: hidden;">
             
             <div class="cover-content" style="position: absolute; top: 45%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 90%; max-width: 600px;">
                 <div class="logo-section" style="margin-bottom: 40px;">
@@ -1064,7 +1064,7 @@ class ProposalAssemblyService
         return [
             'cover_bg_color' => '#059669',
             'cover_text_color' => '#4ade80',
-            'table_header_bg' => '#4fbfa5',
+            'table_header_bg' => '#6B7280',
             'table_border_color' => '#333333',
             'table_total_bg' => '#333333',
             'table_row_alt_bg' => '#f9f9f9',
