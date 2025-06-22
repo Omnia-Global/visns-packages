@@ -286,6 +286,13 @@ class ProposalAssemblyService
      */
     private function renderSection(array $section, $branding, array $proposalData): string
     {
+        // Debug logging to track which renderer is being used
+        Log::info('Rendering section', [
+            'type' => $section['type'],
+            'title' => $section['title'] ?? 'No title',
+            'has_content' => !empty($section['content'])
+        ]);
+        
         switch ($section['type']) {
             case 'cover_page':
                 return $this->renderCoverPage($section, $branding, $proposalData);
@@ -765,7 +772,7 @@ class ProposalAssemblyService
         
         return '
         <div class="agreement-signature-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
-            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
+            <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
             <div class="agreement-content" style="line-height: 1.6;">
                 ' . $content . '
             </div>
@@ -807,7 +814,7 @@ class ProposalAssemblyService
         
         return '
         <div class="terms-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
-            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
+            <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
             <div class="section-content" style="line-height: 1.6;">
                 ' . $content . '
             </div>
