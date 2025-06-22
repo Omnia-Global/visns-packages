@@ -709,44 +709,50 @@ class ProposalAssemblyService
      */
     private function renderItemsTable(string $title, array $items): string
     {
+        // Use consistent colors from renderPricingSection
+        $headerColor = '#6B7280'; // Neutral gray for header
+        
         $html =
             '
-        <div class="items-table-section" style="margin: 30px 0;">
-            <h2 class="accent-text" style="margin-bottom: 15px;">' .
+        <div style="margin: 30px 0;">
+            <h2 style="margin-bottom: 15px; color: #059669; font-size: 18px; font-weight: bold;">' .
             $title .
             '</h2>
-            <table class="items-table" style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; border: 1px solid #E5E7EB; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
                 <thead>
-                    <tr class="secondary-bg" style="color: white;">
-                        <th style="padding: 12px; text-align: left; border: 1px solid #ddd;">Description</th>
-                        <th style="padding: 12px; text-align: center; border: 1px solid #ddd;">Qty</th>
-                        <th style="padding: 12px; text-align: right; border: 1px solid #ddd;">Rate</th>
-                        <th style="padding: 12px; text-align: right; border: 1px solid #ddd;">Total</th>
+                    <tr style="background-color: ' . $headerColor . ' !important;">
+                        <th style="border: 1px solid #E5E7EB; padding: 16px; text-align: left; vertical-align: middle; color: white !important; font-weight: bold; font-size: 14px;">Description</th>
+                        <th style="border: 1px solid #E5E7EB; padding: 16px; text-align: center; vertical-align: middle; width: 60px; color: white !important; font-weight: bold; font-size: 14px;">Qty</th>
+                        <th style="border: 1px solid #E5E7EB; padding: 16px; text-align: right; vertical-align: middle; width: 120px; color: white !important; font-weight: bold; font-size: 14px;">Rate</th>
+                        <th style="border: 1px solid #E5E7EB; padding: 16px; text-align: right; vertical-align: middle; width: 120px; color: white !important; font-weight: bold; font-size: 14px;">Total</th>
                     </tr>
                 </thead>
                 <tbody>';
 
+        $rowIndex = 0;
         foreach ($items as $item) {
             $qty = $item['qty'] ?? 1;
             $rate = $item['rate'] ?? 0;
             $total = $qty * $rate;
+            $rowBg = $rowIndex % 2 === 0 ? '#FFFFFF' : '#F9FAFB';
 
             $html .=
                 '
-                <tr>
-                    <td style="padding: 10px; border: 1px solid #ddd;">' .
+                <tr style="background-color: ' . $rowBg . ';">
+                    <td style="border: 1px solid #E5E7EB; padding: 14px; font-size: 14px; color: #374151; font-weight: 500;">' .
                 ($item['description'] ?? '') .
                 '</td>
-                    <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">' .
+                    <td style="border: 1px solid #E5E7EB; padding: 14px; text-align: center; font-size: 14px; color: #374151; font-weight: 500;">' .
                 $qty .
                 '</td>
-                    <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">$' .
+                    <td style="border: 1px solid #E5E7EB; padding: 14px; text-align: right; font-size: 14px; color: #374151; font-weight: 500;">$' .
                 number_format($rate, 2) .
                 '</td>
-                    <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">$' .
+                    <td style="border: 1px solid #E5E7EB; padding: 14px; text-align: right; font-size: 14px; color: #374151; font-weight: 600;">$' .
                 number_format($total, 2) .
                 '</td>
                 </tr>';
+            $rowIndex++;
         }
 
         $html .= '
@@ -774,36 +780,36 @@ class ProposalAssemblyService
         $total = $subtotalAfterDiscount + $taxAmount;
 
         return '
-        <div class="totals-section" style="margin-top: 30px; text-align: right;">
-            <table style="margin-left: auto; width: 300px;">
-                <tr>
-                    <td style="padding: 8px;">Subtotal:</td>
-                    <td style="padding: 8px; text-align: right;">$' .
+        <div style="margin-top: 30px; text-align: right;">
+            <table style="margin-left: auto; width: 300px; border-collapse: collapse; border: 1px solid #E5E7EB; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                <tr style="background-color: #F3F4F6;">
+                    <td style="border: 1px solid #E5E7EB; padding: 12px; font-size: 14px; color: #374151; font-weight: bold;">Subtotal:</td>
+                    <td style="border: 1px solid #E5E7EB; padding: 12px; text-align: right; font-size: 14px; color: #374151; font-weight: bold;">$' .
             number_format($subtotal, 2) .
             '</td>
                 </tr>
                 ' .
             ($discount > 0
                 ? '
-                <tr>
-                    <td style="padding: 8px;">Discount (' .
+                <tr style="background-color: #F3F4F6;">
+                    <td style="border: 1px solid #E5E7EB; padding: 12px; font-size: 14px; color: #374151; font-weight: bold;">Discount (' .
                     $discount .
                     '%):</td>
-                    <td style="padding: 8px; text-align: right;">-$' .
+                    <td style="border: 1px solid #E5E7EB; padding: 12px; text-align: right; font-size: 14px; color: #374151; font-weight: bold;">-$' .
                     number_format($discountAmount, 2) .
                     '</td>
                 </tr>'
                 : '') .
             '
-                <tr>
-                    <td style="padding: 8px;">GST (10%):</td>
-                    <td style="padding: 8px; text-align: right;">$' .
+                <tr style="background-color: #F3F4F6;">
+                    <td style="border: 1px solid #E5E7EB; padding: 12px; font-size: 14px; color: #374151; font-weight: bold;">Tax (10%):</td>
+                    <td style="border: 1px solid #E5E7EB; padding: 12px; text-align: right; font-size: 14px; color: #374151; font-weight: bold;">$' .
             number_format($taxAmount, 2) .
             '</td>
                 </tr>
-                <tr class="primary-text" style="font-weight: bold; border-top: 2px solid var(--primary-color);">
-                    <td style="padding: 12px;">Total:</td>
-                    <td style="padding: 12px; text-align: right;">$' .
+                <tr style="background-color: #4B5563 !important;">
+                    <td style="border: 1px solid #E5E7EB; border-top: 2px solid #D1D5DB; padding: 14px; font-size: 15px; color: white !important; font-weight: bold;">Total:</td>
+                    <td style="border: 1px solid #E5E7EB; border-top: 2px solid #D1D5DB; padding: 14px; text-align: right; font-size: 16px; color: white !important; font-weight: bold;">$' .
             number_format($total, 2) .
             '</td>
                 </tr>
