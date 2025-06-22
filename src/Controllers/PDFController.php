@@ -463,10 +463,33 @@ class PDFController extends \App\Http\Controllers\Controller
     public function previewProposalPDF(Request $request)
     {
         try {
-            // Set download to false for preview
-            $request->merge(['download' => false]);
+            // Validate the request data
+            $validated = $request->validate([
+                'proposal_data' => 'required|array',
+                'template_id' => 'nullable|integer',
+                'branding_id' => 'nullable|integer',
+                'sections' => 'nullable|array',
+            ]);
+
+            // Use the proposal assembly service to build the proposal
+            $proposalService = app(\Visnsstudio\VisnsPackages\Services\ProposalAssemblyService::class);
             
-            return $this->generateProposalPDF($request);
+            // Build the config array for the proposal assembly service
+            $assemblyConfig = [
+                'template_id' => $validated['template_id'] ?? null,
+                'branding_id' => $validated['branding_id'] ?? null,
+                'proposal_data' => $validated['proposal_data'] ?? [],
+                'sections' => $validated['sections'] ?? [],
+            ];
+            
+            $proposalData = $proposalService->assembleProposal($assemblyConfig);
+
+            // Return HTML content for preview instead of PDF
+            return response()->json([
+                'success' => true,
+                'html' => $proposalData['html']
+            ]);
+            
         } catch (\Exception $e) {
             Log::error('Error previewing Proposal PDF: ' . $e->getMessage());
 
