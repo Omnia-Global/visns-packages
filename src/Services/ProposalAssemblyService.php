@@ -912,7 +912,7 @@ class ProposalAssemblyService
             $placeholder = '{{' . $key . '}}';
             // Convert value to string, handle arrays and objects appropriately
             if (is_array($value)) {
-                $stringValue = implode(', ', $value);
+                $stringValue = $this->arrayToString($value);
             } elseif (is_object($value)) {
                 $stringValue = method_exists($value, '__toString') ? (string)$value : '[Object]';
             } elseif (is_bool($value)) {
@@ -926,6 +926,31 @@ class ProposalAssemblyService
         }
 
         return $content;
+    }
+
+    /**
+     * Convert array to string, handling nested arrays and objects
+     *
+     * @param array $array
+     * @return string
+     */
+    private function arrayToString(array $array): string
+    {
+        $stringValues = [];
+        foreach ($array as $item) {
+            if (is_array($item)) {
+                $stringValues[] = $this->arrayToString($item);
+            } elseif (is_object($item)) {
+                $stringValues[] = method_exists($item, '__toString') ? (string)$item : '[Object]';
+            } elseif (is_bool($item)) {
+                $stringValues[] = $item ? 'true' : 'false';
+            } elseif ($item === null) {
+                $stringValues[] = '';
+            } else {
+                $stringValues[] = (string)$item;
+            }
+        }
+        return implode(', ', $stringValues);
     }
 
     /**
