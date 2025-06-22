@@ -25,17 +25,31 @@ class ProposalAssemblyService
             $customSections = $config['sections'] ?? [];
 
             // Load template and branding
-            $template = $templateId ? ProposalTemplate::with('sections')->find($templateId) : null;
-            $branding = $brandingId ? BrandingProfile::with('file')->find($brandingId) : $this->getDefaultBranding();
+            $template = $templateId
+                ? ProposalTemplate::with('sections')->find($templateId)
+                : null;
+            $branding = $brandingId
+                ? BrandingProfile::with('file')->find($brandingId)
+                : $this->getDefaultBranding();
 
             // Build sections array (without variable replacement for extraction)
-            $sectionsForExtraction = $this->buildSectionsForExtraction($template, $customSections);
-            
+            $sectionsForExtraction = $this->buildSectionsForExtraction(
+                $template,
+                $customSections
+            );
+
             // Extract variables used in the content BEFORE replacement
-            $variablesUsed = $this->extractVariablesUsed($sectionsForExtraction);
+            $variablesUsed = $this->extractVariablesUsed(
+                $sectionsForExtraction
+            );
 
             // Build sections array with variable replacement
-            $sections = $this->buildSections($template, $customSections, $proposalData, $branding);
+            $sections = $this->buildSections(
+                $template,
+                $customSections,
+                $proposalData,
+                $branding
+            );
 
             // Generate HTML content
             $html = $this->assembleHTML($sections, $branding, $proposalData);
@@ -49,7 +63,7 @@ class ProposalAssemblyService
                     'branding' => $branding,
                     'generated_at' => now()->toISOString(),
                     'total_pages' => $this->estimatePageCount($sections),
-                ]
+                ],
             ];
         } catch (\Exception $e) {
             Log::error('Error assembling proposal: ' . $e->getMessage());
@@ -64,8 +78,10 @@ class ProposalAssemblyService
      * @param array $customSections
      * @return array
      */
-    private function buildSectionsForExtraction($template, array $customSections): array
-    {
+    private function buildSectionsForExtraction(
+        $template,
+        array $customSections
+    ): array {
         $sections = [];
 
         if ($template && $template->sections) {
@@ -99,28 +115,41 @@ class ProposalAssemblyService
      * @param BrandingProfile $branding
      * @return array
      */
-    private function buildSections($template, array $customSections, array $proposalData, $branding): array
-    {
+    private function buildSections(
+        $template,
+        array $customSections,
+        array $proposalData,
+        $branding
+    ): array {
         $sections = [];
 
         if ($template && $template->sections) {
             // Check if we have saved proposal content
             $savedContent = $proposalData['proposal_content'] ?? null;
-            
+
             // Use template sections
             foreach ($template->sections as $section) {
                 $content = $section->content;
-                
+
                 // If this is a content section and we have saved content, use the saved content
-                if ($section->section_type === 'content' && !empty($savedContent)) {
+                if (
+                    $section->section_type === 'content' &&
+                    !empty($savedContent)
+                ) {
                     $content = $savedContent;
                 }
-                
+
                 $sections[] = [
                     'id' => $section->id,
                     'type' => $section->section_type,
-                    'title' => $this->replaceVariables($section->title, $proposalData),
-                    'content' => $this->replaceVariables($content, $proposalData),
+                    'title' => $this->replaceVariables(
+                        $section->title,
+                        $proposalData
+                    ),
+                    'content' => $this->replaceVariables(
+                        $content,
+                        $proposalData
+                    ),
                     'sort_order' => $section->sort_order,
                     'is_dynamic' => $section->is_dynamic,
                     'styling' => $section->styling ?? [],
@@ -129,7 +158,10 @@ class ProposalAssemblyService
             }
         } else {
             // Use custom sections or default structure
-            $sections = $this->buildDefaultSections($customSections, $proposalData);
+            $sections = $this->buildDefaultSections(
+                $customSections,
+                $proposalData
+            );
         }
 
         // Sort sections by sort_order
@@ -150,8 +182,10 @@ class ProposalAssemblyService
      * @param array $proposalData
      * @return array
      */
-    private function buildDefaultSections(array $customSections, array $proposalData): array
-    {
+    private function buildDefaultSections(
+        array $customSections,
+        array $proposalData
+    ): array {
         if (!empty($customSections)) {
             return $customSections;
         }
@@ -201,7 +235,9 @@ class ProposalAssemblyService
             [
                 'type' => 'overview',
                 'title' => 'Overview',
-                'content' => $savedContent ?: $this->getDefaultOverviewContent($proposalData),
+                'content' =>
+                    $savedContent ?:
+                    $this->getDefaultOverviewContent($proposalData),
                 'sort_order' => 5,
                 'is_dynamic' => true,
                 'styling' => [],
@@ -210,7 +246,8 @@ class ProposalAssemblyService
             [
                 'type' => 'content',
                 'title' => 'Proposal Content',
-                'content' => $savedContent ?: '<p>No custom content provided.</p>',
+                'content' =>
+                    $savedContent ?: '<p>No custom content provided.</p>',
                 'sort_order' => 5.5,
                 'is_dynamic' => true,
                 'styling' => [],
@@ -254,11 +291,14 @@ class ProposalAssemblyService
      * @param array $proposalData
      * @return string
      */
-    private function assembleHTML(array $sections, $branding, array $proposalData): string
-    {
+    private function assembleHTML(
+        array $sections,
+        $branding,
+        array $proposalData
+    ): string {
         // Store sections for TOC generation
         $this->allSections = $sections;
-        
+
         $html = $this->getHTMLHeader($branding);
 
         foreach ($sections as $section) {
@@ -284,27 +324,58 @@ class ProposalAssemblyService
      * @param array $proposalData
      * @return string
      */
-    private function renderSection(array $section, $branding, array $proposalData): string
-    {
+    private function renderSection(
+        array $section,
+        $branding,
+        array $proposalData
+    ): string {
         switch ($section['type']) {
             case 'cover_page':
-                return $this->renderCoverPage($section, $branding, $proposalData);
+                return $this->renderCoverPage(
+                    $section,
+                    $branding,
+                    $proposalData
+                );
             case 'toc':
                 return $this->renderTableOfContents($section, $proposalData);
             case 'terms_conditions':
                 return $this->renderTermsConditions($section, $branding);
             case 'review_log':
-                return $this->renderChangeLog($section, $branding, $proposalData);
+                return $this->renderChangeLog(
+                    $section,
+                    $branding,
+                    $proposalData
+                );
             case 'overview':
-                return $this->renderOverviewSection($section, $branding, $proposalData);
+                return $this->renderOverviewSection(
+                    $section,
+                    $branding,
+                    $proposalData
+                );
             case 'acceptance':
-                return $this->renderAcceptanceSection($section, $branding, $proposalData);
+                return $this->renderAcceptanceSection(
+                    $section,
+                    $branding,
+                    $proposalData
+                );
             case 'quote_items':
-                return $this->renderPricingSection($section, $branding, $proposalData);
+                return $this->renderPricingSection(
+                    $section,
+                    $branding,
+                    $proposalData
+                );
             case 'payment_terms':
-                return $this->renderPaymentTerms($section, $branding, $proposalData);
+                return $this->renderPaymentTerms(
+                    $section,
+                    $branding,
+                    $proposalData
+                );
             case 'agreement_signature':
-                return $this->renderAgreementSignature($section, $branding, $proposalData);
+                return $this->renderAgreementSignature(
+                    $section,
+                    $branding,
+                    $proposalData
+                );
             case 'content':
                 return $this->renderContentSection($section, $branding);
             case 'terms':
@@ -322,29 +393,38 @@ class ProposalAssemblyService
      * @param array $proposalData
      * @return string
      */
-    private function renderCoverPage(array $section, $branding, array $proposalData): string
-    {
+    private function renderCoverPage(
+        array $section,
+        $branding,
+        array $proposalData
+    ): string {
         // Get logo from branding profile
         $logoHtml = $this->renderBrandingLogo($branding);
-        
+
         return '
-        <div class="omnia-cover-page" style="page-break-after: always; padding: 0; background-color: #059669 !important; color: white !important; height: 100vh; position: relative; font-family: Arial, sans-serif; margin: 0; box-sizing: border-box; width: 100%; min-height: 297mm;">
+        <div class="omnia-cover-page" style="page-break-after: always; padding: 0; background-color: #059669 !important; color: white !important; height: 100vh; position: relative; font-family: Arial, sans-serif; margin: 0; box-sizing: border-box; width: 100%; min-height: 100vh; overflow: hidden;">
             
-            <div class="cover-content" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 90%; max-width: 600px;">
-                <div class="logo-section" style="margin-bottom: 60px;">
-                    ' . $logoHtml . '
+            <div class="cover-content" style="position: absolute; top: 45%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 90%; max-width: 600px;">
+                <div class="logo-section" style="margin-bottom: 40px;">
+                    ' .
+            $logoHtml .
+            '
                 </div>
                 <div>
-                    <h1 style="font-size: 48px; font-weight: bold; margin: 0; color: #4ade80 !important; line-height: 1.2; text-shadow: 1px 1px 2px rgba(0,0,0,0.3);">' . ($proposalData['document_title'] ?? '[Document Title]') . '</h1>
+                    <h1 style="font-size: 48px; font-weight: bold; margin: 0; color: #4ade80 !important; line-height: 1.2; text-shadow: 1px 1px 2px rgba(0,0,0,0.3);">' .
+            ($proposalData['document_title'] ?? '[Document Title]') .
+            '</h1>
                 </div>
             </div>
             
-            <div class="cover-footer" style="position: absolute; bottom: 40px; left: 0; right: 0; text-align: center; width: 100%;">
-                <p style="font-size: 14px; color: #a3a3a3 !important; margin: 0;">' . ($branding->company_name ?? 'Visns Studio CRM') . ' &nbsp;&nbsp;|&nbsp;&nbsp; ' . ($branding->company_info['acn'] ?? 'ACN: 674 383 987') . '</p>
+            <div class="cover-footer" style="position: absolute; bottom: 30px; left: 0; right: 0; text-align: center; width: 100%;">
+                <p style="font-size: 14px; color: #a3a3a3 !important; margin: 0;">' .
+            ($branding->company_name ?? 'Visns Studio CRM') .
+            ' &nbsp;&nbsp;|&nbsp;&nbsp; ' .
+            ($branding->company_info['acn'] ?? 'ACN: 674 383 987') .
+            '</p>
             </div>
         </div>';
-        
-        return $html;
     }
 
     /**
@@ -359,28 +439,38 @@ class ProposalAssemblyService
         if ($branding && $branding->file && $branding->file->file_url) {
             $logoUrl = $branding->file->file_url;
             $companyName = $branding->company_name ?? 'Company Logo';
-            
+
             return '
             <div style="margin: 0 auto; text-align: center;">
-                <img src="' . $logoUrl . '" alt="' . $companyName . '" style="max-width: 450px; max-height: 180px; object-fit: contain;" />
+                <img src="' .
+                $logoUrl .
+                '" alt="' .
+                $companyName .
+                '" style="max-width: 450px; max-height: 180px; object-fit: contain;" />
             </div>';
         }
-        
+
         // Try to use logo_url field if file relationship doesn't exist
         if ($branding && $branding->logo_url) {
             $companyName = $branding->company_name ?? 'Company Logo';
-            
+
             return '
             <div style="margin: 0 auto; text-align: center;">
-                <img src="' . $branding->logo_url . '" alt="' . $companyName . '" style="max-width: 450px; max-height: 180px; object-fit: contain;" />
+                <img src="' .
+                $branding->logo_url .
+                '" alt="' .
+                $companyName .
+                '" style="max-width: 450px; max-height: 180px; object-fit: contain;" />
             </div>';
         }
-        
+
         // Fallback to company name text if no logo available
         $companyName = $branding->company_name ?? 'OmniaGlobal';
         return '
         <div style="width: 200px; height: 80px; background: white; border-radius: 10px; margin: 0 auto; display: flex; align-items: center; justify-content: center;">
-            <span style="color: #2d6a4f; font-size: 24px; font-weight: bold;">' . $companyName . '</span>
+            <span style="color: #2d6a4f; font-size: 24px; font-weight: bold;">' .
+            $companyName .
+            '</span>
         </div>';
     }
 
@@ -391,16 +481,21 @@ class ProposalAssemblyService
      * @param array $proposalData
      * @return string
      */
-    private function renderTableOfContents(array $section, array $proposalData): string
-    {
+    private function renderTableOfContents(
+        array $section,
+        array $proposalData
+    ): string {
         // Auto-generate TOC items from all sections' headings
-        $tocItems = $this->extractHeadingsFromAllSections($section, $proposalData);
-        
+        $tocItems = $this->extractHeadingsFromAllSections(
+            $section,
+            $proposalData
+        );
+
         // Use manually defined TOC items if no headings found
         if (empty($tocItems)) {
             $tocItems = $section['toc_items'] ?? [];
         }
-        
+
         $tocHtml = '
         <div class="table-of-contents" style="page-break-after: always; padding: 80px;">
             <h1 style="font-size: 32px; font-weight: bold; margin-bottom: 40px; text-align: left;">Contents</h1>
@@ -414,17 +509,24 @@ class ProposalAssemblyService
                     $indent = '&nbsp;&nbsp;&nbsp;&nbsp;';
                     break;
                 case 3:
-                    $indent = '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;';
+                    $indent =
+                        '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;';
                     break;
                 default:
                     $indent = '';
                     break;
             }
-            
-            $tocHtml .= '
+
+            $tocHtml .=
+                '
                 <tr class="toc-item" style="border-bottom: 1px dotted #ccc;">
-                    <td class="toc-title" style="padding: 10px 0; border: none; text-align: left;">' . $indent . $item['title'] . '</td>
-                    <td class="toc-page" style="padding: 10px 0; border: none; text-align: right; width: 50px;">' . ($item['page'] ?? '') . '</td>
+                    <td class="toc-title" style="padding: 10px 0; border: none; text-align: left;">' .
+                $indent .
+                $item['title'] .
+                '</td>
+                    <td class="toc-page" style="padding: 10px 0; border: none; text-align: right; width: 50px;">' .
+                ($item['page'] ?? '') .
+                '</td>
                 </tr>';
         }
 
@@ -450,13 +552,22 @@ class ProposalAssemblyService
      * @param array $proposalData
      * @return string
      */
-    private function renderAcceptanceSection(array $section, $branding, array $proposalData): string
-    {
+    private function renderAcceptanceSection(
+        array $section,
+        $branding,
+        array $proposalData
+    ): string {
         return '
         <div class="acceptance-section" style="padding: 60px; page-break-after: avoid;">
-            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
+            <h1 style="margin-bottom: 30px; color: ' .
+            ($branding->colors['primary'] ?? '#2563eb') .
+            ';">' .
+            $section['title'] .
+            '</h1>
             <div class="acceptance-content">
-                ' . $this->replaceVariables($section['content'], $proposalData) . '
+                ' .
+            $this->replaceVariables($section['content'], $proposalData) .
+            '
             </div>
         </div>';
     }
@@ -469,25 +580,33 @@ class ProposalAssemblyService
      * @param array $proposalData
      * @return string
      */
-    private function renderPricingSection(array $section, $branding, array $proposalData): string
-    {
-        // Use high contrast colors for better visibility in both preview and PDF
-        $headerColor = '#4fbfa5'; // Teal color for consistency with existing theme
-        $totalColor = '#333333'; // Dark gray for total row
-        
-        $html = '
-        <div class="pricing-section" style="padding: 40px; page-break-inside: avoid;">
-            <h1 style="margin-bottom: 30px; color: #1f2937; font-size: 28px; font-weight: bold;">' . $section['title'] . '</h1>
-            <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px; border: 2px solid #333333; background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-                <thead>
-                    <tr style="background-color: ' . $headerColor . ' !important;">
-                        <th style="border: 1px solid #333333; padding: 16px; text-align: left; vertical-align: middle; color: white !important; font-weight: bold; font-size: 14px;">Description</th>
-                        <th style="border: 1px solid #333333; padding: 16px; text-align: right; vertical-align: middle; width: 120px; color: white !important; font-weight: bold; font-size: 14px;">Price</th>
-                        <th style="border: 1px solid #333333; padding: 16px; text-align: center; vertical-align: middle; width: 60px; color: white !important; font-weight: bold; font-size: 14px;">Qty</th>
-                        <th style="border: 1px solid #333333; padding: 16px; text-align: right; vertical-align: middle; width: 120px; color: white !important; font-weight: bold; font-size: 14px;">Amount</th>
-                    </tr>
-                </thead>
-                <tbody>';
+    private function renderPricingSection(
+        array $section,
+        $branding,
+        array $proposalData
+    ): string {
+        // Neutral color scheme for better readability
+        $headerColor = '#6B7280'; // Neutral gray for header
+        $totalColor = '#4B5563'; // Darker gray for total row
+
+        $html =
+            '
+    <div class="pricing-section" style="padding: 40px; page-break-inside: avoid;">
+        <h1 style="margin-bottom: 30px; color: #1F2937; font-size: 28px; font-weight: bold;">' .
+            $section['title'] .
+            '</h1>
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px; border: 1px solid #E5E7EB; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <thead>
+                <tr style="background-color: ' .
+            $headerColor .
+            ' !important;">
+                    <th style="border: 1px solid #E5E7EB; padding: 16px; text-align: left; vertical-align: middle; color: white !important; font-weight: bold; font-size: 14px;">Description</th>
+                    <th style="border: 1px solid #E5E7EB; padding: 16px; text-align: right; vertical-align: middle; width: 120px; color: white !important; font-weight: bold; font-size: 14px;">Price</th>
+                    <th style="border: 1px solid #E5E7EB; padding: 16px; text-align: center; vertical-align: middle; width: 60px; color: white !important; font-weight: bold; font-size: 14px;">Qty</th>
+                    <th style="border: 1px solid #E5E7EB; padding: 16px; text-align: right; vertical-align: middle; width: 120px; color: white !important; font-weight: bold; font-size: 14px;">Amount</th>
+                </tr>
+            </thead>
+            <tbody>';
 
         // Add all quote items in OMNIA format
         $allItems = [];
@@ -495,61 +614,87 @@ class ProposalAssemblyService
             $allItems = array_merge($allItems, $proposalData['items_onceoff']);
         }
         if (isset($proposalData['items_monthly_subscription'])) {
-            $allItems = array_merge($allItems, $proposalData['items_monthly_subscription']);
+            $allItems = array_merge(
+                $allItems,
+                $proposalData['items_monthly_subscription']
+            );
         }
         if (isset($proposalData['items_yearly_subscription'])) {
-            $allItems = array_merge($allItems, $proposalData['items_yearly_subscription']);
+            $allItems = array_merge(
+                $allItems,
+                $proposalData['items_yearly_subscription']
+            );
         }
 
         // Add development placeholder if no items
         if (empty($allItems)) {
             $html .= '
-                    <tr style="background-color: #ffffff;">
-                        <td style="border: 1px solid #333333; padding: 14px; font-size: 14px; color: #374151; font-weight: 500;">Development</td>
-                        <td style="border: 1px solid #333333; padding: 14px; text-align: right; font-size: 14px; color: #374151;">$19,750.00</td>
-                        <td style="border: 1px solid #333333; padding: 14px; text-align: center; font-size: 14px; color: #374151;">1</td>
-                        <td style="border: 1px solid #333333; padding: 14px; text-align: right; font-size: 14px; color: #374151; font-weight: 600;">$19,750.00</td>
-                    </tr>';
+                <tr style="background-color: #FFFFFF;">
+                    <td style="border: 1px solid #E5E7EB; padding: 14px; font-size: 14px; color: #374151; font-weight: 500;">Development</td>
+                    <td style="border: 1px solid #E5E7EB; padding: 14px; text-align: right; font-size: 14px; color: #374151;">$19,750.00</td>
+                    <td style="border: 1px solid #E5E7EB; padding: 14px; text-align: center; font-size: 14px; color: #374151;">1</td>
+                    <td style="border: 1px solid #E5E7EB; padding: 14px; text-align: right; font-size: 14px; color: #374151; font-weight: 600;">$19,750.00</td>
+                </tr>';
         } else {
             $rowIndex = 0;
             foreach ($allItems as $item) {
                 $qty = $item['qty'] ?? 1;
                 $rate = $item['rate'] ?? 0;
                 $total = $qty * $rate;
-                $rowBg = ($rowIndex % 2 === 0) ? '#ffffff' : '#f9f9f9';
-                $html .= '
-                    <tr style="background-color: ' . $rowBg . ';">
-                        <td style="border: 1px solid #333333; padding: 14px; font-size: 14px; color: #374151; font-weight: 500;">' . ($item['description'] ?? '') . '</td>
-                        <td style="border: 1px solid #333333; padding: 14px; text-align: right; font-size: 14px; color: #374151; font-weight: 500;">$' . number_format($rate, 2) . '</td>
-                        <td style="border: 1px solid #333333; padding: 14px; text-align: center; font-size: 14px; color: #374151; font-weight: 500;">' . $qty . '</td>
-                        <td style="border: 1px solid #333333; padding: 14px; text-align: right; font-size: 14px; color: #374151; font-weight: 600;">$' . number_format($total, 2) . '</td>
-                    </tr>';
+                $rowBg = $rowIndex % 2 === 0 ? '#FFFFFF' : '#F9FAFB';
+                $html .=
+                    '
+                <tr style="background-color: ' .
+                    $rowBg .
+                    ';">
+                    <td style="border: 1px solid #E5E7EB; padding: 14px; font-size: 14px; color: #374151; font-weight: 500;">' .
+                    ($item['description'] ?? '') .
+                    '</td>
+                    <td style="border: 1px solid #E5E7EB; padding: 14px; text-align: right; font-size: 14px; color: #374151; font-weight: 500;">$' .
+                    number_format($rate, 2) .
+                    '</td>
+                    <td style="border: 1px solid #E5E7EB; padding: 14px; text-align: center; font-size: 14px; color: #374151; font-weight: 500;">' .
+                    $qty .
+                    '</td>
+                    <td style="border: 1px solid #E5E7EB; padding: 14px; text-align: right; font-size: 14px; color: #374151; font-weight: 600;">$' .
+                    number_format($total, 2) .
+                    '</td>
+                </tr>';
                 $rowIndex++;
             }
         }
 
         // Add totals rows
         $subtotal = $this->calculateSubtotal($proposalData);
-        $taxAmount = $subtotal * 0.10;
+        $taxAmount = $subtotal * 0.1;
         $total = $subtotal + $taxAmount;
-        
-        $html .= '
-                </tbody>
-                <tfoot>
-                    <tr style="background-color: #f3f4f6;">
-                        <td colspan="3" style="border: 1px solid #333333; border-top: 2px solid #333333; padding: 12px; text-align: right; font-weight: bold; font-size: 14px; color: #374151;">Sub Total:</td>
-                        <td style="border: 1px solid #333333; border-top: 2px solid #333333; padding: 12px; text-align: right; font-weight: bold; font-size: 14px; color: #374151;">$' . number_format($subtotal, 2) . '</td>
-                    </tr>
-                    <tr style="background-color: #f3f4f6;">
-                        <td colspan="3" style="border: 1px solid #333333; padding: 12px; text-align: right; font-weight: bold; font-size: 14px; color: #374151;">Tax (10%):</td>
-                        <td style="border: 1px solid #333333; padding: 12px; text-align: right; font-weight: bold; font-size: 14px; color: #374151;">$' . number_format($taxAmount, 2) . '</td>
-                    </tr>
-                    <tr style="background-color: ' . $totalColor . ' !important;">
-                        <td colspan="3" style="border: 1px solid #333333; padding: 14px; text-align: right; font-weight: bold; font-size: 15px; color: white !important;">Total:</td>
-                        <td style="border: 1px solid #333333; padding: 14px; text-align: right; font-weight: bold; font-size: 16px; color: white !important;">$' . number_format($total, 2) . '</td>
-                    </tr>
-                </tfoot>
-            </table>';
+
+        $html .=
+            '
+            </tbody>
+            <tfoot>
+                <tr style="background-color: #F3F4F6;">
+                    <td colspan="3" style="border: 1px solid #E5E7EB; border-top: 2px solid #D1D5DB; padding: 12px; text-align: right; font-weight: bold; font-size: 14px; color: #374151;">Sub Total:</td>
+                    <td style="border: 1px solid #E5E7EB; border-top: 2px solid #D1D5DB; padding: 12px; text-align: right; font-weight: bold; font-size: 14px; color: #374151;">$' .
+            number_format($subtotal, 2) .
+            '</td>
+                </tr>
+                <tr style="background-color: #F3F4F6;">
+                    <td colspan="3" style="border: 1px solid #E5E7EB; padding: 12px; text-align: right; font-weight: bold; font-size: 14px; color: #374151;">Tax (10%):</td>
+                    <td style="border: 1px solid #E5E7EB; padding: 12px; text-align: right; font-weight: bold; font-size: 14px; color: #374151;">$' .
+            number_format($taxAmount, 2) .
+            '</td>
+                </tr>
+                <tr style="background-color: ' .
+            $totalColor .
+            ' !important;">
+                    <td colspan="3" style="border: 1px solid #E5E7EB; padding: 14px; text-align: right; font-weight: bold; font-size: 15px; color: white !important;">Total:</td>
+                    <td style="border: 1px solid #E5E7EB; padding: 14px; text-align: right; font-weight: bold; font-size: 16px; color: white !important;">$' .
+            number_format($total, 2) .
+            '</td>
+                </tr>
+            </tfoot>
+        </table>';
         $html .= '</div>';
 
         return $html;
@@ -564,9 +709,12 @@ class ProposalAssemblyService
      */
     private function renderItemsTable(string $title, array $items): string
     {
-        $html = '
+        $html =
+            '
         <div class="items-table-section" style="margin: 30px 0;">
-            <h2 class="accent-text" style="margin-bottom: 15px;">' . $title . '</h2>
+            <h2 class="accent-text" style="margin-bottom: 15px;">' .
+            $title .
+            '</h2>
             <table class="items-table" style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
                 <thead>
                     <tr class="secondary-bg" style="color: white;">
@@ -582,13 +730,22 @@ class ProposalAssemblyService
             $qty = $item['qty'] ?? 1;
             $rate = $item['rate'] ?? 0;
             $total = $qty * $rate;
-            
-            $html .= '
+
+            $html .=
+                '
                 <tr>
-                    <td style="padding: 10px; border: 1px solid #ddd;">' . ($item['description'] ?? '') . '</td>
-                    <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">' . $qty . '</td>
-                    <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">$' . number_format($rate, 2) . '</td>
-                    <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">$' . number_format($total, 2) . '</td>
+                    <td style="padding: 10px; border: 1px solid #ddd;">' .
+                ($item['description'] ?? '') .
+                '</td>
+                    <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">' .
+                $qty .
+                '</td>
+                    <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">$' .
+                number_format($rate, 2) .
+                '</td>
+                    <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">$' .
+                number_format($total, 2) .
+                '</td>
                 </tr>';
         }
 
@@ -610,7 +767,7 @@ class ProposalAssemblyService
     {
         $subtotal = $this->calculateSubtotal($proposalData);
         $discount = $proposalData['discount'] ?? 0;
-        $taxRate = 0.10; // 10% GST
+        $taxRate = 0.1; // 10% GST
         $discountAmount = $subtotal * ($discount / 100);
         $subtotalAfterDiscount = $subtotal - $discountAmount;
         $taxAmount = $subtotalAfterDiscount * $taxRate;
@@ -621,20 +778,34 @@ class ProposalAssemblyService
             <table style="margin-left: auto; width: 300px;">
                 <tr>
                     <td style="padding: 8px;">Subtotal:</td>
-                    <td style="padding: 8px; text-align: right;">$' . number_format($subtotal, 2) . '</td>
+                    <td style="padding: 8px; text-align: right;">$' .
+            number_format($subtotal, 2) .
+            '</td>
                 </tr>
-                ' . ($discount > 0 ? '
+                ' .
+            ($discount > 0
+                ? '
                 <tr>
-                    <td style="padding: 8px;">Discount (' . $discount . '%):</td>
-                    <td style="padding: 8px; text-align: right;">-$' . number_format($discountAmount, 2) . '</td>
-                </tr>' : '') . '
+                    <td style="padding: 8px;">Discount (' .
+                    $discount .
+                    '%):</td>
+                    <td style="padding: 8px; text-align: right;">-$' .
+                    number_format($discountAmount, 2) .
+                    '</td>
+                </tr>'
+                : '') .
+            '
                 <tr>
                     <td style="padding: 8px;">GST (10%):</td>
-                    <td style="padding: 8px; text-align: right;">$' . number_format($taxAmount, 2) . '</td>
+                    <td style="padding: 8px; text-align: right;">$' .
+            number_format($taxAmount, 2) .
+            '</td>
                 </tr>
                 <tr class="primary-text" style="font-weight: bold; border-top: 2px solid var(--primary-color);">
                     <td style="padding: 12px;">Total:</td>
-                    <td style="padding: 12px; text-align: right;">$' . number_format($total, 2) . '</td>
+                    <td style="padding: 12px; text-align: right;">$' .
+            number_format($total, 2) .
+            '</td>
                 </tr>
             </table>
         </div>';
@@ -650,17 +821,23 @@ class ProposalAssemblyService
     private function renderTermsConditions(array $section, $branding): string
     {
         $content = $section['content'];
-        
+
         // Use default content if section content is empty
         if (empty(trim($content))) {
             $content = $this->getDefaultTermsConditions();
         }
-        
+
         return '
         <div class="terms-conditions-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
-            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
+            <h1 style="margin-bottom: 30px; color: ' .
+            ($branding->colors['primary'] ?? '#2563eb') .
+            ';">' .
+            $section['title'] .
+            '</h1>
             <div class="terms-content" style="line-height: 1.6;">
-                ' . $content . '
+                ' .
+            $content .
+            '
             </div>
         </div>';
     }
@@ -673,18 +850,26 @@ class ProposalAssemblyService
      * @param array $proposalData
      * @return string
      */
-    private function renderChangeLog(array $section, $branding, array $proposalData): string
-    {
+    private function renderChangeLog(
+        array $section,
+        $branding,
+        array $proposalData
+    ): string {
         $changeEntries = $proposalData['change_entries'] ?? [
             [
                 'version' => '1.0',
-                'description' => 'Initial Document'
-            ]
+                'description' => 'Initial Document',
+            ],
         ];
 
-        $html = '
+        $html =
+            '
         <div class="change-log-section" style="padding: 60px; page-break-after: avoid;">
-            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
+            <h1 style="margin-bottom: 30px; color: ' .
+            ($branding->colors['primary'] ?? '#2563eb') .
+            ';">' .
+            $section['title'] .
+            '</h1>
             <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
                 <thead>
                     <tr style="background-color: #f5f5f5;">
@@ -695,10 +880,15 @@ class ProposalAssemblyService
                 <tbody>';
 
         foreach ($changeEntries as $entry) {
-            $html .= '
+            $html .=
+                '
                     <tr>
-                        <td style="border: 1px solid #ddd; padding: 10px;">' . ($entry['version'] ?? '') . '</td>
-                        <td style="border: 1px solid #ddd; padding: 10px;">' . ($entry['description'] ?? '') . '</td>
+                        <td style="border: 1px solid #ddd; padding: 10px;">' .
+                ($entry['version'] ?? '') .
+                '</td>
+                        <td style="border: 1px solid #ddd; padding: 10px;">' .
+                ($entry['description'] ?? '') .
+                '</td>
                     </tr>';
         }
 
@@ -718,15 +908,24 @@ class ProposalAssemblyService
      * @param array $proposalData
      * @return string
      */
-    private function renderOverviewSection(array $section, $branding, array $proposalData): string
-    {
+    private function renderOverviewSection(
+        array $section,
+        $branding,
+        array $proposalData
+    ): string {
         $content = $this->replaceVariables($section['content'], $proposalData);
-        
+
         return '
         <div class="overview-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
-            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
+            <h1 style="margin-bottom: 30px; color: ' .
+            ($branding->colors['primary'] ?? '#2563eb') .
+            ';">' .
+            $section['title'] .
+            '</h1>
             <div class="overview-content" style="line-height: 1.6;">
-                ' . $content . '
+                ' .
+            $content .
+            '
             </div>
         </div>';
     }
@@ -739,18 +938,27 @@ class ProposalAssemblyService
      * @param array $proposalData
      * @return string
      */
-    private function renderPaymentTerms(array $section, $branding, array $proposalData): string
-    {
+    private function renderPaymentTerms(
+        array $section,
+        $branding,
+        array $proposalData
+    ): string {
         $content = $this->replaceVariables($section['content'], $proposalData);
-        
+
         // Add proper list styling to the content
         $content = $this->enhanceListStyling($content);
-        
+
         return '
         <div class="payment-terms-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
-            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . '; font-size: 28px; font-weight: bold;">' . $section['title'] . '</h1>
+            <h1 style="margin-bottom: 30px; color: ' .
+            ($branding->colors['primary'] ?? '#2563eb') .
+            '; font-size: 28px; font-weight: bold;">' .
+            $section['title'] .
+            '</h1>
             <div class="payment-content" style="line-height: 1.6; font-size: 16px; color: #333;">
-                ' . $content . '
+                ' .
+            $content .
+            '
             </div>
         </div>';
     }
@@ -763,20 +971,29 @@ class ProposalAssemblyService
      * @param array $proposalData
      * @return string
      */
-    private function renderAgreementSignature(array $section, $branding, array $proposalData): string
-    {
+    private function renderAgreementSignature(
+        array $section,
+        $branding,
+        array $proposalData
+    ): string {
         $content = $this->replaceVariables($section['content'], $proposalData);
-        
+
         // Use default content if section content is empty
         if (empty(trim($content))) {
             $content = $this->getDefaultAgreementSignature();
         }
-        
+
         return '
         <div class="agreement-signature-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
-            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
+            <h1 style="margin-bottom: 30px; color: ' .
+            ($branding->colors['primary'] ?? '#2563eb') .
+            ';">' .
+            $section['title'] .
+            '</h1>
             <div class="agreement-content" style="line-height: 1.6;">
-                ' . $content . '
+                ' .
+            $content .
+            '
             </div>
         </div>';
     }
@@ -792,12 +1009,14 @@ class ProposalAssemblyService
     {
         // Enhance list styling for content sections
         $content = $this->enhanceListStyling($section['content']);
-        
+
         // For content sections, don't render the section title - let the dynamic content control its own headings
         return '
         <div class="content-section" style="padding: 60px; page-break-inside: avoid;">
             <div class="section-content" style="line-height: 1.6;">
-                ' . $content . '
+                ' .
+            $content .
+            '
             </div>
         </div>';
     }
@@ -813,12 +1032,18 @@ class ProposalAssemblyService
     {
         // Enhance list styling for terms sections
         $content = $this->enhanceListStyling($section['content']);
-        
+
         return '
         <div class="terms-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
-            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
+            <h1 style="margin-bottom: 30px; color: ' .
+            ($branding->colors['primary'] ?? '#2563eb') .
+            ';">' .
+            $section['title'] .
+            '</h1>
             <div class="section-content" style="line-height: 1.6;">
-                ' . $content . '
+                ' .
+            $content .
+            '
             </div>
         </div>';
     }
@@ -862,8 +1087,18 @@ class ProposalAssemblyService
             <meta charset="utf-8">
             <title>Proposal</title>
             <style>
+                @page {
+                    margin: 40px;
+                }
+                
+                @page :first {
+                    margin: 0;
+                }
+                
                 body {
-                    font-family: ' . ($fonts['body'] ?? $cssConstants['font_family']) . ';
+                    font-family: ' .
+            ($fonts['body'] ?? $cssConstants['font_family']) .
+            ';
                     font-size: 16px;
                     line-height: 1.6;
                     color: #333;
@@ -872,7 +1107,9 @@ class ProposalAssemblyService
                 }
                 
                 h1, h2, h3, h4, h5, h6 {
-                    font-family: ' . ($fonts['heading'] ?? 'Arial, sans-serif') . ';
+                    font-family: ' .
+            ($fonts['heading'] ?? 'Arial, sans-serif') .
+            ';
                     line-height: 1.3;
                     margin-bottom: 20px;
                     margin-top: 0;
@@ -881,53 +1118,77 @@ class ProposalAssemblyService
                 
                 h1 {
                     font-size: 32px;
-                    color: ' . ($colors['primary'] ?? '#2563eb') . ';
+                    color: ' .
+            ($colors['primary'] ?? '#2563eb') .
+            ';
                     font-weight: bold;
                     margin-bottom: 25px;
                 }
                 
                 h2 {
                     font-size: 26px;
-                    color: ' . ($colors['primary'] ?? '#2563eb') . ';
+                    color: ' .
+            ($colors['primary'] ?? '#2563eb') .
+            ';
                     font-weight: bold;
                     margin-bottom: 20px;
                 }
                 
                 h3 {
                     font-size: 22px;
-                    color: ' . ($colors['primary'] ?? '#2563eb') . ';
+                    color: ' .
+            ($colors['primary'] ?? '#2563eb') .
+            ';
                     font-weight: bold;
                     margin-bottom: 15px;
                 }
                 
                 h4 {
                     font-size: 19px;
-                    color: ' . ($colors['secondary'] ?? '#64748b') . ';
+                    color: ' .
+            ($colors['secondary'] ?? '#64748b') .
+            ';
                     font-weight: bold;
                     margin-bottom: 12px;
                 }
                 
                 h5 {
                     font-size: 17px;
-                    color: ' . ($colors['secondary'] ?? '#64748b') . ';
+                    color: ' .
+            ($colors['secondary'] ?? '#64748b') .
+            ';
                     font-weight: bold;
                     margin-bottom: 10px;
                 }
                 
                 h6 {
                     font-size: 16px;
-                    color: ' . ($colors['secondary'] ?? '#64748b') . ';
+                    color: ' .
+            ($colors['secondary'] ?? '#64748b') .
+            ';
                     font-weight: bold;
                     margin-bottom: 8px;
                 }
                 
-                .primary-bg { background-color: ' . ($colors['primary'] ?? '#2563eb') . '; }
-                .secondary-bg { background-color: ' . ($colors['secondary'] ?? '#64748b') . '; }
-                .accent-bg { background-color: ' . ($colors['accent'] ?? '#059669') . '; }
+                .primary-bg { background-color: ' .
+            ($colors['primary'] ?? '#2563eb') .
+            '; }
+                .secondary-bg { background-color: ' .
+            ($colors['secondary'] ?? '#64748b') .
+            '; }
+                .accent-bg { background-color: ' .
+            ($colors['accent'] ?? '#059669') .
+            '; }
                 
-                .primary-text { color: ' . ($colors['primary'] ?? '#2563eb') . '; }
-                .secondary-text { color: ' . ($colors['secondary'] ?? '#64748b') . '; }
-                .accent-text { color: ' . ($colors['accent'] ?? '#059669') . '; }
+                .primary-text { color: ' .
+            ($colors['primary'] ?? '#2563eb') .
+            '; }
+                .secondary-text { color: ' .
+            ($colors['secondary'] ?? '#64748b') .
+            '; }
+                .accent-text { color: ' .
+            ($colors['accent'] ?? '#059669') .
+            '; }
                 
                 .company-logo {
                     max-height: 80px;
@@ -946,7 +1207,9 @@ class ProposalAssemblyService
                     font-weight: bold;
                     font-size: 20px;
                     margin: 0 auto;
-                    background-color: ' . ($colors['primary'] ?? '#2563eb') . ';
+                    background-color: ' .
+            ($colors['primary'] ?? '#2563eb') .
+            ';
                     line-height: 80px;
                 }
                 
@@ -958,7 +1221,9 @@ class ProposalAssemblyService
                 
                 table th,
                 table td {
-                    border: 1px solid ' . $cssConstants['table_border_color'] . ';
+                    border: 1px solid ' .
+            $cssConstants['table_border_color'] .
+            ';
                     padding: 14px;
                     text-align: left;
                     vertical-align: middle;
@@ -968,21 +1233,29 @@ class ProposalAssemblyService
                 }
                 
                 table th {
-                    background-color: ' . $cssConstants['table_header_bg'] . ' !important;
+                    background-color: ' .
+            $cssConstants['table_header_bg'] .
+            ' !important;
                     color: white !important;
                     font-weight: bold;
                 }
                 
                 table tr:nth-child(even) {
-                    background-color: ' . $cssConstants['table_row_alt_bg'] . ';
+                    background-color: ' .
+            $cssConstants['table_row_alt_bg'] .
+            ';
                 }
                 
                 table tfoot tr {
-                    background-color: ' . $cssConstants['table_subtotal_bg'] . ';
+                    background-color: ' .
+            $cssConstants['table_subtotal_bg'] .
+            ';
                 }
                 
                 table tfoot tr:last-child {
-                    background-color: ' . $cssConstants['table_total_bg'] . ' !important;
+                    background-color: ' .
+            $cssConstants['table_total_bg'] .
+            ' !important;
                 }
                 
                 table tfoot tr:last-child td {
@@ -1062,13 +1335,15 @@ class ProposalAssemblyService
             if (is_array($value)) {
                 $stringValue = $this->arrayToString($value);
             } elseif (is_object($value)) {
-                $stringValue = method_exists($value, '__toString') ? (string)$value : '[Object]';
+                $stringValue = method_exists($value, '__toString')
+                    ? (string) $value
+                    : '[Object]';
             } elseif (is_bool($value)) {
                 $stringValue = $value ? 'true' : 'false';
             } elseif ($value === null) {
                 $stringValue = '';
             } else {
-                $stringValue = (string)$value;
+                $stringValue = (string) $value;
             }
             $content = str_replace($placeholder, $stringValue, $content);
         }
@@ -1089,13 +1364,15 @@ class ProposalAssemblyService
             if (is_array($item)) {
                 $stringValues[] = $this->arrayToString($item);
             } elseif (is_object($item)) {
-                $stringValues[] = method_exists($item, '__toString') ? (string)$item : '[Object]';
+                $stringValues[] = method_exists($item, '__toString')
+                    ? (string) $item
+                    : '[Object]';
             } elseif (is_bool($item)) {
                 $stringValues[] = $item ? 'true' : 'false';
             } elseif ($item === null) {
                 $stringValues[] = '';
             } else {
-                $stringValues[] = (string)$item;
+                $stringValues[] = (string) $item;
             }
         }
         return implode(', ', $stringValues);
@@ -1118,8 +1395,11 @@ class ProposalAssemblyService
                     if (!in_array($tocSection['type'], ['toc', 'cover_page'])) {
                         $tocItems[] = [
                             'title' => $tocSection['title'],
-                            'page' => $this->estimateSectionPageNumber($tocSection, $sections),
-                            'type' => $tocSection['type']
+                            'page' => $this->estimateSectionPageNumber(
+                                $tocSection,
+                                $sections
+                            ),
+                            'type' => $tocSection['type'],
                         ];
                     }
                 }
@@ -1141,8 +1421,12 @@ class ProposalAssemblyService
     {
         $subtotal = 0;
 
-        $itemTypes = ['items_onceoff', 'items_monthly_subscription', 'items_yearly_subscription'];
-        
+        $itemTypes = [
+            'items_onceoff',
+            'items_monthly_subscription',
+            'items_yearly_subscription',
+        ];
+
         foreach ($itemTypes as $type) {
             if (isset($proposalData[$type]) && is_array($proposalData[$type])) {
                 foreach ($proposalData[$type] as $item) {
@@ -1164,7 +1448,7 @@ class ProposalAssemblyService
     private function getDefaultBranding()
     {
         $default = BrandingProfile::where('is_default', true)->first();
-        
+
         if (!$default) {
             // Create minimal default branding if none exists
             $default = new BrandingProfile([
@@ -1173,13 +1457,13 @@ class ProposalAssemblyService
                 'colors' => [
                     'primary' => '#2563eb',
                     'secondary' => '#64748b',
-                    'accent' => '#059669'
+                    'accent' => '#059669',
                 ],
                 'fonts' => [
                     'heading' => 'Arial, sans-serif',
-                    'body' => 'Arial, sans-serif'
+                    'body' => 'Arial, sans-serif',
                 ],
-                'company_info' => []
+                'company_info' => [],
             ]);
         }
 
@@ -1345,7 +1629,7 @@ class ProposalAssemblyService
     private function estimatePageCount(array $sections): int
     {
         $pageCount = 0;
-        
+
         foreach ($sections as $section) {
             switch ($section['type']) {
                 case 'cover_page':
@@ -1392,61 +1676,69 @@ class ProposalAssemblyService
      * @param array $proposalData
      * @return array
      */
-    private function extractHeadingsFromAllSections(array $tocSection, array $proposalData): array
-    {
+    private function extractHeadingsFromAllSections(
+        array $tocSection,
+        array $proposalData
+    ): array {
         $headings = [];
         $pageNumber = 1;
-        
+
         // Get all sections from the current assembly context
         $allSections = $this->getAllSectionsFromContext();
-        
+
         foreach ($allSections as $section) {
             // Skip TOC and cover page sections
             if (in_array($section['type'], ['toc', 'cover_page'])) {
                 continue;
             }
-            
+
             $content = $section['content'] ?? '';
             $sectionType = $section['type'];
-            
+
             // For non-content sections, add the section title as H1 first
             if ($sectionType !== 'content') {
                 $headings[] = [
                     'title' => $section['title'] ?? 'Untitled Section',
                     'level' => 1,
-                    'page' => $this->estimateSectionPageNumber($section, $allSections),
-                    'section_type' => $sectionType
+                    'page' => $this->estimateSectionPageNumber(
+                        $section,
+                        $allSections
+                    ),
+                    'section_type' => $sectionType,
                 ];
             }
-            
+
             // Extract H1, H2, H3 headings from content using regex
             $patterns = [
                 1 => '/<h1[^>]*>(.*?)<\/h1>/i',
-                2 => '/<h2[^>]*>(.*?)<\/h2>/i', 
-                3 => '/<h3[^>]*>(.*?)<\/h3>/i'
+                2 => '/<h2[^>]*>(.*?)<\/h2>/i',
+                3 => '/<h3[^>]*>(.*?)<\/h3>/i',
             ];
-            
+
             foreach ($patterns as $level => $pattern) {
                 preg_match_all($pattern, $content, $matches);
-                
+
                 if (!empty($matches[1])) {
                     foreach ($matches[1] as $headingText) {
                         // Clean up the heading text (remove HTML tags)
                         $cleanHeading = strip_tags(trim($headingText));
-                        
+
                         if (!empty($cleanHeading)) {
                             $headings[] = [
                                 'title' => $cleanHeading,
                                 'level' => $level,
-                                'page' => $this->estimateSectionPageNumber($section, $allSections),
-                                'section_type' => $sectionType
+                                'page' => $this->estimateSectionPageNumber(
+                                    $section,
+                                    $allSections
+                                ),
+                                'section_type' => $sectionType,
                             ];
                         }
                     }
                 }
             }
         }
-        
+
         return $headings;
     }
 
@@ -1457,24 +1749,26 @@ class ProposalAssemblyService
      * @param array $allSections
      * @return int
      */
-    private function estimateSectionPageNumber(array $targetSection, array $allSections): int
-    {
+    private function estimateSectionPageNumber(
+        array $targetSection,
+        array $allSections
+    ): int {
         $pageNumber = 1;
         $targetSortOrder = $targetSection['sort_order'] ?? 0;
-        
+
         foreach ($allSections as $section) {
             $sectionSortOrder = $section['sort_order'] ?? 0;
-            
+
             // Stop when we reach the target section
             if ($sectionSortOrder >= $targetSortOrder) {
                 break;
             }
-            
+
             // Skip cover page in page counting
             if ($section['type'] === 'cover_page') {
                 continue;
             }
-            
+
             // Estimate pages based on section type
             switch ($section['type']) {
                 case 'toc':
@@ -1499,7 +1793,7 @@ class ProposalAssemblyService
                     break;
             }
         }
-        
+
         return $pageNumber;
     }
 
@@ -1522,15 +1816,15 @@ class ProposalAssemblyService
     private function extractVariablesUsed(array $sections): array
     {
         $variablesUsed = [];
-        
+
         foreach ($sections as $section) {
             // Check both content and stored variables
             $content = $section['content'] ?? '';
             $storedVariables = $section['variables'] ?? [];
-            
+
             // Find all variables in the format {{variable_name}} from content
             preg_match_all('/\{\{([^}]+)\}\}/', $content, $matches);
-            
+
             if (!empty($matches[1])) {
                 foreach ($matches[1] as $variable) {
                     $variable = trim($variable);
@@ -1539,7 +1833,7 @@ class ProposalAssemblyService
                     }
                 }
             }
-            
+
             // Also include stored variables from database
             if (!empty($storedVariables) && is_array($storedVariables)) {
                 foreach ($storedVariables as $variable) {
@@ -1549,11 +1843,11 @@ class ProposalAssemblyService
                     }
                 }
             }
-            
+
             // Check title for variables too
             $title = $section['title'] ?? '';
             preg_match_all('/\{\{([^}]+)\}\}/', $title, $titleMatches);
-            
+
             if (!empty($titleMatches[1])) {
                 foreach ($titleMatches[1] as $variable) {
                     $variable = trim($variable);
@@ -1563,7 +1857,7 @@ class ProposalAssemblyService
                 }
             }
         }
-        
+
         return $variablesUsed;
     }
 
@@ -1581,19 +1875,19 @@ class ProposalAssemblyService
             '<ul$1 style="margin: 15px 0; padding-left: 25px; list-style-type: disc;">',
             $content
         );
-        
+
         $content = preg_replace(
             '/<ol(\s[^>]*)?>/',
             '<ol$1 style="margin: 15px 0; padding-left: 25px; list-style-type: decimal;">',
             $content
         );
-        
+
         $content = preg_replace(
             '/<li(\s[^>]*)?>/',
             '<li$1 style="margin: 5px 0; line-height: 1.5; display: list-item;">',
             $content
         );
-        
+
         return $content;
     }
 }
