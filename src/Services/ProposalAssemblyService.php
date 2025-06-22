@@ -146,6 +146,10 @@ class ProposalAssemblyService
             return $customSections;
         }
 
+        // Check if we have saved proposal content
+        $savedContent = $proposalData['proposal_content'] ?? null;
+        $sectionType = $proposalData['proposal_section_type'] ?? 'content';
+
         // Default proposal structure matching existing template requirements
         return [
             [
@@ -187,7 +191,7 @@ class ProposalAssemblyService
             [
                 'type' => 'overview',
                 'title' => 'Overview',
-                'content' => $this->getDefaultOverviewContent($proposalData),
+                'content' => $savedContent ?: $this->getDefaultOverviewContent($proposalData),
                 'sort_order' => 5,
                 'is_dynamic' => true,
                 'styling' => [],
@@ -709,6 +713,9 @@ class ProposalAssemblyService
     {
         $content = $this->replaceVariables($section['content'], $proposalData);
         
+        // Add proper list styling to the content
+        $content = $this->enhanceListStyling($content);
+        
         return '
         <div class="payment-terms-section" style="padding: 60px; page-break-inside: avoid;">
             <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
@@ -755,11 +762,14 @@ class ProposalAssemblyService
     {
         $pageBreak = in_array($section['type'], ['terms']) ? 'page-break-before: always;' : '';
         
+        // Enhance list styling for content sections
+        $content = $this->enhanceListStyling($section['content']);
+        
         return '
         <div class="content-section" style="' . $pageBreak . ' padding: 60px; page-break-inside: avoid;">
             <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
             <div class="section-content" style="line-height: 1.6;">
-                ' . $section['content'] . '
+                ' . $content . '
             </div>
         </div>';
     }
@@ -1372,5 +1382,35 @@ class ProposalAssemblyService
         }
         
         return $variablesUsed;
+    }
+
+    /**
+     * Enhance list styling for better PDF rendering
+     *
+     * @param string $content
+     * @return string
+     */
+    private function enhanceListStyling(string $content): string
+    {
+        // Add inline styles to ul and li elements for proper PDF rendering
+        $content = preg_replace(
+            '/<ul(\s[^>]*)?>/',
+            '<ul$1 style="margin: 15px 0; padding-left: 25px; list-style-type: disc;">',
+            $content
+        );
+        
+        $content = preg_replace(
+            '/<ol(\s[^>]*)?>/',
+            '<ol$1 style="margin: 15px 0; padding-left: 25px; list-style-type: decimal;">',
+            $content
+        );
+        
+        $content = preg_replace(
+            '/<li(\s[^>]*)?>/',
+            '<li$1 style="margin: 5px 0; line-height: 1.5; display: list-item;">',
+            $content
+        );
+        
+        return $content;
     }
 }
