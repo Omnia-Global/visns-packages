@@ -402,7 +402,7 @@ class ProposalAssemblyService
         $logoHtml = $this->renderBrandingLogo($branding);
 
         return '
-        <div class="omnia-cover-page" style="page-break-after: always; padding: 0; background-color: #059669 !important; color: white !important; height: 100vh; position: relative; font-family: Arial, sans-serif; margin: 0; box-sizing: border-box; width: 100%; min-height: 100vh; overflow: hidden;">
+        <div class="omnia-cover-page" style="page-break-after: always; padding: 0; background-color: #059669 !important; color: white !important; height: 297mm; position: relative; font-family: Arial, sans-serif; margin: 0; box-sizing: border-box; width: 100%; overflow: hidden;">
             
             <div class="cover-content" style="position: absolute; top: 45%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 90%; max-width: 600px;">
                 <div class="logo-section" style="margin-bottom: 40px;">
