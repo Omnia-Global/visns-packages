@@ -375,9 +375,18 @@ class PDFController extends \App\Http\Controllers\Controller
     public function generateProposalPDF(Request $request)
     {
         try {
-            // Validate request
+            // Handle JSON string from form submission
+            $proposalData = $request->input('proposal_data');
+            if (is_string($proposalData)) {
+                $proposalData = json_decode($proposalData, true);
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    throw new \InvalidArgumentException('Invalid JSON in proposal_data: ' . json_last_error_msg());
+                }
+            }
+            
+            // Validate request - now proposal_data can be either array or string (we'll parse it)
             $validated = $request->validate([
-                'proposal_data' => 'required|array',
+                'proposal_data' => 'required',
                 'template_id' => 'nullable|integer',
                 'branding_id' => 'nullable|integer',
                 'filename' => 'nullable|string',
@@ -386,6 +395,14 @@ class PDFController extends \App\Http\Controllers\Controller
                 'download' => 'nullable|boolean',
                 'sections' => 'nullable|array',
             ]);
+            
+            // Ensure proposal_data is an array after parsing
+            if (!is_array($proposalData)) {
+                throw new \InvalidArgumentException('The proposal data must be an array.');
+            }
+            
+            // Override the validated proposal_data with our parsed version
+            $validated['proposal_data'] = $proposalData;
 
             // Use the proposal assembly service to build the proposal
             $proposalService = app(\Visnsstudio\VisnsPackages\Services\ProposalAssemblyService::class);
@@ -463,13 +480,30 @@ class PDFController extends \App\Http\Controllers\Controller
     public function previewProposalPDF(Request $request)
     {
         try {
+            // Handle JSON string from form submission
+            $proposalData = $request->input('proposal_data');
+            if (is_string($proposalData)) {
+                $proposalData = json_decode($proposalData, true);
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    throw new \InvalidArgumentException('Invalid JSON in proposal_data: ' . json_last_error_msg());
+                }
+            }
+            
             // Validate the request data
             $validated = $request->validate([
-                'proposal_data' => 'required|array',
+                'proposal_data' => 'required',
                 'template_id' => 'nullable|integer',
                 'branding_id' => 'nullable|integer',
                 'sections' => 'nullable|array',
             ]);
+            
+            // Ensure proposal_data is an array after parsing
+            if (!is_array($proposalData)) {
+                throw new \InvalidArgumentException('The proposal data must be an array.');
+            }
+            
+            // Override the validated proposal_data with our parsed version
+            $validated['proposal_data'] = $proposalData;
 
             // Use the proposal assembly service to build the proposal
             $proposalService = app(\Visnsstudio\VisnsPackages\Services\ProposalAssemblyService::class);
@@ -514,13 +548,30 @@ class PDFController extends \App\Http\Controllers\Controller
     public function generateProposalHTML(Request $request)
     {
         try {
+            // Handle JSON string from form submission
+            $proposalData = $request->input('proposal_data');
+            if (is_string($proposalData)) {
+                $proposalData = json_decode($proposalData, true);
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    throw new \InvalidArgumentException('Invalid JSON in proposal_data: ' . json_last_error_msg());
+                }
+            }
+            
             // Validate request
             $validated = $request->validate([
-                'proposal_data' => 'required|array',
+                'proposal_data' => 'required',
                 'template_id' => 'nullable|integer',
                 'branding_id' => 'nullable|integer',
                 'sections' => 'nullable|array',
             ]);
+            
+            // Ensure proposal_data is an array after parsing
+            if (!is_array($proposalData)) {
+                throw new \InvalidArgumentException('The proposal data must be an array.');
+            }
+            
+            // Override the validated proposal_data with our parsed version
+            $validated['proposal_data'] = $proposalData;
 
             // Use the proposal assembly service to build the proposal
             $proposalService = app(\Visnsstudio\VisnsPackages\Services\ProposalAssemblyService::class);
