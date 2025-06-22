@@ -104,13 +104,23 @@ class ProposalAssemblyService
         $sections = [];
 
         if ($template && $template->sections) {
+            // Check if we have saved proposal content
+            $savedContent = $proposalData['proposal_content'] ?? null;
+            
             // Use template sections
             foreach ($template->sections as $section) {
+                $content = $section->content;
+                
+                // If this is a content section and we have saved content, use the saved content
+                if ($section->section_type === 'content' && !empty($savedContent)) {
+                    $content = $savedContent;
+                }
+                
                 $sections[] = [
                     'id' => $section->id,
                     'type' => $section->section_type,
                     'title' => $this->replaceVariables($section->title, $proposalData),
-                    'content' => $this->replaceVariables($section->content, $proposalData),
+                    'content' => $this->replaceVariables($content, $proposalData),
                     'sort_order' => $section->sort_order,
                     'is_dynamic' => $section->is_dynamic,
                     'styling' => $section->styling ?? [],
@@ -193,6 +203,15 @@ class ProposalAssemblyService
                 'title' => 'Overview',
                 'content' => $savedContent ?: $this->getDefaultOverviewContent($proposalData),
                 'sort_order' => 5,
+                'is_dynamic' => true,
+                'styling' => [],
+                'variables' => [],
+            ],
+            [
+                'type' => 'content',
+                'title' => 'Proposal Content',
+                'content' => $savedContent ?: '<p>No custom content provided.</p>',
+                'sort_order' => 5.5,
                 'is_dynamic' => true,
                 'styling' => [],
                 'variables' => [],
