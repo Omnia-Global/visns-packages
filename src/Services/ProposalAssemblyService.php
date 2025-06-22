@@ -469,16 +469,20 @@ class ProposalAssemblyService
      */
     private function renderPricingSection(array $section, $branding, array $proposalData): string
     {
+        $primaryColor = $branding->colors['primary'] ?? '#2563eb';
+        $secondaryColor = $branding->colors['secondary'] ?? '#64748b';
+        $accentColor = $branding->colors['accent'] ?? '#059669';
+        
         $html = '
-        <div class="pricing-section" style="padding: 70px; page-break-inside: avoid;">
-            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
-            <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+        <div class="pricing-section" style="padding: 40px; page-break-inside: avoid;">
+            <h1 style="margin-bottom: 30px; color: ' . $primaryColor . ';">' . $section['title'] . '</h1>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden;">
                 <thead>
-                    <tr style="background-color: #f5f5f5;">
-                        <th style="border: 1px solid #ddd; padding: 15px; text-align: left; vertical-align: top;">Description</th>
-                        <th style="border: 1px solid #ddd; padding: 15px; text-align: right; vertical-align: top; width: 80px;">Price</th>
-                        <th style="border: 1px solid #ddd; padding: 15px; text-align: center; vertical-align: top; width: 50px;">Qty</th>
-                        <th style="border: 1px solid #ddd; padding: 15px; text-align: right; vertical-align: top; width: 80px;">Amount</th>
+                    <tr style="background: linear-gradient(135deg, ' . $primaryColor . ' 0%, ' . $secondaryColor . ' 100%);">
+                        <th style="border: none; padding: 18px; text-align: left; vertical-align: middle; color: white; font-weight: bold; font-size: 14px;">Description</th>
+                        <th style="border: none; padding: 18px; text-align: right; vertical-align: middle; width: 100px; color: white; font-weight: bold; font-size: 14px;">Price</th>
+                        <th style="border: none; padding: 18px; text-align: center; vertical-align: middle; width: 60px; color: white; font-weight: bold; font-size: 14px;">Qty</th>
+                        <th style="border: none; padding: 18px; text-align: right; vertical-align: middle; width: 100px; color: white; font-weight: bold; font-size: 14px;">Amount</th>
                     </tr>
                 </thead>
                 <tbody>';
@@ -498,24 +502,27 @@ class ProposalAssemblyService
         // Add development placeholder if no items
         if (empty($allItems)) {
             $html .= '
-                    <tr>
-                        <td style="border: 1px solid #ddd; padding: 15px;">Development</td>
-                        <td style="border: 1px solid #ddd; padding: 15px; text-align: right;"></td>
-                        <td style="border: 1px solid #ddd; padding: 15px; text-align: center;"></td>
-                        <td style="border: 1px solid #ddd; padding: 15px; text-align: right;"></td>
+                    <tr style="background-color: #ffffff;">
+                        <td style="border: none; border-bottom: 1px solid #e5e7eb; padding: 16px; font-size: 14px;">Development</td>
+                        <td style="border: none; border-bottom: 1px solid #e5e7eb; padding: 16px; text-align: right; font-size: 14px;"></td>
+                        <td style="border: none; border-bottom: 1px solid #e5e7eb; padding: 16px; text-align: center; font-size: 14px;"></td>
+                        <td style="border: none; border-bottom: 1px solid #e5e7eb; padding: 16px; text-align: right; font-size: 14px;"></td>
                     </tr>';
         } else {
+            $rowIndex = 0;
             foreach ($allItems as $item) {
                 $qty = $item['qty'] ?? 1;
                 $rate = $item['rate'] ?? 0;
                 $total = $qty * $rate;
+                $rowBg = ($rowIndex % 2 === 0) ? '#ffffff' : '#f8fafc';
                 $html .= '
-                    <tr>
-                        <td style="border: 1px solid #ddd; padding: 15px;">' . ($item['description'] ?? '') . '</td>
-                        <td style="border: 1px solid #ddd; padding: 15px; text-align: right;">$' . number_format($rate, 2) . '</td>
-                        <td style="border: 1px solid #ddd; padding: 15px; text-align: center;">' . $qty . '</td>
-                        <td style="border: 1px solid #ddd; padding: 15px; text-align: right;">$' . number_format($total, 2) . '</td>
+                    <tr style="background-color: ' . $rowBg . ';">
+                        <td style="border: none; border-bottom: 1px solid #e5e7eb; padding: 16px; font-size: 14px; color: #374151;">' . ($item['description'] ?? '') . '</td>
+                        <td style="border: none; border-bottom: 1px solid #e5e7eb; padding: 16px; text-align: right; font-size: 14px; color: #374151; font-weight: 500;">$' . number_format($rate, 2) . '</td>
+                        <td style="border: none; border-bottom: 1px solid #e5e7eb; padding: 16px; text-align: center; font-size: 14px; color: #374151; font-weight: 500;">' . $qty . '</td>
+                        <td style="border: none; border-bottom: 1px solid #e5e7eb; padding: 16px; text-align: right; font-size: 14px; color: #374151; font-weight: 600;">$' . number_format($total, 2) . '</td>
                     </tr>';
+                $rowIndex++;
             }
         }
 
@@ -527,17 +534,17 @@ class ProposalAssemblyService
         $html .= '
                 </tbody>
                 <tfoot>
-                    <tr>
-                        <td colspan="3" style="border: 1px solid #ddd; padding: 10px; text-align: right; font-weight: bold; background-color: #f9f9f9;">Sub Total:</td>
-                        <td style="border: 1px solid #ddd; padding: 10px; text-align: right; font-weight: bold; background-color: #f9f9f9;">$' . number_format($subtotal, 2) . '</td>
+                    <tr style="background-color: #f8fafc;">
+                        <td colspan="3" style="border: none; border-top: 2px solid #e5e7eb; padding: 14px; text-align: right; font-weight: 600; font-size: 14px; color: #374151;">Sub Total:</td>
+                        <td style="border: none; border-top: 2px solid #e5e7eb; padding: 14px; text-align: right; font-weight: 600; font-size: 14px; color: #374151;">$' . number_format($subtotal, 2) . '</td>
                     </tr>
-                    <tr>
-                        <td colspan="3" style="border: 1px solid #ddd; padding: 10px; text-align: right; font-weight: bold; background-color: #f9f9f9;">Tax (10%):</td>
-                        <td style="border: 1px solid #ddd; padding: 10px; text-align: right; font-weight: bold; background-color: #f9f9f9;">$' . number_format($taxAmount, 2) . '</td>
+                    <tr style="background-color: #f8fafc;">
+                        <td colspan="3" style="border: none; padding: 14px; text-align: right; font-weight: 600; font-size: 14px; color: #374151;">Tax (10%):</td>
+                        <td style="border: none; padding: 14px; text-align: right; font-weight: 600; font-size: 14px; color: #374151;">$' . number_format($taxAmount, 2) . '</td>
                     </tr>
-                    <tr>
-                        <td colspan="3" style="border: 2px solid #333; padding: 12px; text-align: right; font-weight: bold; background-color: #e9e9e9;">Total:</td>
-                        <td style="border: 2px solid #333; padding: 12px; text-align: right; font-weight: bold; background-color: #e9e9e9; font-size: 18px;">$' . number_format($total, 2) . '</td>
+                    <tr style="background: linear-gradient(135deg, ' . $accentColor . ' 0%, ' . $primaryColor . ' 100%);">
+                        <td colspan="3" style="border: none; padding: 16px; text-align: right; font-weight: bold; font-size: 16px; color: white;">Total:</td>
+                        <td style="border: none; padding: 16px; text-align: right; font-weight: bold; font-size: 18px; color: white;">$' . number_format($total, 2) . '</td>
                     </tr>
                 </tfoot>
             </table>';
