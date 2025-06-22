@@ -233,6 +233,9 @@ class ProposalAssemblyService
      */
     private function assembleHTML(array $sections, $branding, array $proposalData): string
     {
+        // Store sections for TOC generation
+        $this->allSections = $sections;
+        
         $html = $this->getHTMLHeader($branding);
 
         foreach ($sections as $section) {
@@ -243,6 +246,12 @@ class ProposalAssemblyService
 
         return $html;
     }
+
+    /**
+     * Store all sections for TOC generation
+     * @var array
+     */
+    private $allSections = [];
 
     /**
      * Render individual section
@@ -357,7 +366,13 @@ class ProposalAssemblyService
      */
     private function renderTableOfContents(array $section, array $proposalData): string
     {
-        $tocItems = $section['toc_items'] ?? [];
+        // Auto-generate TOC items from all sections' headings
+        $tocItems = $this->extractHeadingsFromAllSections($section, $proposalData);
+        
+        // Use manually defined TOC items if no headings found
+        if (empty($tocItems)) {
+            $tocItems = $section['toc_items'] ?? [];
+        }
         
         $tocHtml = '
         <div class="table-of-contents" style="page-break-after: always; padding: 80px;">
@@ -365,9 +380,23 @@ class ProposalAssemblyService
             <table class="toc-table" style="width: 100%; border-collapse: collapse; margin-top: 40px;">';
 
         foreach ($tocItems as $item) {
+            // Add indentation based on heading level
+            $indent = '';
+            switch ($item['level'] ?? 1) {
+                case 2:
+                    $indent = '&nbsp;&nbsp;&nbsp;&nbsp;';
+                    break;
+                case 3:
+                    $indent = '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;';
+                    break;
+                default:
+                    $indent = '';
+                    break;
+            }
+            
             $tocHtml .= '
                 <tr class="toc-item" style="border-bottom: 1px dotted #ccc;">
-                    <td class="toc-title" style="padding: 10px 0; border: none; text-align: left;">' . $item['title'] . '</td>
+                    <td class="toc-title" style="padding: 10px 0; border: none; text-align: left;">' . $indent . $item['title'] . '</td>
                     <td class="toc-page" style="padding: 10px 0; border: none; text-align: right; width: 50px;">' . ($item['page'] ?? '') . '</td>
                 </tr>';
         }
@@ -1152,6 +1181,88 @@ class ProposalAssemblyService
             ['title' => 'Agreement Signature', 'page' => ''],
             ['title' => 'Terms and Conditions', 'page' => ''],
         ];
+    }
+
+    /**
+     * Extract headings from all sections to auto-generate TOC
+     *
+     * @param array $tocSection
+     * @param array $proposalData
+     * @return array
+     */
+    private function extractHeadingsFromAllSections(array $tocSection, array $proposalData): array
+    {
+        $headings = [];
+        $pageNumber = 1;
+        
+        // Get all sections from the current assembly context
+        // We need to access all sections, not just the TOC section
+        $allSections = $this->getAllSectionsFromContext();
+        
+        foreach ($allSections as $section) {
+            // Skip TOC and cover page sections
+            if (in_array($section['type'], ['toc', 'cover_page'])) {
+                continue;
+            }
+            
+            $content = $section['content'] ?? '';
+            
+            // Extract H1, H2, H3 headings from content using regex
+            $patterns = [
+                1 => '/<h1[^>]*>(.*?)<\/h1>/i',
+                2 => '/<h2[^>]*>(.*?)<\/h2>/i', 
+                3 => '/<h3[^>]*>(.*?)<\/h3>/i'
+            ];
+            
+            foreach ($patterns as $level => $pattern) {
+                preg_match_all($pattern, $content, $matches);
+                
+                if (!empty($matches[1])) {
+                    foreach ($matches[1] as $headingText) {
+                        // Clean up the heading text (remove HTML tags)
+                        $cleanHeading = strip_tags(trim($headingText));
+                        
+                        if (!empty($cleanHeading)) {
+                            $headings[] = [
+                                'title' => $cleanHeading,
+                                'level' => $level,
+                                'page' => $pageNumber,
+                                'section_type' => $section['type']
+                            ];
+                        }
+                    }
+                }
+            }
+            
+            // Increment page number for each section (rough estimate)
+            $pageNumber++;
+        }
+        
+        // If no headings found in content, use section titles as H1
+        if (empty($headings)) {
+            foreach ($allSections as $section) {
+                if (!in_array($section['type'], ['toc', 'cover_page'])) {
+                    $headings[] = [
+                        'title' => $section['title'] ?? 'Untitled Section',
+                        'level' => 1,
+                        'page' => $pageNumber++,
+                        'section_type' => $section['type']
+                    ];
+                }
+            }
+        }
+        
+        return $headings;
+    }
+
+    /**
+     * Get all sections from current context (helper method)
+     *
+     * @return array
+     */
+    private function getAllSectionsFromContext(): array
+    {
+        return $this->allSections;
     }
 
     /**
