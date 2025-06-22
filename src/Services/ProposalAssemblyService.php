@@ -834,7 +834,7 @@ class ProposalAssemblyService
             <style>
                 body {
                     font-family: ' . ($fonts['body'] ?? 'Arial, sans-serif') . ';
-                    font-size: 14px;
+                    font-size: 16px;
                     line-height: 1.6;
                     color: #333;
                     margin: 0;
@@ -850,42 +850,42 @@ class ProposalAssemblyService
                 }
                 
                 h1 {
-                    font-size: 28px;
+                    font-size: 32px;
                     color: ' . ($colors['primary'] ?? '#2563eb') . ';
                     font-weight: bold;
                     margin-bottom: 25px;
                 }
                 
                 h2 {
-                    font-size: 22px;
+                    font-size: 26px;
                     color: ' . ($colors['primary'] ?? '#2563eb') . ';
                     font-weight: bold;
                     margin-bottom: 20px;
                 }
                 
                 h3 {
-                    font-size: 18px;
+                    font-size: 22px;
                     color: ' . ($colors['primary'] ?? '#2563eb') . ';
                     font-weight: bold;
                     margin-bottom: 15px;
                 }
                 
                 h4 {
-                    font-size: 16px;
+                    font-size: 19px;
                     color: ' . ($colors['secondary'] ?? '#64748b') . ';
                     font-weight: bold;
                     margin-bottom: 12px;
                 }
                 
                 h5 {
-                    font-size: 14px;
+                    font-size: 17px;
                     color: ' . ($colors['secondary'] ?? '#64748b') . ';
                     font-weight: bold;
                     margin-bottom: 10px;
                 }
                 
                 h6 {
-                    font-size: 13px;
+                    font-size: 16px;
                     color: ' . ($colors['secondary'] ?? '#64748b') . ';
                     font-weight: bold;
                     margin-bottom: 8px;
@@ -929,10 +929,10 @@ class ProposalAssemblyService
                 table th,
                 table td {
                     border: 1px solid #ddd;
-                    padding: 12px;
+                    padding: 14px;
                     text-align: left;
                     vertical-align: top;
-                    font-size: 14px;
+                    font-size: 16px;
                     line-height: 1.5;
                 }
                 
@@ -954,16 +954,16 @@ class ProposalAssemblyService
                 .no-break { page-break-inside: avoid; }
                 
                 p { 
-                    margin: 12px 0; 
-                    font-size: 14px; 
+                    margin: 14px 0; 
+                    font-size: 16px; 
                     line-height: 1.6;
                     color: #333;
                 }
                 ul, ol { 
-                    margin: 15px 0; 
+                    margin: 16px 0; 
                     padding-left: 0; 
                     margin-left: 25px;
-                    font-size: 14px;
+                    font-size: 16px;
                     line-height: 1.6;
                     list-style-type: disc;
                     list-style-position: outside;
@@ -972,7 +972,7 @@ class ProposalAssemblyService
                     list-style-type: decimal;
                 }
                 li { 
-                    margin-bottom: 8px; 
+                    margin-bottom: 10px; 
                     padding-left: 8px;
                     margin-left: 0;
                     color: #333;
