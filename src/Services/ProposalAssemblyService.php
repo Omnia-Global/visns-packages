@@ -286,13 +286,6 @@ class ProposalAssemblyService
      */
     private function renderSection(array $section, $branding, array $proposalData): string
     {
-        // Debug logging to track which renderer is being used
-        Log::info('Rendering section', [
-            'type' => $section['type'],
-            'title' => $section['title'] ?? 'No title',
-            'has_content' => !empty($section['content'])
-        ]);
-        
         switch ($section['type']) {
             case 'cover_page':
                 return $this->renderCoverPage($section, $branding, $proposalData);
@@ -772,7 +765,7 @@ class ProposalAssemblyService
         
         return '
         <div class="agreement-signature-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
-            <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
+            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
             <div class="agreement-content" style="line-height: 1.6;">
                 ' . $content . '
             </div>
@@ -814,7 +807,7 @@ class ProposalAssemblyService
         
         return '
         <div class="terms-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
-            <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
+            <h1 style="margin-bottom: 30px; color: ' . ($branding->colors['primary'] ?? '#2563eb') . ';">' . $section['title'] . '</h1>
             <div class="section-content" style="line-height: 1.6;">
                 ' . $content . '
             </div>
@@ -841,6 +834,7 @@ class ProposalAssemblyService
             <style>
                 body {
                     font-family: ' . ($fonts['body'] ?? 'Arial, sans-serif') . ';
+                    font-size: 14px;
                     line-height: 1.6;
                     color: #333;
                     margin: 0;
@@ -849,27 +843,52 @@ class ProposalAssemblyService
                 
                 h1, h2, h3, h4, h5, h6 {
                     font-family: ' . ($fonts['heading'] ?? 'Arial, sans-serif') . ';
-                    line-height: 1.2;
-                    margin-bottom: 15px;
+                    line-height: 1.3;
+                    margin-bottom: 20px;
                     margin-top: 0;
+                    font-weight: bold;
                 }
                 
                 h1 {
-                    font-size: 18px;
+                    font-size: 28px;
                     color: ' . ($colors['primary'] ?? '#2563eb') . ';
                     font-weight: bold;
+                    margin-bottom: 25px;
                 }
                 
                 h2 {
-                    font-size: 15px;
-                    color: ' . ($colors['secondary'] ?? '#64748b') . ';
+                    font-size: 22px;
+                    color: ' . ($colors['primary'] ?? '#2563eb') . ';
                     font-weight: bold;
+                    margin-bottom: 20px;
                 }
                 
                 h3 {
-                    font-size: 13px;
-                    color: ' . ($colors['accent'] ?? '#059669') . ';
+                    font-size: 18px;
+                    color: ' . ($colors['primary'] ?? '#2563eb') . ';
                     font-weight: bold;
+                    margin-bottom: 15px;
+                }
+                
+                h4 {
+                    font-size: 16px;
+                    color: ' . ($colors['secondary'] ?? '#64748b') . ';
+                    font-weight: bold;
+                    margin-bottom: 12px;
+                }
+                
+                h5 {
+                    font-size: 14px;
+                    color: ' . ($colors['secondary'] ?? '#64748b') . ';
+                    font-weight: bold;
+                    margin-bottom: 10px;
+                }
+                
+                h6 {
+                    font-size: 13px;
+                    color: ' . ($colors['secondary'] ?? '#64748b') . ';
+                    font-weight: bold;
+                    margin-bottom: 8px;
                 }
                 
                 .primary-bg { background-color: ' . ($colors['primary'] ?? '#2563eb') . '; }
@@ -913,6 +932,8 @@ class ProposalAssemblyService
                     padding: 12px;
                     text-align: left;
                     vertical-align: top;
+                    font-size: 14px;
+                    line-height: 1.5;
                 }
                 
                 table th {
@@ -932,11 +953,18 @@ class ProposalAssemblyService
                 .page-break { page-break-before: always; }
                 .no-break { page-break-inside: avoid; }
                 
-                p { margin: 10px 0; font-size: 11px; }
+                p { 
+                    margin: 12px 0; 
+                    font-size: 14px; 
+                    line-height: 1.6;
+                    color: #333;
+                }
                 ul, ol { 
                     margin: 15px 0; 
                     padding-left: 0; 
-                    margin-left: 20px;
+                    margin-left: 25px;
+                    font-size: 14px;
+                    line-height: 1.6;
                     list-style-type: disc;
                     list-style-position: outside;
                 }
@@ -945,8 +973,9 @@ class ProposalAssemblyService
                 }
                 li { 
                     margin-bottom: 8px; 
-                    padding-left: 20px;
+                    padding-left: 8px;
                     margin-left: 0;
+                    color: #333;
                     line-height: 1.6;
                     display: list-item;
                     text-indent: 0;
