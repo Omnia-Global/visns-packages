@@ -1043,6 +1043,8 @@ php artisan visns:update-models-sorting --force
 php artisan visns:update-models-sorting --path=app/Models --namespace=App\\Models
 ```
 
+**Note:** This command is automatically available after installing the package. If you're not seeing it in your `php artisan` command list, ensure you have properly installed the package and cleared your artisan cache with `php artisan cache:clear`.
+
 **What the command does:**
 
 1. **Model Discovery**: Automatically finds all Eloquent models in your project
