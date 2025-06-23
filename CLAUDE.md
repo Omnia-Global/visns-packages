@@ -138,7 +138,150 @@ php artisan vendor:publish --tag=visns-packages-seeders
 
 # Publish configuration
 php artisan vendor:publish --tag=visns-packages-config
+
+# Update models to use HasRelationshipSorting trait
+php artisan visns:update-models-sorting
+
+# Preview changes without applying them
+php artisan visns:update-models-sorting --dry-run
+
+# Create backups before modifying files
+php artisan visns:update-models-sorting --backup
+
+# Custom model path and namespace
+php artisan visns:update-models-sorting --path=app/Models --namespace=App\\Models
+
+# Skip confirmation prompts
+php artisan visns:update-models-sorting --force
 ```
+
+### Model Update Command
+
+The package includes an automated command to update all models in a project to use the `HasRelationshipSorting` trait. This is essential for enabling relationship and JSON field sorting capabilities.
+
+#### Command Overview
+
+```bash
+php artisan visns:update-models-sorting
+```
+
+**What it does:**
+
+1. **Discovers Models**: Scans the specified path (default: `app/Models`) for all Eloquent model classes
+2. **Analyzes Requirements**: Determines which models need the `HasRelationshipSorting` trait
+3. **Safe Updates**: Adds trait imports, trait usage, and removes conflicting `scopeCustomOrder` methods
+4. **Backup Support**: Creates backup files before making changes (optional)
+5. **Dry Run Mode**: Preview changes without applying them
+
+#### Command Options
+
+```bash
+# Basic usage
+php artisan visns:update-models-sorting
+
+# Preview changes without applying (recommended first run)
+php artisan visns:update-models-sorting --dry-run
+
+# Create backup files before modifying
+php artisan visns:update-models-sorting --backup
+
+# Skip confirmation prompts
+php artisan visns:update-models-sorting --force
+
+# Custom model path and namespace
+php artisan visns:update-models-sorting --path=app/Models --namespace=App\\Models
+
+# Combination of options
+php artisan visns:update-models-sorting --dry-run --backup --path=custom/Models --namespace=Custom\\Models
+```
+
+#### What Gets Updated
+
+For each discovered model, the command:
+
+1. **Adds Trait Import**: 
+   ```php
+   use Visnsstudio\VisnsPackages\Traits\HasRelationshipSorting;
+   ```
+
+2. **Adds Trait Usage**:
+   ```php
+   class User extends Model
+   {
+       use HasRelationshipSorting;  // Added to existing traits
+   }
+   ```
+
+3. **Removes Old Methods**: Removes basic `scopeCustomOrder` implementations that conflict:
+   ```php
+   // This gets removed:
+   public function scopeCustomOrder($query, $orderBy, $order)
+   {
+       if (isset($orderBy) && isset($order)) {
+           $query->orderBy($orderBy, $order);
+       }
+       return $query;
+   }
+   ```
+
+#### Example Session
+
+```bash
+$ php artisan visns:update-models-sorting --dry-run
+
+🔍 Discovering models in your project...
+Found 37 models:
+  - App\Models\User (app/Models/User.php)
+  - App\Models\Contact (app/Models/Contact.php)
+  - App\Models\Client (app/Models/Client.php)
+  - App\Models\Lead (app/Models/Lead.php)
+  ...
+
+📝 Models that need updating:
+  - App\Models\User (needs trait import, needs trait usage)
+  - App\Models\Contact (has old scopeCustomOrder method)
+  - App\Models\Client (needs trait import, needs trait usage, has old scopeCustomOrder method)
+  - App\Models\Lead (has old scopeCustomOrder method)
+
+🔍 Dry run mode - showing what would be changed:
+
+📄 App\Models\User:
+  + Add import: use Visnsstudio\VisnsPackages\Traits\HasRelationshipSorting;
+  + Add trait usage to class
+
+📄 App\Models\Contact:
+  - Remove old scopeCustomOrder method
+
+📄 App\Models\Client:
+  + Add import: use Visnsstudio\VisnsPackages\Traits\HasRelationshipSorting;
+  + Add trait usage to class
+  - Remove old scopeCustomOrder method
+```
+
+#### Integration with Package Installation
+
+This command should be run after installing the package in any new project:
+
+```bash
+# Standard installation process
+composer require visnsstudio/visns-packages
+php artisan vendor:publish --tag=visns-packages-migrations
+php artisan migrate
+
+# Add relationship sorting to all models
+php artisan visns:update-models-sorting --dry-run  # Preview first
+php artisan visns:update-models-sorting --backup   # Apply with backups
+```
+
+#### Safety Features
+
+- **Backup Creation**: `--backup` flag creates timestamped backup files
+- **Dry Run Mode**: `--dry-run` shows what would change without applying
+- **Smart Detection**: Only updates models that actually need changes
+- **Error Handling**: Graceful handling of models that can't be updated
+- **Confirmation Prompts**: Asks for confirmation before making changes (unless `--force`)
+
+This command makes it easy to integrate relationship sorting capabilities into existing projects without manual file modifications.
 
 ## Configuration
 

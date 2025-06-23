@@ -9,6 +9,7 @@ use Visnsstudio\VisnsPackages\Commands\MeilisearchConfigureCommand;
 use Visnsstudio\VisnsPackages\Commands\MeilisearchDebugCommand;
 use Visnsstudio\VisnsPackages\Commands\MeilisearchTestCommand;
 use Visnsstudio\VisnsPackages\Commands\MeilisearchSyncCommand;
+use Visnsstudio\VisnsPackages\Console\Commands\UpdateModelsWithRelationshipSorting;
 use Visnsstudio\VisnsPackages\Controllers\AuthController;
 use Visnsstudio\VisnsPackages\Controllers\UserController;
 use Visnsstudio\VisnsPackages\Controllers\FileController;
@@ -32,7 +33,10 @@ class VisnsPackagesServiceProvider extends ServiceProvider
     public function register()
     {
         // Register basic commands
-        $commands = [PublishMigrationsCommand::class];
+        $commands = [
+            PublishMigrationsCommand::class,
+            UpdateModelsWithRelationshipSorting::class,
+        ];
 
         // Only register MeiliSearch commands if dependencies are available
         if ($this->meilisearchIsAvailable()) {

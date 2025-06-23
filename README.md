@@ -161,6 +161,9 @@ php artisan migrate
     -   Advanced filtering with multiple operators
     -   OR conditions with `orKey` parameter
     -   Relationship filtering with `whereHas`
+    -   **Intelligent Relationship Sorting** - Sort by related model fields using dot notation
+    -   **JSON Field Sorting** - Sort by data within JSON columns
+    -   Subquery-based sorting that preserves eager loading performance
 
 ## Database Migrations
 
@@ -912,6 +915,168 @@ The same endpoints are also available via the API with authentication required:
 ## Dynamic Controller
 
 The package includes a `DynamicController` that provides a flexible way to interact with any model in your application. It automatically determines the model based on the URL path and provides standard CRUD operations and filtering capabilities.
+
+## Intelligent Relationship Sorting
+
+The package includes a powerful `HasRelationshipSorting` trait that enables sorting by related model fields and JSON data without breaking eager loading performance. This trait should be added to all models that need advanced sorting capabilities.
+
+### Using the HasRelationshipSorting Trait
+
+Add the trait to your models:
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Visnsstudio\VisnsPackages\Traits\HasRelationshipSorting;
+
+class User extends Model
+{
+    use HasRelationshipSorting;
+    
+    // Your model code here...
+}
+```
+
+### Relationship Sorting
+
+Sort by related model fields using dot notation:
+
+```bash
+# Sort users by their profile name
+GET /ajax/users/table?orderBy=profile.name&order=asc
+
+# Sort orders by customer company name
+GET /ajax/orders/table?orderBy=customer.company&order=desc
+
+# Sort posts by author's last name
+GET /ajax/posts/table?orderBy=author.last_name&order=asc
+```
+
+### JSON Field Sorting
+
+Sort by data within JSON columns:
+
+```bash
+# Sort by a specific key in a JSON field
+GET /ajax/users/table?orderBy=settings.theme&order=asc
+
+# Sort by nested JSON data
+GET /ajax/products/table?orderBy=metadata.specifications.weight&order=desc
+```
+
+### Supported Relationship Types
+
+The trait supports all Laravel relationship types:
+
+- **BelongsTo**: `user.profile.name`
+- **HasOne**: `order.shipping_address.city`
+- **HasMany**: `category.products.count` (aggregated)
+- **BelongsToMany**: `user.roles.name` (through pivot)
+
+### Implementation Details
+
+The trait uses subqueries instead of joins to maintain performance:
+
+- Preserves eager loading functionality
+- Prevents duplicate rows from joins
+- Optimized for large datasets
+- Supports complex relationship chains
+
+### Model Requirements
+
+Models using this trait should implement:
+
+1. **Relationship methods**: Standard Laravel relationships
+2. **JSON field detection**: Automatic detection of JSON columns
+3. **Fallback handling**: Graceful fallback to standard sorting
+
+Example model with relationship:
+
+```php
+class User extends Model
+{
+    use HasRelationshipSorting;
+    
+    protected $casts = [
+        'settings' => 'array', // JSON field
+        'metadata' => 'array', // JSON field
+    ];
+    
+    public function profile()
+    {
+        return $this->hasOne(Profile::class);
+    }
+    
+    public function orders()
+    {
+        return $this->hasMany(Order::class);
+    }
+    
+    public function roles()
+    {
+        return $this->belongsToMany(Role::class);
+    }
+}
+```
+
+### Automatic Model Update Command
+
+The package includes an Artisan command that automatically discovers and updates all models in your project to use the `HasRelationshipSorting` trait:
+
+```bash
+# Update all models automatically
+php artisan visns:update-models-sorting
+
+# Preview changes without applying them (recommended first run)
+php artisan visns:update-models-sorting --dry-run
+
+# Create backup files before modifying
+php artisan visns:update-models-sorting --backup
+
+# Skip confirmation prompts
+php artisan visns:update-models-sorting --force
+
+# Custom model path and namespace
+php artisan visns:update-models-sorting --path=app/Models --namespace=App\\Models
+```
+
+**What the command does:**
+
+1. **Model Discovery**: Automatically finds all Eloquent models in your project
+2. **Trait Integration**: Adds the `HasRelationshipSorting` trait import and usage
+3. **Legacy Cleanup**: Removes old basic `scopeCustomOrder` methods that conflict with the trait
+4. **Safe Updates**: Creates backups and provides dry-run mode for safety
+5. **Smart Detection**: Only updates models that actually need changes
+
+**Example output:**
+
+```
+🔍 Discovering models in your project...
+Found 25 models:
+  - App\Models\User (app/Models/User.php)
+  - App\Models\Order (app/Models/Order.php)
+  - App\Models\Product (app/Models/Product.php)
+  ...
+
+📝 Models that need updating:
+  - App\Models\User (needs trait import, needs trait usage)
+  - App\Models\Order (has old scopeCustomOrder method)
+  - App\Models\Product (needs trait import, needs trait usage, has old scopeCustomOrder method)
+
+🚀 Updating models...
+  ✅ Updated App\Models\User
+  ✅ Updated App\Models\Order
+  ✅ Updated App\Models\Product
+
+📊 Summary:
+  ✅ Successfully updated: 15
+  🎉 Models have been updated to use HasRelationshipSorting trait!
+```
+
+This command is perfect for integrating the relationship sorting functionality into existing projects without manual file modifications.
 
 ### Search Integration
 

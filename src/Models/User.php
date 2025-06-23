@@ -16,11 +16,12 @@ use Spatie\Permission\Traits\HasRoles;
 
 use OwenIt\Auditing\Contracts\Auditable;
 use Laravel\Sanctum\HasApiTokens;
+use Visnsstudio\VisnsPackages\Traits\HasRelationshipSorting;
 
 class User extends Authenticatable implements Auditable
 {
     use \OwenIt\Auditing\Auditable;
-    use HasFactory, Notifiable, HasRoles, HasApiTokens;
+    use HasFactory, Notifiable, HasRoles, HasApiTokens, HasRelationshipSorting;
 
     /**
      * The attributes that are mass assignable.
@@ -145,22 +146,6 @@ class User extends Authenticatable implements Auditable
         );
     }
 
-    /**
-     * Scope a query to order by a given column.
-     *
-     * @param \Illuminate\Database\Eloquent\Builder $query
-     * @param string|null $orderBy
-     * @param string|null $order
-     * @return \Illuminate\Database\Eloquent\Builder
-     */
-    public function scopeCustomOrder($query, $orderBy, $order)
-    {
-        if (isset($orderBy) && isset($order)) {
-            $query->orderBy($orderBy, $order);
-        }
-
-        return $query;
-    }
 
     /**
      * Scope a query to search by name or email.
@@ -303,5 +288,45 @@ class User extends Authenticatable implements Auditable
 
         // If not a dynamic relationship, call the parent method
         return parent::__call($method, $parameters);
+    }
+
+    /**
+     * Get the sortable relationship fields for this model.
+     * 
+     * @return array
+     */
+    public function getSortableRelationshipFields()
+    {
+        return [
+            // Explicit relationships
+            'twoFactorRememberTokens.created_at',
+            'twoFactorRememberTokens.name',
+            
+            // Inherited from traits (Spatie Permission)
+            'roles.name',
+            'roles.created_at',
+            'permissions.name',
+            
+            // Inherited from traits (Sanctum)
+            'tokens.name',
+            'tokens.created_at',
+            
+            // Inherited from traits (Auditing)
+            'audits.created_at',
+            'audits.event',
+            
+            // Common dynamic relationships (configure in visns-packages config)
+            'profile.name',
+            'profile.title',
+            'profile.created_at',
+            'posts.title',
+            'posts.created_at',
+            'company.name',
+            'department.name',
+            
+            // Example nested relationships
+            'profile.company.name',
+            'roles.permissions.name',
+        ];
     }
 }

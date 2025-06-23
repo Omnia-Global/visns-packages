@@ -8,13 +8,14 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Visnsstudio\VisnsPackages\Services\FilePathResolver;
+use Visnsstudio\VisnsPackages\Traits\HasRelationshipSorting;
 
 use OwenIt\Auditing\Contracts\Auditable;
 
 class File extends Model implements Auditable
 {
     use \OwenIt\Auditing\Auditable;
-    use HasFactory;
+    use HasFactory, HasRelationshipSorting;
 
     protected $fillable = [
         'fileable_id',
@@ -112,14 +113,6 @@ class File extends Model implements Auditable
         return $this->morphTo();
     }
 
-    public function scopeCustomOrder($query, $orderBy, $order)
-    {
-        if (isset($orderBy) && isset($order)) {
-            $query->orderBy($orderBy, $order);
-        }
-
-        return $query;
-    }
 
     protected function fileExists(): Attribute
     {
