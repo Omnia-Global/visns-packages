@@ -1043,7 +1043,58 @@ php artisan visns:update-models-sorting --force
 php artisan visns:update-models-sorting --path=app/Models --namespace=App\\Models
 ```
 
-**Note:** This command is automatically available after installing the package. If you're not seeing it in your `php artisan` command list, ensure you have properly installed the package and cleared your artisan cache with `php artisan cache:clear`.
+### Command Usage Guide
+
+**Basic Usage:**
+```bash
+# Step 1: Always preview changes first (recommended)
+php artisan visns:update-models-sorting --dry-run
+
+# Step 2: Apply changes with backup (safest option)
+php artisan visns:update-models-sorting --backup
+
+# Alternative: Apply changes without backup (if you have version control)
+php artisan visns:update-models-sorting
+```
+
+**Advanced Options:**
+```bash
+# Skip confirmation prompts (useful for automation)
+php artisan visns:update-models-sorting --force
+
+# Custom model location (if not using standard app/Models)
+php artisan visns:update-models-sorting --path=src/Models --namespace=MyApp\\Models
+
+# Combine options for CI/CD environments
+php artisan visns:update-models-sorting --dry-run --path=app/Models --namespace=App\\Models
+```
+
+**Integration Workflow for New Projects:**
+```bash
+# Standard installation process
+composer require visnsstudio/visns-packages
+php artisan vendor:publish --tag=visns-packages-migrations
+php artisan migrate
+
+# Add relationship sorting to all models
+php artisan visns:update-models-sorting --dry-run    # Preview changes
+php artisan visns:update-models-sorting --backup     # Apply with backups
+```
+
+**Troubleshooting:**
+If the command is not available after installation:
+```bash
+# Clear Laravel caches
+php artisan cache:clear
+php artisan config:clear
+php artisan route:clear
+
+# Refresh Composer autoloader
+composer dump-autoload
+
+# Verify package installation
+composer show visnsstudio/visns-packages
+```
 
 **What the command does:**
 

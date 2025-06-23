@@ -176,13 +176,17 @@ class UpdateModelsWithRelationshipSorting extends Command
             
             // Check if already has the trait
             $hasTraitImport = str_contains($fileContent, 'use Visnsstudio\\VisnsPackages\\Traits\\HasRelationshipSorting;');
-            $hasTraitUsage = str_contains($fileContent, 'HasRelationshipSorting');
+            $hasTraitUsage = preg_match('/use\s+[^;]*HasRelationshipSorting[^;]*;/s', $fileContent);
             $hasOldMethod = str_contains($fileContent, 'public function scopeCustomOrder($query, $orderBy, $order)');
+            
+            // Check for malformed trait usage (like in the error case)
+            $hasMalformedUsage = preg_match('/use\s+[^;]*,\s*HasRelationshipSorting[^;]*;/s', $fileContent) && !$hasTraitImport;
 
-            if (!$hasTraitImport || !$hasTraitUsage || $hasOldMethod) {
+            if (!$hasTraitImport || !$hasTraitUsage || $hasOldMethod || $hasMalformedUsage) {
                 $model['needs_import'] = !$hasTraitImport;
-                $model['needs_usage'] = !$hasTraitUsage;
+                $model['needs_usage'] = !$hasTraitUsage || $hasMalformedUsage;
                 $model['needs_removal'] = $hasOldMethod;
+                $model['needs_cleanup'] = $hasMalformedUsage;
                 $model['file_content'] = $fileContent;
                 $needsUpdate[] = $model;
             }
@@ -203,11 +207,15 @@ class UpdateModelsWithRelationshipSorting extends Command
         }
         
         if ($model['needs_usage']) {
-            $status[] = 'needs trait usage';
+            $status[] = 'needs trait usage fix';
         }
         
         if ($model['needs_removal']) {
             $status[] = 'has old scopeCustomOrder method';
+        }
+        
+        if (isset($model['needs_cleanup']) && $model['needs_cleanup']) {
+            $status[] = 'needs malformed trait cleanup';
         }
 
         return '(' . implode(', ', $status) . ')';
@@ -225,11 +233,15 @@ class UpdateModelsWithRelationshipSorting extends Command
         }
         
         if ($model['needs_usage']) {
-            $this->line("  + Add trait usage to class");
+            $this->line("  + Fix trait usage in class");
         }
         
         if ($model['needs_removal']) {
             $this->line("  - Remove old scopeCustomOrder method");
+        }
+        
+        if (isset($model['needs_cleanup']) && $model['needs_cleanup']) {
+            $this->line("  ! Clean up malformed trait usage");
         }
     }
 
@@ -249,6 +261,16 @@ class UpdateModelsWithRelationshipSorting extends Command
     {
         $content = $model['file_content'];
         
+        // Clean up malformed trait usage first
+        if (isset($model['needs_cleanup']) && $model['needs_cleanup']) {
+            $content = $this->cleanupMalformedTraitUsage($content);
+        }
+        
+        // Remove old scopeCustomOrder method if needed
+        if ($model['needs_removal']) {
+            $content = $this->removeOldScopeMethod($content);
+        }
+        
         // Add trait import if needed
         if ($model['needs_import']) {
             $content = $this->addTraitImport($content);
@@ -257,11 +279,6 @@ class UpdateModelsWithRelationshipSorting extends Command
         // Add trait usage if needed
         if ($model['needs_usage']) {
             $content = $this->addTraitUsage($content);
-        }
-        
-        // Remove old scopeCustomOrder method if needed
-        if ($model['needs_removal']) {
-            $content = $this->removeOldScopeMethod($content);
         }
         
         File::put($model['file'], $content);
@@ -303,16 +320,44 @@ class UpdateModelsWithRelationshipSorting extends Command
      */
     protected function addTraitUsage(string $content): string
     {
-        // Find existing trait usage or class body start
-        if (preg_match('/class\s+\w+[^{]*\{[^}]*?use\s+([^;]+);/s', $content, $matches)) {
-            // Has existing traits, append to them
-            $existingTraits = trim($matches[1]);
-            $newTraits = $existingTraits . ', HasRelationshipSorting';
-            $content = str_replace($matches[0], str_replace($existingTraits, $newTraits, $matches[0]), $content);
+        // Check if HasRelationshipSorting is already properly used
+        if (preg_match('/use\s+[^;]*HasRelationshipSorting[^;]*;/s', $content)) {
+            return $content; // Already has proper trait usage
+        }
+        
+        // Find existing trait usage pattern
+        if (preg_match('/class\s+\w+[^{]*\{\s*([^}]*?use\s+[^;]+;)/s', $content, $matches)) {
+            $useBlock = $matches[1];
+            
+            // Check if there are multiple use statements in the class
+            if (preg_match_all('/use\s+([^;]+);/s', $useBlock, $useMatches)) {
+                $lastUseStatement = end($useMatches[0]);
+                $newUseStatement = "    use HasRelationshipSorting;";
+                
+                // Add the new trait usage after the last use statement
+                $content = str_replace($lastUseStatement, $lastUseStatement . "\n" . $newUseStatement, $content);
+            }
         } else {
-            // No existing traits, add new use statement
+            // No existing traits, add new use statement after class opening brace
             $content = preg_replace('/class\s+\w+[^{]*\{/', "$0\n    use HasRelationshipSorting;\n", $content);
         }
+        
+        return $content;
+    }
+
+    /**
+     * Clean up malformed trait usage
+     */
+    protected function cleanupMalformedTraitUsage(string $content): string
+    {
+        // Remove malformed trait usage like "use \OwenIt\Auditing\Auditable, HasRelationshipSorting;"
+        $content = preg_replace('/use\s+([^;]*),\s*HasRelationshipSorting([^;]*);/s', 'use $1$2;', $content);
+        
+        // Remove standalone "HasRelationshipSorting" without proper import
+        $content = preg_replace('/use\s+HasRelationshipSorting\s*;/s', '', $content);
+        
+        // Clean up extra whitespace and newlines
+        $content = preg_replace('/\n{3,}/', "\n\n", $content);
         
         return $content;
     }
