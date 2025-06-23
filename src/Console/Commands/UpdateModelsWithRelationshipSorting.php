@@ -174,8 +174,9 @@ class UpdateModelsWithRelationshipSorting extends Command
         foreach ($models as $model) {
             $fileContent = File::get($model['file']);
             
-            // Check if already has the trait
-            $hasTraitImport = str_contains($fileContent, 'use Visnsstudio\\VisnsPackages\\Traits\\HasRelationshipSorting;');
+            // Check if already has the trait (with or without leading backslash)
+            $hasTraitImport = str_contains($fileContent, 'use Visnsstudio\\VisnsPackages\\Traits\\HasRelationshipSorting;') || 
+                              str_contains($fileContent, 'use \\Visnsstudio\\VisnsPackages\\Traits\\HasRelationshipSorting;');
             $hasTraitUsage = preg_match('/use\s+[^;]*HasRelationshipSorting[^;]*;/s', $fileContent);
             $hasOldMethod = str_contains($fileContent, 'public function scopeCustomOrder($query, $orderBy, $order)');
             
@@ -229,7 +230,7 @@ class UpdateModelsWithRelationshipSorting extends Command
         $this->line("\n📄 {$model['class']}:");
         
         if ($model['needs_import']) {
-            $this->line("  + Add import: use Visnsstudio\\VisnsPackages\\Traits\\HasRelationshipSorting;");
+            $this->line("  + Add import: use \\Visnsstudio\\VisnsPackages\\Traits\\HasRelationshipSorting;");
         }
         
         if ($model['needs_usage']) {
@@ -292,21 +293,35 @@ class UpdateModelsWithRelationshipSorting extends Command
         // Find the last use statement
         $lines = explode("\n", $content);
         $lastUseIndex = -1;
+        $indentation = '';
         
         foreach ($lines as $index => $line) {
             if (str_starts_with(trim($line), 'use ') && !str_contains($line, ' as ') && str_ends_with(trim($line), ';')) {
                 $lastUseIndex = $index;
+                // Capture the indentation from existing use statements
+                $indentation = str_replace(trim($line), '', $line);
             }
         }
         
+        // Create the new import line with proper indentation and leading backslash
+        $newImport = $indentation . 'use \\Visnsstudio\\VisnsPackages\\Traits\\HasRelationshipSorting;';
+        
         if ($lastUseIndex >= 0) {
             // Add after the last use statement
-            array_splice($lines, $lastUseIndex + 1, 0, 'use Visnsstudio\\VisnsPackages\\Traits\\HasRelationshipSorting;');
+            array_splice($lines, $lastUseIndex + 1, 0, $newImport);
         } else {
-            // Add after namespace declaration
+            // Add after namespace declaration, detect indentation from nearby lines
             foreach ($lines as $index => $line) {
                 if (str_starts_with(trim($line), 'namespace ')) {
-                    array_splice($lines, $index + 2, 0, 'use Visnsstudio\\VisnsPackages\\Traits\\HasRelationshipSorting;');
+                    // Look for indentation pattern in the file
+                    for ($i = $index + 1; $i < count($lines) && $i < $index + 10; $i++) {
+                        if (!empty(trim($lines[$i])) && str_starts_with($lines[$i], ' ') || str_starts_with($lines[$i], "\t")) {
+                            $indentation = str_replace(trim($lines[$i]), '', $lines[$i]);
+                            break;
+                        }
+                    }
+                    $newImport = $indentation . 'use \\Visnsstudio\\VisnsPackages\\Traits\\HasRelationshipSorting;';
+                    array_splice($lines, $index + 2, 0, $newImport);
                     break;
                 }
             }
