@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Support\Str;
 
 trait HasRelationshipSorting
 {
@@ -33,6 +34,12 @@ trait HasRelationshipSorting
 
         if (!isset($orderBy) || !isset($order)) {
             return $query;
+        }
+
+        // Check if this is a virtual/appended column that cannot be sorted
+        if ($this->isVirtualColumn($orderBy)) {
+            \Log::info("Detected virtual/appended column that cannot be sorted: {$orderBy}");
+            return $this->handleVirtualColumnSorting($query, $orderBy, $order);
         }
 
         // Handle dot notation (could be relationship or JSON field)
@@ -185,6 +192,7 @@ trait HasRelationshipSorting
         return $query->orderBy($subQuery, $order);
     }
 
+
     /**
      * Check if a field is a JSON field on this model.
      *
@@ -261,5 +269,134 @@ trait HasRelationshipSorting
         }
         
         return in_array($field, $sortableFields);
+    }
+
+    /**
+     * Check if a field is a virtual/appended column that cannot be sorted directly.
+     *
+     * @param string $fieldName
+     * @return bool
+     */
+    public function isVirtualColumn($fieldName)
+    {
+        // Check if the field is in the model's appends array
+        if (in_array($fieldName, $this->getAppends())) {
+            return true;
+        }
+        
+        // Check if the field has a getXAttribute method (accessor)
+        $accessorMethod = 'get' . Str::studly($fieldName) . 'Attribute';
+        if (method_exists($this, $accessorMethod)) {
+            return true;
+        }
+        
+        // Check against a list of common virtual field patterns
+        $commonVirtualFields = [
+            'full_name', 'display_name', 'customer_names', 'description',
+            'computed_', 'calculated_', 'virtual_', 'formatted_', 'customer', 'customers'
+        ];
+        
+        foreach ($commonVirtualFields as $pattern) {
+            if (str_contains($fieldName, $pattern)) {
+                return true;
+            }
+        }
+        
+        // Also check if the field name contains dots and starts with common virtual patterns
+        if (str_contains($fieldName, '.')) {
+            $firstPart = explode('.', $fieldName)[0];
+            foreach ($commonVirtualFields as $pattern) {
+                if (str_contains($firstPart, $pattern)) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+
+    /**
+     * Handle sorting attempts on virtual/appended columns.
+     * This method provides fallback behavior when users try to sort by virtual columns.
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @param string $orderBy
+     * @param string $order
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    protected function handleVirtualColumnSorting($query, $orderBy, $order)
+    {
+        // Try to find an alternative sortable field
+        $alternativeField = $this->getAlternativeSortField($orderBy);
+        
+        if ($alternativeField) {
+            \Log::info("Using alternative sort field '{$alternativeField}' for virtual column '{$orderBy}'");
+            return $query->orderBy($alternativeField, $order);
+        }
+        
+        // Check if there's a custom handler for this virtual field
+        $customHandler = $this->getCustomVirtualColumnHandler($orderBy);
+        if ($customHandler && method_exists($this, $customHandler)) {
+            \Log::info("Using custom handler '{$customHandler}' for virtual column '{$orderBy}'");
+            return $this->$customHandler($query, $orderBy, $order);
+        }
+        
+        // Fallback: return unsorted query with warning
+        \Log::warning("Cannot sort by virtual column '{$orderBy}' - no alternative or custom handler found");
+        return $query;
+    }
+
+    /**
+     * Get alternative sortable field for virtual columns.
+     * Override this method in your model to provide custom mappings.
+     *
+     * @param string $virtualField
+     * @return string|null
+     */
+    protected function getAlternativeSortField($virtualField)
+    {
+        $alternatives = $this->getVirtualColumnAlternatives();
+        
+        return $alternatives[$virtualField] ?? null;
+    }
+
+    /**
+     * Get virtual column alternatives mapping.
+     * Override this method in your model to define alternative sortable fields.
+     *
+     * @return array
+     */
+    public function getVirtualColumnAlternatives()
+    {
+        return [
+            'full_name' => 'name',
+            'display_name' => 'name',
+            'customer_names' => 'name',
+            'description' => 'created_at',
+        ];
+    }
+
+    /**
+     * Get custom handler method name for virtual column sorting.
+     *
+     * @param string $virtualField
+     * @return string|null
+     */
+    protected function getCustomVirtualColumnHandler($virtualField)
+    {
+        $handlers = $this->getVirtualColumnHandlers();
+        
+        return $handlers[$virtualField] ?? null;
+    }
+
+    /**
+     * Get virtual column custom handlers mapping.
+     * Override this method in your model to define custom sorting methods.
+     *
+     * @return array
+     */
+    public function getVirtualColumnHandlers()
+    {
+        return [];
     }
 }

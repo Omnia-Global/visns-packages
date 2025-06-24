@@ -283,6 +283,110 @@ php artisan visns:update-models-sorting --backup   # Apply with backups
 
 This command makes it easy to integrate relationship sorting capabilities into existing projects without manual file modifications.
 
+### Virtual Column Sorting Handling
+
+The `HasRelationshipSorting` trait now includes intelligent detection and handling of virtual/appended columns that can cause SQL errors when users attempt to sort by them.
+
+#### Virtual Column Detection
+
+The trait automatically detects virtual columns using multiple methods:
+
+1. **Appended Attributes**: Fields listed in the model's `$appends` array
+2. **Accessor Methods**: Fields with `getXAttribute()` methods 
+3. **Common Patterns**: Fields matching common virtual column naming patterns
+
+#### Handling Virtual Column Sorting
+
+When a virtual column sort is attempted, the trait:
+
+1. **Alternative Mapping**: Uses alternative sortable fields defined in `getVirtualColumnAlternatives()`
+2. **Custom Handlers**: Calls custom sorting methods defined in `getVirtualColumnHandlers()`
+3. **Graceful Fallback**: Returns unsorted query with warning if no handling is defined
+
+#### Model Configuration for Virtual Columns
+
+```php
+use Visnsstudio\VisnsPackages\Traits\HasRelationshipSorting;
+
+class Contact extends Model
+{
+    use HasRelationshipSorting;
+    
+    protected $appends = ['customer_names', 'full_name'];
+    
+    public function getCustomerNamesAttribute()
+    {
+        return $this->getAllCustomers()->pluck('name')->join(', ');
+    }
+    
+    // Define alternative sortable fields for virtual columns
+    public function getVirtualColumnAlternatives()
+    {
+        return [
+            'customer_names' => 'name',        // Sort by contact name instead
+            'full_name' => 'name',             // Sort by name field
+            'description' => 'created_at',     // Sort by creation date
+        ];
+    }
+    
+    // Define custom handlers for complex virtual column sorting
+    public function getVirtualColumnHandlers()
+    {
+        return [
+            'customer_names' => 'sortByCustomerNames',
+        ];
+    }
+    
+    // Custom sorting method for customer_names
+    public function sortByCustomerNames($query, $orderBy, $order)
+    {
+        // Complex sorting logic using subqueries or joins
+        return $query->leftJoin('contact_customer', 'contacts.id', '=', 'contact_customer.contact_id')
+                    ->leftJoin('customers', 'contact_customer.customer_id', '=', 'customers.id')
+                    ->orderBy('customers.name', $order)
+                    ->select('contacts.*')
+                    ->distinct();
+    }
+}
+```
+
+#### Command Enhancement
+
+The `visns:update-models-sorting` command now detects virtual columns and provides warnings:
+
+```bash
+$ php artisan visns:update-models-sorting --dry-run
+
+📄 App\Models\Contact:
+  ✅ Already has HasRelationshipSorting trait
+  ⚠️  Virtual columns detected (may cause sorting issues):
+     - customer_names (appended attribute)
+     - full_name (appended attribute) 
+     - display_name (accessor method)
+     💡 Consider defining getVirtualColumnAlternatives() method
+```
+
+#### Best Practices for Virtual Columns
+
+1. **Define Alternatives**: Always provide `getVirtualColumnAlternatives()` for virtual columns
+2. **Frontend Configuration**: Disable sorting for complex virtual columns in frontend config:
+   ```json
+   {
+     "id": "customer_names",
+     "label": "Customers",
+     "sortable": false
+   }
+   ```
+3. **Performance Consideration**: For frequently sorted virtual columns, consider:
+   - Adding computed/cached columns to the database
+   - Using database observers to maintain computed values
+   - Implementing efficient custom sorting handlers
+
+4. **Error Prevention**: The enhanced trait prevents SQL errors but consider user experience:
+   - Clearly communicate which columns are sortable
+   - Provide meaningful alternative sorting options
+   - Use loading states for complex sorting operations
+
 ## Configuration
 
 ### User Model Configuration

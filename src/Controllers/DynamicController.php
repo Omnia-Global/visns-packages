@@ -1156,8 +1156,12 @@ class DynamicController extends \App\Http\Controllers\Controller
         // Replace the data in the paginator
         $paginator->setCollection($data);
 
-        // Return the paginated response as JSON
-        return response()->json($paginator, 200);
+        // Convert paginator to array and add column metadata
+        $response = $paginator->toArray();
+        $response['columns_metadata'] = $this->getColumnsMetadata();
+
+        // Return the enhanced response as JSON
+        return response()->json($response, 200);
     }
 
     protected function respondWithAll($query)
@@ -1182,6 +1186,146 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
 
         return response()->json($data, 200);
+    }
+
+    /**
+     * Get column metadata including sortability information
+     *
+     * @return array
+     */
+    protected function getColumnsMetadata()
+    {
+        $metadata = [];
+        
+        // Get a sample instance to analyze columns
+        $sampleInstance = new $this->model;
+        
+        // Get all possible columns from the model
+        $columns = $this->getAllModelColumns($sampleInstance);
+        
+        foreach ($columns as $column) {
+            $metadata[$column] = [
+                'sortable' => $this->isColumnSortable($sampleInstance, $column),
+                'virtual' => $this->isVirtualColumn($sampleInstance, $column)
+            ];
+        }
+        
+        return $metadata;
+    }
+
+    /**
+     * Get all columns from the model including database fields and virtual fields
+     *
+     * @param object $modelInstance
+     * @return array
+     */
+    protected function getAllModelColumns($modelInstance)
+    {
+        $columns = [];
+        
+        // Get database columns
+        try {
+            $table = $modelInstance->getTable();
+            $databaseColumns = \DB::getSchemaBuilder()->getColumnListing($table);
+            $columns = array_merge($columns, $databaseColumns);
+        } catch (\Exception $e) {
+            // Fallback if schema inspection fails
+            $columns = array_keys($modelInstance->getAttributes());
+        }
+        
+        // Add appended attributes (virtual columns)
+        $appendedAttributes = $modelInstance->getAppends();
+        $columns = array_merge($columns, $appendedAttributes);
+        
+        // Add any visible virtual columns that might be in a sample data set
+        if (method_exists($modelInstance, 'toArray')) {
+            try {
+                // Create a temporary instance with some data to get all possible keys
+                $tempInstance = new $this->model;
+                if (method_exists($tempInstance, 'newCollection')) {
+                    $sampleData = $this->model::limit(1)->get()->first();
+                    if ($sampleData) {
+                        $arrayKeys = array_keys($sampleData->toArray());
+                        $columns = array_merge($columns, $arrayKeys);
+                    }
+                }
+            } catch (\Exception $e) {
+                // Continue with existing columns if sample data fails
+            }
+        }
+        
+        // Remove duplicates and sort
+        $columns = array_unique($columns);
+        sort($columns);
+        
+        return $columns;
+    }
+
+    /**
+     * Check if a column is sortable (not virtual)
+     *
+     * @param object $modelInstance
+     * @param string $column
+     * @return bool
+     */
+    protected function isColumnSortable($modelInstance, $column)
+    {
+        // Virtual columns are not sortable
+        if ($this->isVirtualColumn($modelInstance, $column)) {
+            return false;
+        }
+        
+        // Check if the model has custom sorting logic that might handle this column
+        if (method_exists($modelInstance, 'scopeCustomOrder')) {
+            // If the model uses HasRelationshipSorting trait, 
+            // it can handle relationship-based sorting
+            if (method_exists($modelInstance, 'isVirtualColumn')) {
+                return !$modelInstance->isVirtualColumn($column);
+            }
+        }
+        
+        return true;
+    }
+
+    /**
+     * Check if a column is virtual (computed/appended)
+     *
+     * @param object $modelInstance
+     * @param string $column
+     * @return bool
+     */
+    protected function isVirtualColumn($modelInstance, $column)
+    {
+        // If the model has the HasRelationshipSorting trait, use its method
+        if (method_exists($modelInstance, 'isVirtualColumn')) {
+            return $modelInstance->isVirtualColumn($column);
+        }
+        
+        // Fallback logic if trait is not available
+        // Check if the field is in the model's appends array
+        if (in_array($column, $modelInstance->getAppends())) {
+            return true;
+        }
+        
+        // Check if the field has a getXAttribute method (accessor)
+        $accessorMethod = 'get' . \Str::studly($column) . 'Attribute';
+        if (method_exists($modelInstance, $accessorMethod)) {
+            return true;
+        }
+        
+        // Check against a list of common virtual field patterns
+        $commonVirtualFields = [
+            'full_name', 'display_name', 'customer_names', 'description',
+            'computed_', 'calculated_', 'virtual_', 'formatted_'
+        ];
+        
+        foreach ($commonVirtualFields as $pattern) {
+            if (str_contains($column, $pattern)) {
+                return true;
+            }
+        }
+        
+        return false;
     }
 
     public function clone($id)

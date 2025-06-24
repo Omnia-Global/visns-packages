@@ -183,12 +183,25 @@ class UpdateModelsWithRelationshipSorting extends Command
             // Check for malformed trait usage (like in the error case)
             $hasMalformedUsage = preg_match('/use\s+[^;]*,\s*HasRelationshipSorting[^;]*;/s', $fileContent) && !$hasTraitImport;
 
+            // Detect virtual/appended columns that might cause sorting issues
+            $virtualColumns = $this->detectVirtualColumns($fileContent);
+
             if (!$hasTraitImport || !$hasTraitUsage || $hasOldMethod || $hasMalformedUsage) {
                 $model['needs_import'] = !$hasTraitImport;
                 $model['needs_usage'] = !$hasTraitUsage || $hasMalformedUsage;
                 $model['needs_removal'] = $hasOldMethod;
                 $model['needs_cleanup'] = $hasMalformedUsage;
                 $model['file_content'] = $fileContent;
+                $model['virtual_columns'] = $virtualColumns;
+                $needsUpdate[] = $model;
+            } elseif (!empty($virtualColumns)) {
+                // Even if the model has the trait, show virtual columns info
+                $model['virtual_columns'] = $virtualColumns;
+                $model['file_content'] = $fileContent;
+                $model['needs_import'] = false;
+                $model['needs_usage'] = false;
+                $model['needs_removal'] = false;
+                $model['needs_cleanup'] = false;
                 $needsUpdate[] = $model;
             }
         }
@@ -218,8 +231,13 @@ class UpdateModelsWithRelationshipSorting extends Command
         if (isset($model['needs_cleanup']) && $model['needs_cleanup']) {
             $status[] = 'needs malformed trait cleanup';
         }
+        
+        if (!empty($model['virtual_columns'])) {
+            $virtualCount = count($model['virtual_columns']);
+            $status[] = "has {$virtualCount} virtual column" . ($virtualCount !== 1 ? 's' : '');
+        }
 
-        return '(' . implode(', ', $status) . ')';
+        return empty($status) ? '(✅ up to date)' : '(' . implode(', ', $status) . ')';
     }
 
     /**
@@ -243,6 +261,14 @@ class UpdateModelsWithRelationshipSorting extends Command
         
         if (isset($model['needs_cleanup']) && $model['needs_cleanup']) {
             $this->line("  ! Clean up malformed trait usage");
+        }
+        
+        if (!empty($model['virtual_columns'])) {
+            $this->line("  ⚠️  Virtual columns detected (may cause sorting issues):");
+            foreach ($model['virtual_columns'] as $column) {
+                $this->line("     - {$column['name']} ({$column['type']})");
+            }
+            $this->line("     💡 Consider defining getVirtualColumnAlternatives() method");
         }
     }
 
@@ -439,5 +465,89 @@ class UpdateModelsWithRelationshipSorting extends Command
         $content = preg_replace('/\n{3,}/', "\n\n", $content);
         
         return $content;
+    }
+
+    /**
+     * Detect virtual/appended columns in model file content
+     */
+    protected function detectVirtualColumns(string $content): array
+    {
+        $virtualColumns = [];
+        
+        // 1. Detect appended attributes from $appends property
+        if (preg_match('/protected\s+\$appends\s*=\s*\[(.*?)\];/s', $content, $matches)) {
+            $appendsList = $matches[1];
+            // Extract individual array items
+            if (preg_match_all("/['\"](.*?)['\"]/", $appendsList, $appendMatches)) {
+                foreach ($appendMatches[1] as $appendName) {
+                    if (!empty(trim($appendName))) {
+                        $virtualColumns[] = [
+                            'name' => trim($appendName),
+                            'type' => 'appended attribute'
+                        ];
+                    }
+                }
+            }
+        }
+        
+        // 2. Detect accessor methods (getXAttribute)
+        if (preg_match_all('/public\s+function\s+get(\w+)Attribute\s*\(/i', $content, $accessorMatches)) {
+            foreach ($accessorMatches[1] as $attributeName) {
+                $snakeCaseName = $this->camelToSnake($attributeName);
+                // Avoid duplicates from $appends
+                $exists = false;
+                foreach ($virtualColumns as $existing) {
+                    if ($existing['name'] === $snakeCaseName) {
+                        $exists = true;
+                        break;
+                    }
+                }
+                if (!$exists) {
+                    $virtualColumns[] = [
+                        'name' => $snakeCaseName,
+                        'type' => 'accessor method'
+                    ];
+                }
+            }
+        }
+        
+        // 3. Detect common virtual column patterns
+        $commonVirtualPatterns = [
+            'full_name', 'display_name', 'customer_names', 'description',
+            'computed_', 'calculated_', 'virtual_', 'formatted_'
+        ];
+        
+        foreach ($commonVirtualPatterns as $pattern) {
+            // Look for variables or method names containing these patterns
+            if (preg_match_all("/['\"]{$pattern}[^'\"]*['\"]/", $content, $patternMatches)) {
+                foreach ($patternMatches[0] as $match) {
+                    $fieldName = trim($match, '"\'');
+                    // Avoid duplicates
+                    $exists = false;
+                    foreach ($virtualColumns as $existing) {
+                        if ($existing['name'] === $fieldName) {
+                            $exists = true;
+                            break;
+                        }
+                    }
+                    if (!$exists && !empty($fieldName)) {
+                        $virtualColumns[] = [
+                            'name' => $fieldName,
+                            'type' => 'pattern match'
+                        ];
+                    }
+                }
+            }
+        }
+        
+        return $virtualColumns;
+    }
+
+    /**
+     * Convert camelCase to snake_case
+     */
+    protected function camelToSnake(string $input): string
+    {
+        return strtolower(preg_replace('/([a-z])([A-Z])/', '$1_$2', $input));
     }
 }
