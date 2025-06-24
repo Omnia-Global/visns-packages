@@ -36,34 +36,36 @@ trait HasRelationshipSorting
             return $query;
         }
 
-        // Check if this is a virtual/appended column that cannot be sorted
-        if ($this->isVirtualColumn($orderBy)) {
-            \Log::info("Detected virtual/appended column that cannot be sorted: {$orderBy}");
-            return $this->handleVirtualColumnSorting($query, $orderBy, $order);
-        }
-
-        // Handle dot notation (could be relationship or JSON field)
+        // Handle dot notation first (could be relationship, JSON field, or virtual column)
         if (str_contains($orderBy, '.')) {
             \Log::info("Detected dot notation for: {$orderBy}");
             
             $parts = explode('.', $orderBy);
             $firstPart = $parts[0];
             
-            // Check if this is a JSON field (column exists on this model)
-            if ($this->isJsonField($firstPart)) {
-                \Log::info("Detected JSON field sorting for: {$orderBy}");
-                return $this->applyJsonFieldSorting($query, $orderBy, $order);
-            }
-            
-            // Check if this is a relationship
+            // 1. Check if this is a relationship FIRST (most common case)
             if (method_exists($this, $firstPart)) {
                 \Log::info("Detected relationship sorting for: {$orderBy}");
                 return $this->applyRelationshipSorting($query, $orderBy, $order);
             }
             
-            // Fallback: try as JSON field anyway
-            \Log::info("Fallback to JSON field sorting for: {$orderBy}");
-            return $this->applyJsonFieldSorting($query, $orderBy, $order);
+            // 2. Check if this is a JSON field (column exists on this model)
+            if ($this->isJsonField($firstPart)) {
+                \Log::info("Detected JSON field sorting for: {$orderBy}");
+                return $this->applyJsonFieldSorting($query, $orderBy, $order);
+            }
+            
+            // 3. Check if this is a virtual/appended column that cannot be sorted
+            if ($this->isVirtualColumn($orderBy)) {
+                \Log::info("Detected virtual/appended column that cannot be sorted: {$orderBy}");
+                return $this->handleVirtualColumnSorting($query, $orderBy, $order);
+            }
+        }
+
+        // Check for non-dot notation virtual columns
+        if ($this->isVirtualColumn($orderBy)) {
+            \Log::info("Detected virtual/appended column that cannot be sorted: {$orderBy}");
+            return $this->handleVirtualColumnSorting($query, $orderBy, $order);
         }
 
         // Regular column sorting
@@ -136,11 +138,12 @@ trait HasRelationshipSorting
             $relatedTable = $relation->getRelated()->getTable();
             $qualifiedColumn = "{$relatedTable}.{$column}";
             
-            $subQuery = $relation->getQuery()
+            // Get fresh query builder to avoid existing constraints
+            $subQuery = $relation->getRelated()->newQuery()
                 ->select($qualifiedColumn)
                 ->whereColumn(
-                    $relation->getQualifiedForeignKeyName(),
-                    $relation->getQualifiedOwnerKeyName()
+                    $relation->getQualifiedOwnerKeyName(),
+                    $relation->getQualifiedForeignKeyName()
                 )
                 ->limit(1);
         }
