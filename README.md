@@ -79,6 +79,30 @@ You can install the package via composer:
 composer require visnsstudio/visns-packages
 ```
 
+### Local Development Setup
+
+For local development, you'll need to set up the package as a local dependency. Add the following to your project's `composer.json` file in the `repositories` section:
+
+```json
+{
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../visns-packages",
+            "options": {
+                "symlink": true
+            }
+        }
+    ]
+}
+```
+
+Then install the package:
+
+```bash
+composer require visnsstudio/visns-packages @dev
+```
+
 After installation, publish the migrations:
 
 ```bash
