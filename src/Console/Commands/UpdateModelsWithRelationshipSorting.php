@@ -382,20 +382,57 @@ class UpdateModelsWithRelationshipSorting extends Command
      */
     protected function removeOldScopeMethod(string $content): string
     {
-        // Remove the basic scopeCustomOrder method with its common implementations
-        $patterns = [
-            // Pattern 1: Basic implementation
-            '/\s*public function scopeCustomOrder\(\$query, \$orderBy, \$order\)\s*\{\s*if \(isset\(\$orderBy\) && isset\(\$order\)\) \{\s*\$query->orderBy\(\$orderBy, \$order\);\s*\}\s*return \$query;\s*\}\s*/s',
-            
-            // Pattern 2: Without return statement
-            '/\s*public function scopeCustomOrder\(\$query, \$orderBy, \$order\)\s*\{\s*if \(isset\(\$orderBy\) && isset\(\$order\)\) \{\s*\$query->orderBy\(\$orderBy, \$order\);\s*\}\s*\}\s*/s',
-            
-            // Pattern 3: More flexible matching
-            '/\s*public function scopeCustomOrder\([^}]+\}\s*/s'
-        ];
+        // Use regex to match the complete scopeCustomOrder method with proper brace matching
+        $pattern = '/\s*public\s+function\s+scopeCustomOrder\s*\([^)]*\)\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*/s';
         
-        foreach ($patterns as $pattern) {
-            $content = preg_replace($pattern, "\n", $content);
+        // First try the precise regex pattern
+        $content = preg_replace($pattern, "\n", $content);
+        
+        // If that didn't work, try a more comprehensive approach
+        if (str_contains($content, 'scopeCustomOrder')) {
+            // Split into lines and manually remove the method
+            $lines = explode("\n", $content);
+            $newLines = [];
+            $inScopeMethod = false;
+            $braceDepth = 0;
+            $startedMethod = false;
+            
+            foreach ($lines as $line) {
+                $trimmedLine = trim($line);
+                
+                // Check if we're starting the scopeCustomOrder method
+                if (!$inScopeMethod && str_contains($trimmedLine, 'public function scopeCustomOrder(')) {
+                    $inScopeMethod = true;
+                    $startedMethod = true;
+                    $braceDepth = 0;
+                    
+                    // Check if the opening brace is on the same line
+                    if (str_contains($line, '{')) {
+                        $braceDepth += substr_count($line, '{') - substr_count($line, '}');
+                        if ($braceDepth <= 0) {
+                            $inScopeMethod = false; // Method completed on same line
+                        }
+                    }
+                    continue; // Skip the method declaration line
+                }
+                
+                // If we're inside the method
+                if ($inScopeMethod) {
+                    // Count braces to find the end
+                    $braceDepth += substr_count($line, '{') - substr_count($line, '}');
+                    
+                    // If we've balanced all braces, the method is complete
+                    if ($braceDepth <= 0) {
+                        $inScopeMethod = false;
+                    }
+                    continue; // Skip all lines inside the method
+                }
+                
+                // Keep lines that are not part of the scopeCustomOrder method
+                $newLines[] = $line;
+            }
+            
+            $content = implode("\n", $newLines);
         }
         
         // Clean up extra newlines
