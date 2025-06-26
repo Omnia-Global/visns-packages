@@ -375,10 +375,13 @@ class DynamicController extends \App\Http\Controllers\Controller
             $providedIdField = $providedFields[0];
             $providedLabelField = $providedFields[1];
             
-            // Check if all provided fields exist in the database
+            // Check if all provided fields exist in the database or as appended fields
             $allFieldsExist = true;
+            $appendedFields = $this->model->getAppends();
+            
             foreach ($providedFields as $field) {
-                if (!Schema::hasColumn($tableName, $field)) {
+                $fieldExists = Schema::hasColumn($tableName, $field) || in_array($field, $appendedFields);
+                if (!$fieldExists) {
                     $allFieldsExist = false;
                     break;
                 }
