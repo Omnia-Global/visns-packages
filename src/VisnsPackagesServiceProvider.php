@@ -91,9 +91,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
         // Publish seeders
         $this->publishes(
             [
-                __DIR__ . '/../database/seeders' => database_path(
-                    'seeders'
-                ),
+                __DIR__ . '/../database/seeders' => database_path('seeders'),
             ],
             'visns-packages-seeders'
         );
@@ -333,11 +331,20 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                                 'generateCustomPDF'
                             );
                             Route::post('/generate-quote', 'generateQuotePDF');
-                            
+
                             // Proposal PDF generation routes (backward compatible)
-                            Route::post('/generate-proposal', 'generateProposalPDF');
-                            Route::post('/preview-proposal', 'previewProposalPDF');
-                            Route::post('/generate-proposal-html', 'generateProposalHTML');
+                            Route::post(
+                                '/generate-proposal',
+                                'generateProposalPDF'
+                            );
+                            Route::post(
+                                '/preview-proposal',
+                                'previewProposalPDF'
+                            );
+                            Route::post(
+                                '/generate-proposal-html',
+                                'generateProposalHTML'
+                            );
                         });
 
                     Route::controller(AuthController::class)->group(
@@ -412,17 +419,26 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                                 'generateCustomPDF'
                             );
                             Route::post('/generate-quote', 'generateQuotePDF');
-                            
-                            // Proposal PDF generation API routes (backward compatible)  
-                            Route::post('/generate-proposal', 'generateProposalPDF');
-                            Route::post('/preview-proposal', 'previewProposalPDF');
-                            Route::post('/generate-proposal-html', 'generateProposalHTML');
+
+                            // Proposal PDF generation API routes (backward compatible)
+                            Route::post(
+                                '/generate-proposal',
+                                'generateProposalPDF'
+                            );
+                            Route::post(
+                                '/preview-proposal',
+                                'previewProposalPDF'
+                            );
+                            Route::post(
+                                '/generate-proposal-html',
+                                'generateProposalHTML'
+                            );
                         });
                 });
 
             // Register dynamic entity routes first (they will be more general)
             $this->registerDynamicEntityRoutes();
-            
+
             // Register custom routes after (they will override/supplement dynamic routes)
             $this->registerCustomEntityRoutes();
         }
@@ -436,12 +452,14 @@ class VisnsPackagesServiceProvider extends ServiceProvider
     protected function registerDynamicEntityRoutes()
     {
         $dynamicEntities = config('visns-packages.dynamic_entities', []);
-        
+
         if (!empty($dynamicEntities)) {
             foreach ($dynamicEntities as $entity) {
                 // Register dynamic routes for all entities (controller is now determined by DynamicController)
                 Route::prefix("ajax/{$entity}")
-                    ->controller(\Visnsstudio\VisnsPackages\Controllers\DynamicController::class)
+                    ->controller(
+                        \Visnsstudio\VisnsPackages\Controllers\DynamicController::class
+                    )
                     ->group(function () use ($entity) {
                         Route::get('/', 'index');
                         Route::post('/', 'store');
@@ -457,20 +475,17 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                     });
 
                 Route::prefix("ajax/{$entity}/json")
-                    ->controller(\Visnsstudio\VisnsPackages\Controllers\DynamicJsonController::class)
+                    ->controller(
+                        \Visnsstudio\VisnsPackages\Controllers\DynamicJsonController::class
+                    )
                     ->group(function () use ($entity) {
                         Route::post('/sortList', 'jsonSortList');
                         Route::post('/sortUpdate', 'jsonSortUpdate');
                         Route::post('/table', 'jsonTable');
                         Route::post('/get', 'jsonGet');
-                        Route::post('/set', 'jsonSet');
-                        Route::post('/push', 'jsonPush');
-                        Route::post('/where', 'jsonWhere');
-                        Route::post('/search', 'jsonSearch');
-                        Route::post('/clone', 'jsonClone');
-                        Route::post('/toggle', 'jsonToggle');
+                        Route::post('/store', 'jsonStore');
+                        Route::put('/update', 'jsonUpdate');
                         Route::post('/delete', 'jsonDelete');
-                        Route::post('/dropdown', 'jsonDropdown');
                     });
             }
         }
@@ -484,25 +499,34 @@ class VisnsPackagesServiceProvider extends ServiceProvider
     protected function registerCustomEntityRoutes()
     {
         $entityConfig = config('visns-packages.entity_config', []);
-        
+
         foreach ($entityConfig as $entity => $config) {
             if (isset($config['custom_routes'])) {
                 // Map entity names to controller classes
                 $controllerClass = $this->getControllerClassForEntity($entity);
-                
+
                 if ($controllerClass) {
                     Route::prefix("ajax/{$entity}")
                         ->controller($controllerClass)
                         ->group(function () use ($config) {
-                            foreach ($config['custom_routes'] as $route => $methods) {
+                            foreach (
+                                $config['custom_routes']
+                                as $route => $methods
+                            ) {
                                 if (is_array($methods)) {
                                     // Handle multiple HTTP methods for the same route
-                                    foreach ($methods as $httpVerb => $methodName) {
+                                    foreach (
+                                        $methods
+                                        as $httpVerb => $methodName
+                                    ) {
                                         Route::{$httpVerb}($route, $methodName);
                                     }
                                 } else {
                                     // Single method, determine HTTP verb from route pattern
-                                    $httpVerb = $this->determineHttpVerb($route, $methods);
+                                    $httpVerb = $this->determineHttpVerb(
+                                        $route,
+                                        $methods
+                                    );
                                     Route::{$httpVerb}($route, $methods);
                                 }
                             }
@@ -538,28 +562,36 @@ class VisnsPackagesServiceProvider extends ServiceProvider
     protected function determineHttpVerb(string $route, string $method): string
     {
         // If route contains {id} and method contains update/edit, use PUT
-        if (str_contains($route, '{id}') && 
-            (str_contains(strtolower($method), 'update') || str_contains(strtolower($method), 'edit'))) {
+        if (
+            str_contains($route, '{id}') &&
+            (str_contains(strtolower($method), 'update') ||
+                str_contains(strtolower($method), 'edit'))
+        ) {
             return 'put';
         }
-        
+
         // If route contains {id} and method contains delete/destroy, use DELETE
-        if (str_contains($route, '{id}') && 
-            (str_contains(strtolower($method), 'delete') || str_contains(strtolower($method), 'destroy'))) {
+        if (
+            str_contains($route, '{id}') &&
+            (str_contains(strtolower($method), 'delete') ||
+                str_contains(strtolower($method), 'destroy'))
+        ) {
             return 'delete';
         }
-        
+
         // If method contains create/store/add/generate, use POST
-        if (str_contains(strtolower($method), 'create') || 
+        if (
+            str_contains(strtolower($method), 'create') ||
             str_contains(strtolower($method), 'store') ||
             str_contains(strtolower($method), 'add') ||
             str_contains(strtolower($method), 'generate') ||
             str_contains(strtolower($method), 'duplicate') ||
             str_contains(strtolower($method), 'apply') ||
-            str_contains(strtolower($method), 'reorder')) {
+            str_contains(strtolower($method), 'reorder')
+        ) {
             return 'post';
         }
-        
+
         // Default to GET for all other methods
         return 'get';
     }
@@ -572,8 +604,8 @@ class VisnsPackagesServiceProvider extends ServiceProvider
     protected function meilisearchIsAvailable(): bool
     {
         return class_exists(\MeiliSearch\Client::class) &&
-               class_exists(\Laravel\Scout\Searchable::class) &&
-               config('scout.driver') === 'meilisearch' &&
-               !config('visns-packages.search.force_disable_meilisearch', false);
+            class_exists(\Laravel\Scout\Searchable::class) &&
+            config('scout.driver') === 'meilisearch' &&
+            !config('visns-packages.search.force_disable_meilisearch', false);
     }
 }
