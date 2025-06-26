@@ -375,8 +375,16 @@ class DynamicController extends \App\Http\Controllers\Controller
             $providedIdField = $providedFields[0];
             $providedLabelField = $providedFields[1];
             
-            // Check if both provided fields exist in the database
-            if (Schema::hasColumn($tableName, $providedIdField) && Schema::hasColumn($tableName, $providedLabelField)) {
+            // Check if all provided fields exist in the database
+            $allFieldsExist = true;
+            foreach ($providedFields as $field) {
+                if (!Schema::hasColumn($tableName, $field)) {
+                    $allFieldsExist = false;
+                    break;
+                }
+            }
+            
+            if ($allFieldsExist) {
                 // Override detected fields with provided fields
                 $detectedFields['id'] = $providedIdField;
                 $detectedFields['label'] = $providedLabelField;
