@@ -493,16 +493,9 @@ class DynamicController extends \App\Http\Controllers\Controller
                 $itemData['label'] = $this->buildSmartLabel($item, $detectedFields);
             }
 
-            // Add any additional requested fields (excluding name combination fields to avoid duplication)
-            foreach ($fields as $key => $field) {
-                if ($key > 1 && $field !== $idField && $field !== 'label') {
-                    // Skip name combination fields if they were used for label building
-                    if (
-                        $detectedFields['name_combination'] &&
-                        in_array($field, $detectedFields['name_combination'])
-                    ) {
-                        continue;
-                    }
+            // Add all requested fields to ensure they are returned in the response
+            foreach ($fields as $field) {
+                if ($field !== $idField && $field !== 'label' && !isset($itemData[$field])) {
                     $itemData[$field] = $item->{$field} ?? null;
                 }
             }
