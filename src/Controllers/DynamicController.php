@@ -368,8 +368,27 @@ class DynamicController extends \App\Http\Controllers\Controller
         // Detect available fields intelligently
         $detectedFields = $this->detectAvailableFields();
 
-        // Use intelligent field detection or fall back to provided fields
-        $fields = $request->input('fields', [$detectedFields['id'], $detectedFields['label'] ?? $detectedFields['id']]);
+        // Handle fields parameter - respect provided fields if they exist in database
+        $providedFields = $request->input('fields');
+        if ($providedFields && is_array($providedFields) && count($providedFields) >= 2) {
+            $tableName = $this->model->getTable();
+            $providedIdField = $providedFields[0];
+            $providedLabelField = $providedFields[1];
+            
+            // Check if both provided fields exist in the database
+            if (Schema::hasColumn($tableName, $providedIdField) && Schema::hasColumn($tableName, $providedLabelField)) {
+                // Override detected fields with provided fields
+                $detectedFields['id'] = $providedIdField;
+                $detectedFields['label'] = $providedLabelField;
+                $fields = $providedFields;
+            } else {
+                // Fall back to intelligent field detection
+                $fields = [$detectedFields['id'], $detectedFields['label'] ?? $detectedFields['id']];
+            }
+        } else {
+            // Use intelligent field detection as default
+            $fields = [$detectedFields['id'], $detectedFields['label'] ?? $detectedFields['id']];
+        }
 
         // Get intelligent sorting parameters
         [$sortField, $sort] = $this->getSortParams($request, $fields);
@@ -465,8 +484,14 @@ class DynamicController extends \App\Http\Controllers\Controller
             $idField = $detectedFields['id'];
             $itemData[$idField] = $item->{$idField};
 
-            // Build smart label
-            $itemData['label'] = $this->buildSmartLabel($item, $detectedFields);
+            // Build label - use provided label field if specified, otherwise use smart label
+            if ($providedFields && isset($providedFields[1]) && Schema::hasColumn($this->model->getTable(), $providedFields[1])) {
+                // Use the provided label field directly
+                $itemData['label'] = $item->{$providedFields[1]} ?? '';
+            } else {
+                // Use smart label building
+                $itemData['label'] = $this->buildSmartLabel($item, $detectedFields);
+            }
 
             // Add any additional requested fields (excluding name combination fields to avoid duplication)
             foreach ($fields as $key => $field) {
