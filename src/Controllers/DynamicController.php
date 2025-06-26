@@ -403,6 +403,11 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         // Get intelligent sorting parameters
         [$sortField, $sort] = $this->getSortParams($request, $fields);
+        
+        // If fields are provided, always sort by the second field (label field)
+        if ($providedFields && $allFieldsExist && isset($providedFields[1])) {
+            $sortField = $providedFields[1];
+        }
 
         // Build query with intelligent ordering
         $query = method_exists($this->model, 'scopeCustomOrder')
