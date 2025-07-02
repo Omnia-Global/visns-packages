@@ -404,8 +404,9 @@ class DynamicController extends \App\Http\Controllers\Controller
         // Get intelligent sorting parameters
         [$sortField, $sort] = $this->getSortParams($request, $fields);
         
-        // If fields are provided, always sort by the second field (label field)
-        if ($providedFields && $allFieldsExist && isset($providedFields[1])) {
+        // If fields are provided but no explicit orderBy/sortBy, default to the second field (label field)
+        if ($providedFields && $allFieldsExist && isset($providedFields[1]) && 
+            !$request->has('orderBy') && !$request->has('sortBy')) {
             $sortField = $providedFields[1];
         }
 
