@@ -1441,10 +1441,24 @@ class DynamicController extends \App\Http\Controllers\Controller
                 ($type === 'datetime' || $type === 'date') &&
                 isset($allData[$field])
             ) {
-                // Convert the field using Carbon
-                $allData[$field] = Carbon::createFromTimestamp(
-                    strtotime($allData[$field])
-                );
+                // Handle date and datetime fields properly
+                if ($type === 'date') {
+                    // For date fields, preserve as date without timezone conversion
+                    try {
+                        $allData[$field] = Carbon::parse($allData[$field])->format('Y-m-d');
+                    } catch (\Exception $e) {
+                        // Keep original value if parsing fails
+                    }
+                } else {
+                    // For datetime fields, use proper timezone handling
+                    $dateValue = $this->handleDateValue($allData[$field]);
+                    if (is_array($dateValue)) {
+                        // If it's a date range, use the start date
+                        $allData[$field] = $dateValue[0];
+                    } else {
+                        $allData[$field] = $dateValue;
+                    }
+                }
             } elseif ($type === 'boolean') {
                 if (isset($allData[$field])) {
                     // Handle various boolean representations (true, 1, "1", "true", "yes", "on")
@@ -1815,10 +1829,24 @@ class DynamicController extends \App\Http\Controllers\Controller
                 ($type === 'datetime' || $type === 'date') &&
                 isset($allData[$field])
             ) {
-                // Convert the field using Carbon
-                $allData[$field] = Carbon::createFromTimestamp(
-                    strtotime($allData[$field])
-                );
+                // Handle date and datetime fields properly
+                if ($type === 'date') {
+                    // For date fields, preserve as date without timezone conversion
+                    try {
+                        $allData[$field] = Carbon::parse($allData[$field])->format('Y-m-d');
+                    } catch (\Exception $e) {
+                        // Keep original value if parsing fails
+                    }
+                } else {
+                    // For datetime fields, use proper timezone handling
+                    $dateValue = $this->handleDateValue($allData[$field]);
+                    if (is_array($dateValue)) {
+                        // If it's a date range, use the start date
+                        $allData[$field] = $dateValue[0];
+                    } else {
+                        $allData[$field] = $dateValue;
+                    }
+                }
             } elseif ($type === 'boolean' && isset($allData[$field])) {
                 // Handle various boolean representations (true, 1, "1", "true", "yes", "on")
                 $value = $allData[$field];
