@@ -1660,6 +1660,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                 'file_name' => $request->input('filename'),
                 'file_extension' => $request->input('extension'),
                 'file_size' => $request->input('filesize'),
+                'file_description' => $request->input('file_description') ?? null,
                 'fileable_field' => $request->filled('fileable_field')
                     ? $request->input('fileable_field')
                     : $request->input('file_relationship'),
@@ -1702,6 +1703,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                             'file_name' => $uploadedFile['filename'],
                             'file_extension' => $uploadedFile['extension'],
                             'file_size' => $uploadedFile['filesize'],
+                            'file_description' => $uploadedFile['file_description'] ?? null,
                             'fileable_field' => !empty(
                                 $uploadedFile['fileable_field']
                             )
@@ -1956,6 +1958,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                 'file_name' => $request->input('filename'),
                 'file_extension' => $request->input('extension'),
                 'file_size' => $request->input('filesize'),
+                'file_description' => $request->input('file_description') ?? null,
                 'fileable_field' => $request->filled('fileable_field')
                     ? $request->input('fileable_field')
                     : $request->input('file_relationship'),
@@ -2048,6 +2051,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                                     'file_size' =>
                                         $uploadedFile['filesize'] ??
                                         $uploadedFile['file_size'],
+                                    'file_description' => $uploadedFile['file_description'] ?? null,
                                     'fileable_field' => !empty(
                                         $uploadedFile['fileable_field']
                                     )
