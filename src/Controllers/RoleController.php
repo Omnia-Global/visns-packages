@@ -85,13 +85,15 @@ class RoleController extends \App\Http\Controllers\Controller
         ]);
     }
 
-    public function update(Request $request, Role $role)
+    public function update(Request $request, $id)
     {
         $error = '';
 
         $request->validate([
             'name' => 'required',
         ]);
+
+        $role = Role::find($id);
 
         if ($request->has('name')) {
             $role->name = $request->input('name');
@@ -117,10 +119,11 @@ class RoleController extends \App\Http\Controllers\Controller
         ]);
     }
 
-    public function destroy(Role $role)
+    public function destroy($id)
     {
         $error = '';
 
+        $role = Role::find($id);
         $role->delete();
 
         return response()->json([

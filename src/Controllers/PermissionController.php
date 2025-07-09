@@ -80,13 +80,15 @@ class PermissionController extends \App\Http\Controllers\Controller
         ]);
     }
 
-    public function update(Request $request, Permission $permission)
+    public function update(Request $request, $id)
     {
         $error = '';
 
         $request->validate([
             'name' => 'required',
         ]);
+
+        $permission = Permission::find($id);
 
         if ($request->has('name')) {
             $permission->name = $request->input('name');
@@ -99,10 +101,11 @@ class PermissionController extends \App\Http\Controllers\Controller
         ]);
     }
 
-    public function destroy(Permission $permission)
+    public function destroy($id)
     {
         $error = '';
 
+        $permission = Permission::find($id);
         $permission->delete();
 
         return response()->json([
