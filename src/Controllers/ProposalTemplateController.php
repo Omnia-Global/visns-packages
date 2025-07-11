@@ -450,8 +450,12 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
                 \Visnsstudio\VisnsPackages\Services\ProposalAssemblyService::class
             );
 
+            // Get branding profile if specified
+            $brandingId = $request->get('branding_profile_id');
+            
             $proposalData = $proposalService->assembleProposal([
                 'template_id' => $id,
+                'branding_id' => $brandingId,
                 'proposal_data' => $sampleData,
                 'sections' => $template->sections->toArray(),
                 'header_config' => $template->styling['header'] ?? null,

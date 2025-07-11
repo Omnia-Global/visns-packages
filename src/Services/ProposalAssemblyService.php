@@ -23,6 +23,7 @@ class ProposalAssemblyService
             $brandingId = $config['branding_id'] ?? null;
             $proposalData = $config['proposal_data'] ?? [];
             $customSections = $config['sections'] ?? [];
+            $headerConfig = $config['header_config'] ?? null;
 
             // Load template and branding
             $template = $templateId
@@ -51,6 +52,9 @@ class ProposalAssemblyService
                 $branding
             );
 
+            // Add header_config to proposalData so it's available in assembleHTML
+            $proposalData['header_config'] = $headerConfig;
+            
             // Generate HTML content
             $html = $this->assembleHTML($sections, $branding, $proposalData);
 
@@ -1425,7 +1429,14 @@ class ProposalAssemblyService
      */
     private function generateProposalHeader($branding, $headerConfig = null): string
     {
+        // Debug logging
+        \Log::info('Header Config Debug:', [
+            'headerConfig' => $headerConfig,
+            'branding' => $branding ? $branding->toArray() : null
+        ]);
+        
         if (!$headerConfig || !($headerConfig['enabled'] ?? false)) {
+            \Log::info('Header disabled or not configured');
             return '';
         }
 
@@ -1470,6 +1481,8 @@ class ProposalAssemblyService
         $html .= '</div>';
         $html .= '</div>';
         $html .= '</div>';
+        
+        \Log::info('Generated header HTML:', ['html' => $html]);
         
         return $html;
     }
