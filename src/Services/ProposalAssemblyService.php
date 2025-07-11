@@ -302,7 +302,8 @@ class ProposalAssemblyService
         // Check if there's a cover page section
         $hasCoverPage = false;
         foreach ($sections as $section) {
-            if ($section['section_type'] === 'cover_page') {
+            $sectionType = is_array($section) ? ($section['section_type'] ?? null) : ($section->section_type ?? null);
+            if ($sectionType === 'cover_page') {
                 $hasCoverPage = true;
                 break;
             }
