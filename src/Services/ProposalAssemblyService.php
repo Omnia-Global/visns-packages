@@ -1412,7 +1412,7 @@ class ProposalAssemblyService
                 }
             </style>
         </head>
-        <body>' . $this->generateProposalHeader($branding, $headerConfig) . '
+        <body>' . $this->generateProposalHeader($branding, $headerConfig);
     }
 
     /**
