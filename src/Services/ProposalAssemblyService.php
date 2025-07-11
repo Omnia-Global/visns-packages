@@ -1406,13 +1406,40 @@ class ProposalAssemblyService
                 }
                 
                 @media print {
+                    @page {
+                        margin-top: 120px;
+                        @top-center {
+                            content: element(header);
+                        }
+                    }
+                    
                     .proposal-header {
+                        position: running(header);
                         padding: 15px 0;
                         margin-bottom: 20px;
+                        border-bottom: 2px solid ' . ($colors['primary'] ?? '#2563eb') . ';
+                        background: white;
                     }
                     
                     .proposal-header-logo img {
                         max-height: 50px;
+                    }
+                    
+                    /* Alternative approach - fixed header */
+                    .proposal-header-fixed {
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        z-index: 1000;
+                        background: white;
+                        border-bottom: 2px solid ' . ($colors['primary'] ?? '#2563eb') . ';
+                        padding: 15px 20px;
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    }
+                    
+                    body {
+                        padding-top: 100px;
                     }
                 }
             </style>
@@ -1429,60 +1456,62 @@ class ProposalAssemblyService
      */
     private function generateProposalHeader($branding, $headerConfig = null): string
     {
-        // Debug logging
-        \Log::info('Header Config Debug:', [
-            'headerConfig' => $headerConfig,
-            'branding' => $branding ? $branding->toArray() : null
-        ]);
-        
         if (!$headerConfig || !($headerConfig['enabled'] ?? false)) {
-            \Log::info('Header disabled or not configured');
             return '';
         }
 
         $companyInfo = $branding->company_info ?? [];
-        $html = '<div class="proposal-header">';
+        $html = '<div class="proposal-header proposal-header-fixed">';
         
         // Logo section
         $html .= '<div class="proposal-header-logo">';
-        if ($branding->logo_url) {
-            $html .= '<img src="' . htmlspecialchars($branding->logo_url) . '" alt="' . htmlspecialchars($branding->company_name) . ' Logo">';
+        
+        // Check for logo_url first, then file relationship
+        $logoUrl = $branding->logo_url;
+        if (!$logoUrl && $branding->file) {
+            $logoUrl = $branding->file->url ?? null;
+        }
+        
+        if ($logoUrl) {
+            $html .= '<img src="' . htmlspecialchars($logoUrl) . '" alt="' . htmlspecialchars($branding->company_name) . ' Logo">';
         } else {
-            $initials = strtoupper(substr($branding->company_name, 0, 3));
+            $initials = strtoupper(substr($branding->company_name ?? 'COMPANY', 0, 3));
             $html .= '<div class="logo-placeholder">' . $initials . '</div>';
         }
         $html .= '</div>';
         
         // Company info section
         $html .= '<div class="proposal-header-content">';
-        $html .= '<div class="company-name">' . htmlspecialchars($branding->company_name) . '</div>';
+        $html .= '<div class="company-name">' . htmlspecialchars($branding->company_name ?? 'Company Name') . '</div>';
         $html .= '<div class="company-info">';
         
         // Address
-        if (!empty($headerConfig['show_address']) && !empty($companyInfo['address'])) {
-            $html .= '<div>' . htmlspecialchars($companyInfo['address']) . '</div>';
+        if (!empty($headerConfig['show_address'])) {
+            $address = $companyInfo['address'] ?? 'Add company address in branding profile';
+            $html .= '<div>' . htmlspecialchars($address) . '</div>';
         }
         
         // Website
-        if (!empty($headerConfig['show_website']) && !empty($companyInfo['website'])) {
-            $html .= '<div><span class="label">Website</span>' . htmlspecialchars($companyInfo['website']) . '</div>';
+        if (!empty($headerConfig['show_website'])) {
+            $website = $companyInfo['website'] ?? 'Add company website in branding profile';
+            $html .= '<div><span class="label">Website: </span>' . htmlspecialchars($website) . '</div>';
         }
         
         // Phone
-        if (!empty($headerConfig['show_phone']) && !empty($companyInfo['phone'])) {
-            $html .= '<div><span class="label">Phone</span>' . htmlspecialchars($companyInfo['phone']) . '</div>';
+        if (!empty($headerConfig['show_phone'])) {
+            $phone = $companyInfo['phone'] ?? 'Add company phone in branding profile';
+            $html .= '<div><span class="label">Phone: </span>' . htmlspecialchars($phone) . '</div>';
         }
         
         // ABN
-        if (!empty($headerConfig['show_abn']) && !empty($companyInfo['abn'])) {
-            $html .= '<div><span class="label">ABN</span>' . htmlspecialchars($companyInfo['abn']) . '</div>';
+        if (!empty($headerConfig['show_abn'])) {
+            $abn = $companyInfo['abn'] ?? 'Add company ABN in branding profile';
+            $html .= '<div><span class="label">ABN: </span>' . htmlspecialchars($abn) . '</div>';
         }
         
         $html .= '</div>';
         $html .= '</div>';
         $html .= '</div>';
-        
-        \Log::info('Generated header HTML:', ['html' => $html]);
         
         return $html;
     }
