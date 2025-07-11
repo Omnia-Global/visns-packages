@@ -308,7 +308,10 @@ class ProposalAssemblyService
             }
         }
 
-        $html = $this->getHTMLHeader($branding, $hasCoverPage);
+        // Get header configuration from proposalData
+        $headerConfig = $proposalData['header_config'] ?? null;
+
+        $html = $this->getHTMLHeader($branding, $hasCoverPage, $headerConfig);
 
         foreach ($sections as $section) {
             $html .= $this->renderSection($section, $branding, $proposalData);
@@ -1088,9 +1091,10 @@ class ProposalAssemblyService
      *
      * @param BrandingProfile $branding
      * @param bool $hasCoverPage
+     * @param array|null $headerConfig
      * @return string
      */
-    private function getHTMLHeader($branding, $hasCoverPage = false): string
+    private function getHTMLHeader($branding, $hasCoverPage = false, $headerConfig = null): string
     {
         $colors = $branding->colors ?? [];
         $fonts = $branding->fonts ?? [];
@@ -1248,6 +1252,25 @@ class ProposalAssemblyService
                     font-weight: 500;
                 }
                 
+                /* Honor inline border styles - tables with border="0" or border-style: none */
+                table[border="0"],
+                table[style*="border-style: none"],
+                table[style*="border:none"],
+                table[style*="border: none"] {
+                    border: none !important;
+                }
+                
+                table[border="0"] th,
+                table[border="0"] td,
+                table[style*="border-style: none"] th,
+                table[style*="border-style: none"] td,
+                table[style*="border:none"] th,
+                table[style*="border:none"] td,
+                table[style*="border: none"] th,
+                table[style*="border: none"] td {
+                    border: none !important;
+                }
+                
                 table th {
                     background-color: ' .
             $cssConstants['table_header_bg'] .
@@ -1313,9 +1336,141 @@ class ProposalAssemblyService
                     display: list-item;
                     text-indent: 0;
                 }
+                
+                /* Proposal Header Styles */
+                .proposal-header {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    padding: 20px 0;
+                    border-bottom: 2px solid ' . ($colors['primary'] ?? '#2563eb') . ';
+                    margin-bottom: 30px;
+                }
+                
+                .proposal-header-logo {
+                    flex-shrink: 0;
+                    margin-right: 20px;
+                }
+                
+                .proposal-header-logo img {
+                    max-height: 60px;
+                    width: auto;
+                }
+                
+                .proposal-header-logo .logo-placeholder {
+                    width: 60px;
+                    height: 60px;
+                    background-color: ' . ($colors['primary'] ?? '#2563eb') . ';
+                    color: white;
+                    border-radius: 8px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-weight: bold;
+                    font-size: 18px;
+                }
+                
+                .proposal-header-content {
+                    flex: 1;
+                    text-align: right;
+                }
+                
+                .proposal-header-content .company-name {
+                    font-size: 24px;
+                    font-weight: bold;
+                    color: ' . ($colors['primary'] ?? '#2563eb') . ';
+                    margin-bottom: 5px;
+                    font-family: ' . ($fonts['heading'] ?? 'Arial, sans-serif') . ';
+                }
+                
+                .proposal-header-content .company-info {
+                    font-size: 14px;
+                    color: #666;
+                    line-height: 1.4;
+                }
+                
+                .proposal-header-content .company-info div {
+                    margin-bottom: 2px;
+                }
+                
+                .proposal-header-content .company-info .label {
+                    font-weight: 600;
+                    color: ' . ($colors['secondary'] ?? '#64748b') . ';
+                    display: inline-block;
+                    width: 70px;
+                }
+                
+                @media print {
+                    .proposal-header {
+                        padding: 15px 0;
+                        margin-bottom: 20px;
+                    }
+                    
+                    .proposal-header-logo img {
+                        max-height: 50px;
+                    }
+                }
             </style>
         </head>
-        <body>';
+        <body>' . $this->generateProposalHeader($branding, $headerConfig) . '
+    }
+
+    /**
+     * Generate proposal header HTML
+     *
+     * @param BrandingProfile $branding
+     * @param array|null $headerConfig
+     * @return string
+     */
+    private function generateProposalHeader($branding, $headerConfig = null): string
+    {
+        if (!$headerConfig || !($headerConfig['enabled'] ?? false)) {
+            return '';
+        }
+
+        $companyInfo = $branding->company_info ?? [];
+        $html = '<div class="proposal-header">';
+        
+        // Logo section
+        $html .= '<div class="proposal-header-logo">';
+        if ($branding->logo_url) {
+            $html .= '<img src="' . htmlspecialchars($branding->logo_url) . '" alt="' . htmlspecialchars($branding->company_name) . ' Logo">';
+        } else {
+            $initials = strtoupper(substr($branding->company_name, 0, 3));
+            $html .= '<div class="logo-placeholder">' . $initials . '</div>';
+        }
+        $html .= '</div>';
+        
+        // Company info section
+        $html .= '<div class="proposal-header-content">';
+        $html .= '<div class="company-name">' . htmlspecialchars($branding->company_name) . '</div>';
+        $html .= '<div class="company-info">';
+        
+        // Address
+        if (!empty($headerConfig['show_address']) && !empty($companyInfo['address'])) {
+            $html .= '<div>' . htmlspecialchars($companyInfo['address']) . '</div>';
+        }
+        
+        // Website
+        if (!empty($headerConfig['show_website']) && !empty($companyInfo['website'])) {
+            $html .= '<div><span class="label">Website</span>' . htmlspecialchars($companyInfo['website']) . '</div>';
+        }
+        
+        // Phone
+        if (!empty($headerConfig['show_phone']) && !empty($companyInfo['phone'])) {
+            $html .= '<div><span class="label">Phone</span>' . htmlspecialchars($companyInfo['phone']) . '</div>';
+        }
+        
+        // ABN
+        if (!empty($headerConfig['show_abn']) && !empty($companyInfo['abn'])) {
+            $html .= '<div><span class="label">ABN</span>' . htmlspecialchars($companyInfo['abn']) . '</div>';
+        }
+        
+        $html .= '</div>';
+        $html .= '</div>';
+        $html .= '</div>';
+        
+        return $html;
     }
 
     /**

@@ -302,6 +302,7 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
                 'branding_id' => $brandingId,
                 'proposal_data' => $sampleData,
                 'sections' => $template->sections->toArray(),
+                'header_config' => $template->styling['header'] ?? null,
             ]);
 
             // Check if request wants HTML response (for direct browser access)
@@ -453,6 +454,7 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
                 'template_id' => $id,
                 'proposal_data' => $sampleData,
                 'sections' => $template->sections->toArray(),
+                'header_config' => $template->styling['header'] ?? null,
             ]);
 
             // Use PDFController to generate the PDF
