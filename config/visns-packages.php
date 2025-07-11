@@ -116,6 +116,7 @@ return [
                 '{id}/sections' => ['get' => 'getSections', 'post' => 'addSection'],
                 '{id}/sections/{sectionId}' => ['put' => 'updateSection', 'delete' => 'deleteSection'],
                 '{id}/sections/reorder' => ['post' => 'reorderSections'],
+                '{id}/agreement-signature' => ['get' => 'getAgreementSignature', 'post' => 'saveAgreementSignature'],
             ],
         ],
         'brandingProfiles' => [

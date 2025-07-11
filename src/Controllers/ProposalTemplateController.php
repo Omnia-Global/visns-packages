@@ -677,4 +677,227 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
             );
         }
     }
+
+    /**
+     * Get Agreement Signature template data for a specific template
+     *
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getAgreementSignature($id)
+    {
+        try {
+            $template = ProposalTemplate::with('sections')->findOrFail($id);
+            
+            // Find the agreement_signature section
+            $agreementSection = $template->sections()
+                ->where('section_type', 'agreement_signature')
+                ->first();
+
+            if (!$agreementSection) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Agreement Signature section not found for this template',
+                ], 404);
+            }
+
+            // Parse the content to extract header, body, and fields
+            $content = $agreementSection->content ?? '';
+            $variables = $agreementSection->variables ?? [];
+            
+            // Extract headerText, bodyText, and fields from content
+            $parsedContent = $this->parseAgreementSignatureContent($content, $variables);
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'id' => $agreementSection->id,
+                    'template_id' => $template->id,
+                    'headerText' => $parsedContent['headerText'] ?? '',
+                    'bodyText' => $parsedContent['bodyText'] ?? '',
+                    'fields' => $parsedContent['fields'] ?? [],
+                    'section_type' => $agreementSection->section_type,
+                    'title' => $agreementSection->title,
+                    'sort_order' => $agreementSection->sort_order,
+                    'is_enabled' => $agreementSection->is_enabled ?? true,
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching agreement signature template: ' . $e->getMessage());
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error fetching agreement signature template',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
+
+    /**
+     * Save Agreement Signature template data for a specific template
+     *
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function saveAgreementSignature(Request $request, $id)
+    {
+        try {
+            $template = ProposalTemplate::findOrFail($id);
+
+            $validated = $request->validate([
+                'headerText' => 'nullable|string',
+                'bodyText' => 'nullable|string',
+                'fields' => 'nullable|array',
+                'fields.*.id' => 'required|string',
+                'fields.*.label' => 'required|string',
+                'fields.*.type' => 'required|string|in:text,textarea,select,checkbox,radio,date,email,phone,signature',
+                'fields.*.required' => 'boolean',
+                'fields.*.options' => 'nullable|array',
+                'fields.*.placeholder' => 'nullable|string',
+                'fields.*.defaultValue' => 'nullable|string',
+                'fields.*.validation' => 'nullable|array',
+            ]);
+
+            // Build the content structure for the agreement signature section
+            $content = $this->buildAgreementSignatureContent(
+                $validated['headerText'] ?? '',
+                $validated['bodyText'] ?? '',
+                $validated['fields'] ?? []
+            );
+
+            // Build variables array for template processing
+            $variables = $this->buildAgreementSignatureVariables($validated['fields'] ?? []);
+
+            // Find existing agreement_signature section or create new one
+            $agreementSection = $template->sections()
+                ->where('section_type', 'agreement_signature')
+                ->first();
+
+            if ($agreementSection) {
+                // Update existing section
+                $agreementSection->update([
+                    'content' => $content,
+                    'variables' => $variables,
+                    'title' => 'Agreement & Signature',
+                ]);
+            } else {
+                // Create new section
+                $maxOrder = $template->sections()->max('sort_order') ?? 0;
+                $agreementSection = $template->sections()->create([
+                    'section_type' => 'agreement_signature',
+                    'title' => 'Agreement & Signature',
+                    'content' => $content,
+                    'variables' => $variables,
+                    'sort_order' => $maxOrder + 1,
+                    'is_enabled' => true,
+                    'is_dynamic' => false,
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'id' => $agreementSection->id,
+                    'template_id' => $template->id,
+                    'headerText' => $validated['headerText'] ?? '',
+                    'bodyText' => $validated['bodyText'] ?? '',
+                    'fields' => $validated['fields'] ?? [],
+                    'section_type' => $agreementSection->section_type,
+                    'title' => $agreementSection->title,
+                    'sort_order' => $agreementSection->sort_order,
+                    'is_enabled' => $agreementSection->is_enabled,
+                ],
+                'message' => 'Agreement Signature template saved successfully',
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error saving agreement signature template: ' . $e->getMessage());
+            return response()->json(
+                [
+                    'success' => false,
+                    'message' => 'Error saving agreement signature template',
+                    'error' => $e->getMessage(),
+                ],
+                500
+            );
+        }
+    }
+
+    /**
+     * Parse agreement signature content to extract header, body, and fields
+     *
+     * @param string $content
+     * @param array $variables
+     * @return array
+     */
+    private function parseAgreementSignatureContent($content, $variables)
+    {
+        // If content is empty, return default structure
+        if (empty($content)) {
+            return [
+                'headerText' => '',
+                'bodyText' => '',
+                'fields' => [],
+            ];
+        }
+
+        // Try to parse as JSON first (new format)
+        $parsed = json_decode($content, true);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($parsed)) {
+            return [
+                'headerText' => $parsed['headerText'] ?? '',
+                'bodyText' => $parsed['bodyText'] ?? '',
+                'fields' => $parsed['fields'] ?? [],
+            ];
+        }
+
+        // Fallback: parse as HTML/text content (legacy format)
+        // For legacy support, we'll extract what we can from HTML content
+        return [
+            'headerText' => '',
+            'bodyText' => $content,
+            'fields' => [],
+        ];
+    }
+
+    /**
+     * Build agreement signature content structure
+     *
+     * @param string $headerText
+     * @param string $bodyText
+     * @param array $fields
+     * @return string
+     */
+    private function buildAgreementSignatureContent($headerText, $bodyText, $fields)
+    {
+        return json_encode([
+            'headerText' => $headerText,
+            'bodyText' => $bodyText,
+            'fields' => $fields,
+        ], JSON_PRETTY_PRINT);
+    }
+
+    /**
+     * Build variables array for agreement signature template processing
+     *
+     * @param array $fields
+     * @return array
+     */
+    private function buildAgreementSignatureVariables($fields)
+    {
+        $variables = [];
+
+        foreach ($fields as $field) {
+            $fieldId = $field['id'] ?? '';
+            $fieldLabel = $field['label'] ?? '';
+            
+            if (!empty($fieldId)) {
+                $variables["{{agreement_field_{$fieldId}}}"] = $fieldLabel;
+            }
+        }
+
+        return $variables;
+    }
 }
