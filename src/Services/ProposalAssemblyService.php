@@ -299,7 +299,16 @@ class ProposalAssemblyService
         // Store sections for TOC generation
         $this->allSections = $sections;
 
-        $html = $this->getHTMLHeader($branding);
+        // Check if there's a cover page section
+        $hasCoverPage = false;
+        foreach ($sections as $section) {
+            if ($section['section_type'] === 'cover_page') {
+                $hasCoverPage = true;
+                break;
+            }
+        }
+
+        $html = $this->getHTMLHeader($branding, $hasCoverPage);
 
         foreach ($sections as $section) {
             $html .= $this->renderSection($section, $branding, $proposalData);
@@ -1078,9 +1087,10 @@ class ProposalAssemblyService
      * Get HTML document header with branding styles
      *
      * @param BrandingProfile $branding
+     * @param bool $hasCoverPage
      * @return string
      */
-    private function getHTMLHeader($branding): string
+    private function getHTMLHeader($branding, $hasCoverPage = false): string
     {
         $colors = $branding->colors ?? [];
         $fonts = $branding->fonts ?? [];
@@ -1098,7 +1108,7 @@ class ProposalAssemblyService
                 }
                 
                 @page :first {
-                    margin: 0;
+                    margin: ' . ($hasCoverPage ? '0' : '40px') . ';
                 }
                 
                 body {
