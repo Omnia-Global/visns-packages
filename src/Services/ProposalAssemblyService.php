@@ -25,10 +25,22 @@ class ProposalAssemblyService
             $customSections = $config['sections'] ?? [];
             $headerConfig = $config['header_config'] ?? null;
 
-            // Load template and branding
+            // Load template and branding first
             $template = $templateId
                 ? ProposalTemplate::with('sections')->find($templateId)
                 : null;
+
+            // Log the incoming configuration for debugging
+            \Log::info('ProposalAssemblyService::assembleProposal - Incoming config', [
+                'template_id' => $templateId,
+                'branding_id' => $brandingId,
+                'has_proposal_data' => !empty($proposalData),
+                'sections_count' => count($customSections),
+                'header_config' => $headerConfig,
+                'header_config_type' => gettype($headerConfig),
+                'header_enabled' => $headerConfig['enabled'] ?? 'not_set',
+                'template_styling' => $template->styling ?? 'no_template_or_styling',
+            ]);
             $branding = $brandingId
                 ? BrandingProfile::with('file')->find($brandingId)
                 : $this->getDefaultBranding();
@@ -53,10 +65,57 @@ class ProposalAssemblyService
             );
 
             // Add header_config to proposalData so it's available in assembleHTML
+            // Priority order: direct header_config > template.styling.header > default config
+            if (!$headerConfig) {
+                // Check if template has header configuration in its styling
+                $templateHeaderConfig = null;
+                if ($template && isset($template->styling['header'])) {
+                    $templateHeaderConfig = $template->styling['header'];
+                    \Log::info('ProposalAssemblyService::assembleProposal - Found header config in template styling.header', [
+                        'template_header_config' => $templateHeaderConfig,
+                    ]);
+                } elseif ($template && isset($template->styling['header_config'])) {
+                    // Fallback for old naming convention
+                    $templateHeaderConfig = $template->styling['header_config'];
+                    \Log::info('ProposalAssemblyService::assembleProposal - Found header config in template styling.header_config', [
+                        'template_header_config' => $templateHeaderConfig,
+                    ]);
+                }
+                
+                // Use template config or default config if we have branding
+                if ($templateHeaderConfig) {
+                    $headerConfig = $templateHeaderConfig;
+                } elseif ($branding) {
+                    // Enable headers by default for all proposals with branding
+                    $headerConfig = [
+                        'enabled' => true,
+                        'show_address' => true,
+                        'show_phone' => true,
+                        'show_website' => false,
+                        'show_abn' => false,
+                    ];
+                    \Log::info('ProposalAssemblyService::assembleProposal - Using default header config', [
+                        'default_header_config' => $headerConfig,
+                    ]);
+                }
+            }
             $proposalData['header_config'] = $headerConfig;
+            
+            // Log before HTML assembly
+            \Log::info('ProposalAssemblyService::assembleProposal - Before HTML assembly', [
+                'header_config_in_proposal_data' => $proposalData['header_config'],
+                'branding_company_name' => $branding->company_name ?? 'null',
+            ]);
             
             // Generate HTML content
             $html = $this->assembleHTML($sections, $branding, $proposalData);
+            
+            // Log after HTML assembly
+            \Log::info('ProposalAssemblyService::assembleProposal - After HTML assembly', [
+                'html_length' => strlen($html),
+                'html_contains_header' => strpos($html, 'proposal-header') !== false,
+                'html_contains_has_header' => strpos($html, 'has-header') !== false,
+            ]);
 
             return [
                 'html' => $html,
@@ -315,6 +374,13 @@ class ProposalAssemblyService
 
         // Get header configuration from proposalData
         $headerConfig = $proposalData['header_config'] ?? null;
+
+        // Log header config extraction
+        \Log::info('ProposalAssemblyService::assembleHTML - Header config extraction', [
+            'proposal_data_keys' => array_keys($proposalData),
+            'header_config_from_proposal_data' => $headerConfig,
+            'has_cover_page' => $hasCoverPage,
+        ]);
 
         $html = $this->getHTMLHeader($branding, $hasCoverPage, $headerConfig);
 
@@ -1101,9 +1167,26 @@ class ProposalAssemblyService
      */
     private function getHTMLHeader($branding, $hasCoverPage = false, $headerConfig = null): string
     {
+        // Log header generation
+        \Log::info('ProposalAssemblyService::getHTMLHeader - Called', [
+            'has_branding' => !is_null($branding),
+            'branding_company_name' => $branding->company_name ?? 'null',
+            'has_cover_page' => $hasCoverPage,
+            'header_config' => $headerConfig,
+            'header_config_type' => gettype($headerConfig),
+            'header_enabled' => $headerConfig['enabled'] ?? 'not_set',
+        ]);
+
         $colors = $branding->colors ?? [];
         $fonts = $branding->fonts ?? [];
         $cssConstants = self::getSharedCSSConstants();
+
+        // Determine body class
+        $hasHeaderClass = ($headerConfig && ($headerConfig['enabled'] ?? false)) ? ' class="has-header"' : '';
+        \Log::info('ProposalAssemblyService::getHTMLHeader - Body class generation', [
+            'header_condition_met' => $headerConfig && ($headerConfig['enabled'] ?? false),
+            'body_class_string' => $hasHeaderClass,
+        ]);
 
         return '
         <!DOCTYPE html>
@@ -1495,7 +1578,7 @@ class ProposalAssemblyService
                 }
             </style>
         </head>
-        <body' . (($headerConfig && ($headerConfig['enabled'] ?? false)) ? ' class="has-header"' : '') . '>' . $this->generateProposalHeader($branding, $headerConfig);
+        <body' . $hasHeaderClass . '>' . $this->generateProposalHeader($branding, $headerConfig);
     }
 
     /**
@@ -1507,9 +1590,19 @@ class ProposalAssemblyService
      */
     private function generateProposalHeader($branding, $headerConfig = null): string
     {
+        \Log::info('ProposalAssemblyService::generateProposalHeader - Called', [
+            'header_config' => $headerConfig,
+            'header_enabled' => $headerConfig['enabled'] ?? 'not_set',
+            'header_is_null' => is_null($headerConfig),
+            'branding_company_name' => $branding->company_name ?? 'null',
+        ]);
+
         if (!$headerConfig || !($headerConfig['enabled'] ?? false)) {
+            \Log::info('ProposalAssemblyService::generateProposalHeader - Header disabled, returning empty string');
             return '';
         }
+
+        \Log::info('ProposalAssemblyService::generateProposalHeader - Header enabled, generating HTML');
 
         $companyInfo = $branding->company_info ?? [];
         $html = '<div class="proposal-header">';
@@ -1563,6 +1656,11 @@ class ProposalAssemblyService
         $html .= '</div>';
         $html .= '</div>';
         $html .= '</div>';
+        
+        \Log::info('ProposalAssemblyService::generateProposalHeader - Generated header HTML', [
+            'html_length' => strlen($html),
+            'html_preview' => substr($html, 0, 200) . '...',
+        ]);
         
         return $html;
     }

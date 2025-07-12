@@ -375,6 +375,13 @@ class PDFController extends \App\Http\Controllers\Controller
     public function generateProposalPDF(Request $request)
     {
         try {
+            // Log the incoming request for debugging
+            Log::info('PDFController::generateProposalPDF - Incoming request data', [
+                'request_keys' => array_keys($request->all()),
+                'has_header_config' => $request->has('header_config'),
+                'header_config_raw' => $request->input('header_config'),
+            ]);
+
             // Handle JSON string from form submission
             $proposalData = $request->input('proposal_data');
             if (is_string($proposalData)) {
@@ -397,6 +404,12 @@ class PDFController extends \App\Http\Controllers\Controller
                 'header_config' => 'nullable|array',
             ]);
             
+            // Log validation results
+            Log::info('PDFController::generateProposalPDF - Validation results', [
+                'header_config_validated' => $validated['header_config'] ?? 'null',
+                'header_config_type' => gettype($validated['header_config'] ?? null),
+            ]);
+            
             // Ensure proposal_data is an array after parsing
             if (!is_array($proposalData)) {
                 throw new \InvalidArgumentException('The proposal data must be an array.');
@@ -417,7 +430,20 @@ class PDFController extends \App\Http\Controllers\Controller
                 'header_config' => $validated['header_config'] ?? null,
             ];
             
+            // Log the assembly config being sent to the service
+            Log::info('PDFController::generateProposalPDF - Assembly config', [
+                'assembly_config' => $assemblyConfig,
+                'header_config_in_assembly' => $assemblyConfig['header_config'],
+            ]);
+            
             $proposalData = $proposalService->assembleProposal($assemblyConfig);
+            
+            // Log what we got back from the assembly service
+            Log::info('PDFController::generateProposalPDF - Assembly results', [
+                'html_length' => strlen($proposalData['html']),
+                'html_contains_header' => strpos($proposalData['html'], 'proposal-header') !== false,
+                'html_contains_has_header_class' => strpos($proposalData['html'], 'has-header') !== false,
+            ]);
 
             // Get filename (default: proposal.pdf)
             $filename = $validated['filename'] ?? 'proposal-' . date('Y-m-d') . '.pdf';
@@ -450,13 +476,33 @@ class PDFController extends \App\Http\Controllers\Controller
                 ->setPaper($paper, $orientation);
                 
             // Add header to each page if header is enabled
-            if (isset($validated['header_config']) && ($validated['header_config']['enabled'] ?? false)) {
+            Log::info('PDFController::generateProposalPDF - Header check', [
+                'header_config_isset' => isset($validated['header_config']),
+                'header_config_enabled' => $validated['header_config']['enabled'] ?? 'not_set',
+                'header_condition_met' => isset($validated['header_config']) && ($validated['header_config']['enabled'] ?? false),
+            ]);
+            
+            // Check if headers should be enabled (from request, HTML contains headers, or branding is available)
+            $hasHeaders = (isset($validated['header_config']) && ($validated['header_config']['enabled'] ?? false)) || 
+                         strpos($proposalData['html'], 'proposal-header') !== false ||
+                         strpos($proposalData['html'], 'has-header') !== false;
+            
+            if ($hasHeaders) {
+                Log::info('PDFController::generateProposalPDF - Adding header script to PDF');
+                // Get company name from branding metadata if available
+                $companyName = 'Company Name';
+                if (isset($proposalData['metadata']['branding']->company_name)) {
+                    $companyName = $proposalData['metadata']['branding']->company_name;
+                }
+                
                 $pdf->getDomPDF()->getCanvas()->page_script('
-                    if ($PAGE_NUM > 1) {
+                    if ($PAGE_NUM >= 1) {
                         $font = $fontMetrics->getFont("Arial", "normal");
-                        $canvas->text(40, 40, "Header on page $PAGE_NUM", $font, 12, array(0,0,0));
+                        $canvas->text(40, 40, "' . $companyName . ' - Page $PAGE_NUM", $font, 10, array(0,0,0));
                     }
                 ');
+            } else {
+                Log::info('PDFController::generateProposalPDF - Headers not detected, skipping header script');
             }
 
             // Return PDF as download or inline
