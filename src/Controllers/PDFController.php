@@ -394,6 +394,7 @@ class PDFController extends \App\Http\Controllers\Controller
                 'orientation' => 'nullable|string|in:portrait,landscape',
                 'download' => 'nullable|boolean',
                 'sections' => 'nullable|array',
+                'header_config' => 'nullable|array',
             ]);
             
             // Ensure proposal_data is an array after parsing
@@ -413,6 +414,7 @@ class PDFController extends \App\Http\Controllers\Controller
                 'branding_id' => $validated['branding_id'] ?? null,
                 'proposal_data' => $validated['proposal_data'] ?? [],
                 'sections' => $validated['sections'] ?? [],
+                'header_config' => $validated['header_config'] ?? null,
             ];
             
             $proposalData = $proposalService->assembleProposal($assemblyConfig);
@@ -446,6 +448,16 @@ class PDFController extends \App\Http\Controllers\Controller
             $pdf = PDF::loadHTML($proposalData['html'])
                 ->setOptions($options)
                 ->setPaper($paper, $orientation);
+                
+            // Add header to each page if header is enabled
+            if (isset($validated['header_config']) && ($validated['header_config']['enabled'] ?? false)) {
+                $pdf->getDomPDF()->getCanvas()->page_script('
+                    if ($PAGE_NUM > 1) {
+                        $font = $fontMetrics->getFont("Arial", "normal");
+                        $canvas->text(40, 40, "Header on page $PAGE_NUM", $font, 12, array(0,0,0));
+                    }
+                ');
+            }
 
             // Return PDF as download or inline
             $download = $validated['download'] ?? true;
@@ -495,6 +507,7 @@ class PDFController extends \App\Http\Controllers\Controller
                 'template_id' => 'nullable|integer',
                 'branding_id' => 'nullable|integer',
                 'sections' => 'nullable|array',
+                'header_config' => 'nullable|array',
             ]);
             
             // Ensure proposal_data is an array after parsing
@@ -514,6 +527,7 @@ class PDFController extends \App\Http\Controllers\Controller
                 'branding_id' => $validated['branding_id'] ?? null,
                 'proposal_data' => $validated['proposal_data'] ?? [],
                 'sections' => $validated['sections'] ?? [],
+                'header_config' => $validated['header_config'] ?? null,
             ];
             
             $proposalData = $proposalService->assembleProposal($assemblyConfig);
@@ -563,6 +577,7 @@ class PDFController extends \App\Http\Controllers\Controller
                 'template_id' => 'nullable|integer',
                 'branding_id' => 'nullable|integer',
                 'sections' => 'nullable|array',
+                'header_config' => 'nullable|array',
             ]);
             
             // Ensure proposal_data is an array after parsing
@@ -582,6 +597,7 @@ class PDFController extends \App\Http\Controllers\Controller
                 'branding_id' => $validated['branding_id'] ?? null,
                 'proposal_data' => $validated['proposal_data'] ?? [],
                 'sections' => $validated['sections'] ?? [],
+                'header_config' => $validated['header_config'] ?? null,
             ];
             
             $proposalData = $proposalService->assembleProposal($assemblyConfig);

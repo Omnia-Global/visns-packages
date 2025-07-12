@@ -906,4 +906,241 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
 
         return $variables;
     }
+
+    /**
+     * Get ALL database fields from ALL tables for enhanced variable selection
+     * This provides a comprehensive list of all available fields for maximum flexibility
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getAllDatabaseFields()
+    {
+        try {
+            $tables = [];
+            $excludedTables = config('visns-packages.proposal.intelligent_variables.excluded_tables', [
+                'migrations', 'password_resets', 'password_reset_tokens', 'failed_jobs',
+                'personal_access_tokens', 'sessions', 'cache', 'cache_locks', 'jobs',
+                'job_batches', 'notifications', 'telescope_entries', 'telescope_entries_tags',
+                'telescope_monitoring', 'activity_log', 'media', 'permission_tables'
+            ]);
+            
+            $excludedFields = config('visns-packages.proposal.intelligent_variables.global_exclusions', [
+                'id', 'password', 'remember_token', 'email_verified_at', 'two_factor_secret',
+                'two_factor_recovery_codes', 'created_at', 'updated_at', 'deleted_at'
+            ]);
+
+            // Get all tables in the database
+            $connection = \Illuminate\Support\Facades\DB::connection();
+            $databaseName = $connection->getDatabaseName();
+            
+            if ($connection->getDriverName() === 'mysql') {
+                $allTables = $connection->select("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ?", [$databaseName]);
+                $tableNames = array_map(function($table) { return $table->TABLE_NAME; }, $allTables);
+            } else if ($connection->getDriverName() === 'pgsql') {
+                $allTables = $connection->select("SELECT tablename FROM pg_tables WHERE schemaname = 'public'");
+                $tableNames = array_map(function($table) { return $table->tablename; }, $allTables);
+            } else {
+                // SQLite or other databases
+                $tableNames = \Illuminate\Support\Facades\Schema::getAllTables();
+                $tableNames = array_map(function($table) { return array_values((array)$table)[0]; }, $tableNames);
+            }
+
+            foreach ($tableNames as $tableName) {
+                // Skip excluded tables
+                if (in_array($tableName, $excludedTables)) {
+                    continue;
+                }
+
+                try {
+                    // Get column information for the table
+                    $columns = \Illuminate\Support\Facades\Schema::getColumnListing($tableName);
+                    
+                    // Filter out excluded fields
+                    $allowedColumns = array_diff($columns, $excludedFields);
+                    
+                    if (empty($allowedColumns)) {
+                        continue;
+                    }
+
+                    $tableVariables = [];
+                    foreach ($allowedColumns as $column) {
+                        $fieldType = $this->getFieldType($tableName, $column);
+                        $description = $this->generateFieldDescription($column, ucfirst($tableName));
+                        
+                        // Add main variable
+                        $tableVariables[] = [
+                            'name' => $tableName . '_' . $column,
+                            'description' => $description,
+                            'field_type' => $fieldType,
+                            'original_field' => $column,
+                            'table_name' => $tableName
+                        ];
+                        
+                        // Add raw version for numeric/currency fields
+                        if ($this->isNumericField($fieldType, $column)) {
+                            $tableVariables[] = [
+                                'name' => $tableName . '_' . $column . '_raw',
+                                'description' => $description . ' (for calculations)',
+                                'field_type' => 'float',
+                                'original_field' => $column,
+                                'table_name' => $tableName,
+                                'is_calculation_version' => true
+                            ];
+                        }
+                    }
+
+                    if (!empty($tableVariables)) {
+                        // Determine icon based on table name patterns
+                        $icon = $this->getTableIcon($tableName);
+                        
+                        $tables[] = [
+                            'category' => $this->formatTableName($tableName),
+                            'icon' => $icon,
+                            'table_name' => $tableName,
+                            'variables' => $tableVariables,
+                            'field_count' => count($tableVariables)
+                        ];
+                    }
+
+                } catch (\Exception $tableError) {
+                    Log::warning("Error processing table {$tableName}: " . $tableError->getMessage());
+                    continue;
+                }
+            }
+
+            // Sort tables by name for better UX
+            usort($tables, function($a, $b) {
+                return strcmp($a['category'], $b['category']);
+            });
+
+            return response()->json([
+                'success' => true,
+                'tables' => $tables,
+                'total_tables' => count($tables),
+                'total_variables' => array_sum(array_map(function($table) { 
+                    return $table['field_count']; 
+                }, $tables)),
+                'excluded_tables' => $excludedTables,
+                'excluded_fields' => $excludedFields
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error fetching all database fields: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Error fetching database fields',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get appropriate icon for a table based on its name
+     */
+    private function getTableIcon($tableName)
+    {
+        $iconMap = [
+            // Users & Auth
+            'users' => 'User', 'user' => 'User', 'admins' => 'UserCheck', 'staff' => 'Users',
+            // Customers & Clients
+            'customers' => 'User', 'clients' => 'Users', 'contacts' => 'Contact',
+            // Projects & Work
+            'projects' => 'FolderOpen', 'jobs' => 'Briefcase', 'tasks' => 'CheckSquare',
+            'designs' => 'PaintBucket', 'estimates' => 'Calculator', 'estimations' => 'Calculator',
+            // Financial
+            'quotes' => 'FileText', 'invoices' => 'Receipt', 'payments' => 'CreditCard',
+            'transactions' => 'DollarSign', 'billing' => 'Receipt',
+            // Content & Media
+            'files' => 'File', 'images' => 'Image', 'documents' => 'FileText',
+            'media' => 'Image', 'galleries' => 'Images',
+            // Communication
+            'messages' => 'MessageSquare', 'emails' => 'Mail', 'notifications' => 'Bell',
+            'comments' => 'MessageCircle', 'notes' => 'StickyNote',
+            // System & Config
+            'settings' => 'Settings', 'configs' => 'Settings', 'preferences' => 'Sliders',
+            'templates' => 'Layout', 'branding' => 'Palette',
+            // Location & Address
+            'addresses' => 'MapPin', 'locations' => 'MapPin', 'sites' => 'Building',
+            // Contractors & Vendors
+            'contractors' => 'Hammer', 'vendors' => 'Store', 'suppliers' => 'Truck',
+            // Time & Scheduling
+            'schedules' => 'Calendar', 'appointments' => 'Clock', 'timesheets' => 'Timer',
+            // Quality & Issues
+            'defects' => 'AlertTriangle', 'issues' => 'AlertCircle', 'reports' => 'BarChart3',
+            // Categories & Types
+            'categories' => 'Folder', 'types' => 'Tag', 'status' => 'CheckCircle'
+        ];
+
+        // Check for exact match first
+        if (isset($iconMap[$tableName])) {
+            return $iconMap[$tableName];
+        }
+
+        // Check for partial matches (singular/plural variations)
+        foreach ($iconMap as $pattern => $icon) {
+            if (str_contains($tableName, $pattern) || str_contains($pattern, rtrim($tableName, 's'))) {
+                return $icon;
+            }
+        }
+
+        // Default icon
+        return 'Database';
+    }
+
+    /**
+     * Format table name for display
+     */
+    private function formatTableName($tableName)
+    {
+        // Convert snake_case to Title Case and handle plurals nicely
+        $formatted = str_replace('_', ' ', $tableName);
+        $formatted = ucwords($formatted);
+        
+        // Add some context for common table patterns
+        $patterns = [
+            'Types' => 'Types & Categories',
+            'Categories' => 'Categories & Classifications',
+            'Status' => 'Status & States',
+            'Config' => 'Configuration',
+            'Setting' => 'Settings & Preferences'
+        ];
+
+        foreach ($patterns as $pattern => $replacement) {
+            if (str_contains($formatted, $pattern)) {
+                $formatted = str_replace($pattern, $replacement, $formatted);
+                break;
+            }
+        }
+
+        return $formatted;
+    }
+
+    /**
+     * Check if a field is numeric and should have a raw calculation version
+     */
+    private function isNumericField($fieldType, $fieldName)
+    {
+        // Common numeric field types
+        $numericTypes = ['decimal', 'float', 'double', 'integer', 'bigint', 'smallint', 'tinyint', 'money'];
+        
+        if (in_array(strtolower($fieldType), $numericTypes)) {
+            return true;
+        }
+        
+        // Common numeric field name patterns
+        $numericPatterns = [
+            'price', 'cost', 'fee', 'amount', 'total', 'subtotal', 'budget', 'value',
+            'rate', 'charge', 'sum', 'balance', 'payment', 'deposit', 'discount',
+            'tax', 'gst', 'vat', 'markup', 'margin', 'commission', 'salary', 'wage'
+        ];
+        
+        $fieldNameLower = strtolower($fieldName);
+        foreach ($numericPatterns as $pattern) {
+            if (str_contains($fieldNameLower, $pattern)) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
 }

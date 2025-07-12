@@ -1007,13 +1007,13 @@ class ProposalAssemblyService
         }
 
         return '
-        <div class="agreement-signature-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
-            <h1 style="margin-bottom: 30px; color: ' .
+        <div class="agreement-signature-section" style="page-break-before: always; padding: 5px 20px 30px 20px; page-break-inside: avoid; border: none !important; outline: none !important;">
+            <h1 style="margin-bottom: 16px; margin-top: 0; color: ' .
             ($branding->colors['primary'] ?? '#2563eb') .
             ';">' .
             $section['title'] .
             '</h1>
-            <div class="agreement-content" style="line-height: 1.6;">
+            <div class="agreement-content" style="line-height: 1.5; border: none !important; box-shadow: none !important; outline: none !important; background: transparent !important;">
                 ' .
             $content .
             '
@@ -1035,8 +1035,8 @@ class ProposalAssemblyService
 
         // For content sections, don't render the section title - let the dynamic content control its own headings
         return '
-        <div class="content-section" style="padding: 60px; page-break-inside: avoid;">
-            <div class="section-content" style="line-height: 1.6;">
+        <div class="content-section" style="padding: 20px 20px; page-break-inside: avoid;">
+            <div class="section-content" style="line-height: 1.5;">
                 ' .
             $content .
             '
@@ -1113,11 +1113,11 @@ class ProposalAssemblyService
             <title>Proposal</title>
             <style>
                 @page {
-                    margin: 40px;
+                    margin: 20px;
                 }
                 
                 @page :first {
-                    margin: ' . ($hasCoverPage ? '0' : '40px') . ';
+                    margin: ' . ($hasCoverPage ? '0' : '20px') . ';
                 }
                 
                 body {
@@ -1136,49 +1136,45 @@ class ProposalAssemblyService
             ($fonts['heading'] ?? 'Arial, sans-serif') .
             ';
                     line-height: 1.3;
-                    margin-bottom: 20px;
+                    margin-bottom: 16px;
                     margin-top: 0;
                     font-weight: bold;
                 }
                 
                 h1 {
-                    font-size: 32px;
+                    font-size: 24px;
                     color: ' .
             ($colors['primary'] ?? '#2563eb') .
             ';
                     font-weight: bold;
-                    margin-bottom: 25px;
+                    margin-bottom: 16px;
+                    margin-top: 0;
+                    margin-left: 0;
+                    padding-left: 0;
                 }
                 
                 h2 {
-                    font-size: 26px;
+                    font-size: 20px;
                     color: ' .
             ($colors['primary'] ?? '#2563eb') .
             ';
                     font-weight: bold;
-                    margin-bottom: 20px;
+                    margin-bottom: 14px;
+                    margin-top: 0;
                 }
                 
                 h3 {
-                    font-size: 22px;
+                    font-size: 18px;
                     color: ' .
             ($colors['primary'] ?? '#2563eb') .
             ';
                     font-weight: bold;
-                    margin-bottom: 15px;
+                    margin-bottom: 12px;
+                    margin-top: 0;
                 }
                 
                 h4 {
-                    font-size: 19px;
-                    color: ' .
-            ($colors['secondary'] ?? '#64748b') .
-            ';
-                    font-weight: bold;
-                    margin-bottom: 12px;
-                }
-                
-                h5 {
-                    font-size: 17px;
+                    font-size: 16px;
                     color: ' .
             ($colors['secondary'] ?? '#64748b') .
             ';
@@ -1186,13 +1182,22 @@ class ProposalAssemblyService
                     margin-bottom: 10px;
                 }
                 
-                h6 {
-                    font-size: 16px;
+                h5 {
+                    font-size: 15px;
                     color: ' .
             ($colors['secondary'] ?? '#64748b') .
             ';
                     font-weight: bold;
                     margin-bottom: 8px;
+                }
+                
+                h6 {
+                    font-size: 14px;
+                    color: ' .
+            ($colors['secondary'] ?? '#64748b') .
+            ';
+                    font-weight: bold;
+                    margin-bottom: 6px;
                 }
                 
                 .primary-bg { background-color: ' .
@@ -1314,18 +1319,27 @@ class ProposalAssemblyService
                 .page-break { page-break-before: always; }
                 .no-break { page-break-inside: avoid; }
                 
+                /* Override container borders only */
+                .agreement-content,
+                .agreement-signature-section {
+                    border: none !important;
+                    outline: none !important;
+                    box-shadow: none !important;
+                    background: transparent !important;
+                }
+                
                 p { 
-                    margin: 14px 0; 
-                    font-size: 16px; 
-                    line-height: 1.6;
+                    margin: 12px 0; 
+                    font-size: 14px; 
+                    line-height: 1.5;
                     color: #333;
                 }
                 ul, ol { 
-                    margin: 16px 0; 
+                    margin: 14px 0; 
                     padding-left: 0; 
-                    margin-left: 25px;
-                    font-size: 16px;
-                    line-height: 1.6;
+                    margin-left: 20px;
+                    font-size: 14px;
+                    line-height: 1.5;
                     list-style-type: disc;
                     list-style-position: outside;
                 }
@@ -1333,11 +1347,11 @@ class ProposalAssemblyService
                     list-style-type: decimal;
                 }
                 li { 
-                    margin-bottom: 10px; 
-                    padding-left: 8px;
+                    margin-bottom: 8px; 
+                    padding-left: 6px;
                     margin-left: 0;
                     color: #333;
-                    line-height: 1.6;
+                    line-height: 1.5;
                     display: list-item;
                     text-indent: 0;
                 }
@@ -1405,46 +1419,83 @@ class ProposalAssemblyService
                     width: 70px;
                 }
                 
-                @media print {
-                    @page {
-                        margin-top: 120px;
-                        @top-center {
-                            content: element(header);
-                        }
-                    }
-                    
-                    .proposal-header {
-                        position: running(header);
-                        padding: 15px 0;
-                        margin-bottom: 20px;
-                        border-bottom: 2px solid ' . ($colors['primary'] ?? '#2563eb') . ';
-                        background: white;
-                    }
-                    
-                    .proposal-header-logo img {
-                        max-height: 50px;
-                    }
-                    
-                    /* Alternative approach - fixed header */
-                    .proposal-header-fixed {
-                        position: fixed;
-                        top: 0;
-                        left: 0;
-                        right: 0;
-                        z-index: 1000;
-                        background: white;
-                        border-bottom: 2px solid ' . ($colors['primary'] ?? '#2563eb') . ';
-                        padding: 15px 20px;
-                        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                    }
-                    
-                    body {
-                        padding-top: 100px;
-                    }
+                /* Header CSS for DomPDF - using script approach */
+                .proposal-header {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    width: 100%;
+                    padding: 10px 20px;
+                    border-bottom: 2px solid ' . ($colors['primary'] ?? '#2563eb') . ';
+                    background: white;
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    z-index: 1000;
+                    box-sizing: border-box;
+                }
+                
+                .proposal-header-logo img {
+                    max-height: 40px;
+                    width: auto;
+                }
+                
+                .proposal-header-logo .logo-placeholder {
+                    width: 40px;
+                    height: 40px;
+                    background-color: ' . ($colors['primary'] ?? '#2563eb') . ';
+                    color: white;
+                    border-radius: 6px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-weight: bold;
+                    font-size: 14px;
+                }
+                
+                .proposal-header-content {
+                    text-align: right;
+                    flex: 1;
+                }
+                
+                .proposal-header-content .company-name {
+                    font-size: 18px;
+                    font-weight: bold;
+                    color: ' . ($colors['primary'] ?? '#2563eb') . ';
+                    margin-bottom: 3px;
+                    font-family: ' . ($fonts['heading'] ?? 'Arial, sans-serif') . ';
+                }
+                
+                .proposal-header-content .company-info {
+                    font-size: 12px;
+                    color: #666;
+                    line-height: 1.3;
+                }
+                
+                .proposal-header-content .company-info div {
+                    margin-bottom: 1px;
+                }
+                
+                .proposal-header-content .company-info .label {
+                    font-weight: 600;
+                    color: ' . ($colors['secondary'] ?? '#64748b') . ';
+                    display: inline-block;
+                    width: 50px;
+                }
+                
+                /* Adjust body content for header space when header is enabled */
+                body.has-header {
+                    padding-top: 80px;
+                }
+                
+                /* Skip header on cover page */
+                .omnia-cover-page .proposal-header {
+                    display: none;
                 }
             </style>
         </head>
-        <body>' . $this->generateProposalHeader($branding, $headerConfig);
+        <body' . (($headerConfig && ($headerConfig['enabled'] ?? false)) ? ' class="has-header"' : '') . '>' . $this->generateProposalHeader($branding, $headerConfig);
     }
 
     /**
@@ -1461,7 +1512,7 @@ class ProposalAssemblyService
         }
 
         $companyInfo = $branding->company_info ?? [];
-        $html = '<div class="proposal-header proposal-header-fixed">';
+        $html = '<div class="proposal-header">';
         
         // Logo section
         $html .= '<div class="proposal-header-logo">';
@@ -1543,7 +1594,11 @@ class ProposalAssemblyService
             return '';
         }
 
-        foreach ($data as $key => $value) {
+        // Enhance data with raw numeric versions for calculations
+        $enhancedData = $this->enhanceDataWithNumericVersions($data);
+        
+        // First pass: Replace all simple variable placeholders
+        foreach ($enhancedData as $key => $value) {
             $placeholder = '{{' . $key . '}}';
             // Convert value to string, handle arrays and objects appropriately
             if (is_array($value)) {
@@ -1561,6 +1616,9 @@ class ProposalAssemblyService
             }
             $content = str_replace($placeholder, $stringValue, $content);
         }
+
+        // Second pass: Process mathematical expressions
+        $content = $this->processMathematicalExpressions($content, $enhancedData);
 
         return $content;
     }
@@ -1812,26 +1870,36 @@ class ProposalAssemblyService
     private function getDefaultAgreementSignature(): string
     {
         return '
-        <p style="margin-bottom: 30px; line-height: 1.6;">We are excited about the opportunity to work with you on this project and deliver a solution that meets your needs and exceeds your expectations. To proceed, please review the details of the proposal and provide your acceptance by signing below.</p>
-        
-        <p style="margin-bottom: 50px; line-height: 1.6;">By signing this document, you agree to the scope outlined in this proposal and authorize us to commence work on the project as described.</p>
-        
-        <div style="margin-bottom: 80px;">
-            <span style="font-weight: bold; font-size: inherit;">Client Name:</span>
-            <span style="border-bottom: 2px solid #000; display: inline-block; width: 400px; margin-left: 20px; height: 20px;"></span>
-        </div>
-        
-        <div style="margin-bottom: 80px;">
-            <span style="font-weight: bold; font-size: inherit;">Signature:</span>
-            <span style="border-bottom: 2px solid #000; display: inline-block; width: 400px; margin-left: 35px; height: 20px;"></span>
-        </div>
-        
-        <div style="margin-bottom: 80px;">
-            <span style="font-weight: bold; font-size: inherit;">Date:</span>
-            <span style="border-bottom: 2px solid #000; display: inline-block; width: 400px; margin-left: 80px; height: 20px;"></span>
-        </div>
-        
-        <p style="margin-top: 50px; line-height: 1.6; font-weight: normal;">We look forward to a successful collaboration.</p>';
+        <div style="border: none !important; outline: none !important; box-shadow: none !important; background: transparent !important; padding: 0; margin: 0;">
+            <p style="margin-bottom: 20px; line-height: 1.5;">We are excited about the opportunity to work with you on this project and deliver a solution that meets your needs and exceeds your expectations. To proceed, please review the details of the proposal and provide your acceptance by signing below.</p>
+            
+            <p style="margin-bottom: 30px; line-height: 1.5;">By signing this document, you agree to the scope outlined in this proposal and authorize us to commence work on the project as described.</p>
+            
+            <div style="margin-bottom: 40px;">
+                <span style="font-weight: bold; font-size: inherit;">Name *:</span>
+                <span style="border-bottom: 1px dotted #666; display: inline-block; width: 400px; margin-left: 20px; height: 18px;"></span>
+            </div>
+            
+            <div style="margin-bottom: 40px;">
+                <span style="font-weight: bold; font-size: inherit;">Company Name *:</span>
+                <span style="border-bottom: 1px dotted #666; display: inline-block; width: 300px; margin-left: 20px; height: 18px;"></span>
+            </div>
+            
+            <div style="margin-bottom: 40px;">
+                <span style="font-weight: bold; font-size: inherit;">ABN:</span>
+                <span style="border-bottom: 1px dotted #666; display: inline-block; width: 400px; margin-left: 60px; height: 18px;"></span>
+            </div>
+            
+            <div style="margin-bottom: 60px;">
+                <span style="font-weight: bold; font-size: inherit;">Signature *:</span>
+                <span style="border-bottom: 1px solid #333; display: inline-block; width: 350px; margin-left: 20px; height: 30px;"></span>
+            </div>
+            
+            <div style="margin-bottom: 40px;">
+                <span style="font-weight: bold; font-size: inherit;">Date *:</span>
+                <span style="border-bottom: 1px dotted #666; display: inline-block; width: 400px; margin-left: 60px; height: 18px;"></span>
+            </div>
+        </div>';
     }
 
     /**
@@ -2103,5 +2171,303 @@ class ProposalAssemblyService
         );
 
         return $content;
+    }
+
+    /**
+     * Enhance data array with raw numeric versions of formatted values
+     * This automatically creates _raw versions of currency/numeric fields for calculations
+     *
+     * @param array $data
+     * @return array
+     */
+    private function enhanceDataWithNumericVersions(array $data): array
+    {
+        $enhancedData = $data;
+        
+        foreach ($data as $key => $value) {
+            // Skip if this is already a raw version
+            if (str_ends_with($key, '_raw')) {
+                continue;
+            }
+            
+            // Check if this looks like a formatted currency or numeric value
+            if (is_string($value)) {
+                $numericValue = $this->extractNumericValue($value);
+                
+                // Only create raw version if we found a meaningful numeric value
+                // and it's not already exactly the same as the original
+                if ($numericValue > 0 && $numericValue != $value) {
+                    $enhancedData[$key . '_raw'] = $numericValue;
+                }
+            } elseif (is_numeric($value)) {
+                // For direct numeric values, also provide a raw version for consistency
+                $enhancedData[$key . '_raw'] = (float) $value;
+            }
+            
+            // Special handling for mathematical expressions in template content
+            // If we find expressions using this variable, make sure raw version exists
+            if (is_string($value) && (strpos($value, '$') !== false || is_numeric($value))) {
+                $numericValue = $this->extractNumericValue($value);
+                if ($numericValue > 0) {
+                    $enhancedData[$key . '_for_calculation'] = $numericValue;
+                }
+            }
+        }
+        
+        return $enhancedData;
+    }
+
+    /**
+     * Process mathematical expressions in content
+     * Supports expressions like: {{variable}} * 0.1, {{var1}} + {{var2}}, etc.
+     *
+     * @param string $content
+     * @param array $data
+     * @return string
+     */
+    private function processMathematicalExpressions(string $content, array $data): string
+    {
+        // First, let's handle expressions with variables still in them
+        $content = preg_replace_callback('/\{\{[^}]+\}\}\s*[\+\-\*\/\%]\s*[\d\.\{\}a-zA-Z_\+\-\*\/\%\s]+/', function ($matches) use ($data) {
+            $expression = $matches[0];
+            
+            try {
+                // Replace variables in the expression with their numeric values
+                foreach ($data as $key => $value) {
+                    $placeholder = '{{' . $key . '}}';
+                    if (strpos($expression, $placeholder) !== false) {
+                        $numericValue = $this->extractNumericValue($value);
+                        $expression = str_replace($placeholder, $numericValue, $expression);
+                    }
+                }
+                
+                // Evaluate the mathematical expression safely
+                $result = $this->evaluateMathExpression($expression);
+                
+                // Format the result
+                return $this->formatCalculatedValue($result, $data);
+                
+            } catch (\Exception $e) {
+                \Log::warning('Failed to evaluate math expression: ' . $expression . ' - ' . $e->getMessage());
+                return $matches[0];
+            }
+        }, $content);
+        
+        // Then handle pure numeric expressions like "2222 * 0.1"
+        $content = preg_replace_callback('/\b(\d+(?:\.\d+)?)\s*([\+\-\*\/\%])\s*(\d+(?:\.\d+)?)\b/', function ($matches) use ($data) {
+            $left = (float) $matches[1];
+            $operator = $matches[2];
+            $right = (float) $matches[3];
+            
+            try {
+                switch ($operator) {
+                    case '+':
+                        $result = $left + $right;
+                        break;
+                    case '-':
+                        $result = $left - $right;
+                        break;
+                    case '*':
+                        $result = $left * $right;
+                        break;
+                    case '/':
+                        if ($right == 0) {
+                            throw new \InvalidArgumentException('Division by zero');
+                        }
+                        $result = $left / $right;
+                        break;
+                    case '%':
+                        if ($right == 0) {
+                            throw new \InvalidArgumentException('Modulo by zero');
+                        }
+                        $result = fmod($left, $right);
+                        break;
+                    default:
+                        return $matches[0];
+                }
+                
+                // Format the result
+                return $this->formatCalculatedValue($result, $data);
+                
+            } catch (\Exception $e) {
+                \Log::warning('Failed to evaluate simple math expression: ' . $matches[0] . ' - ' . $e->getMessage());
+                return $matches[0];
+            }
+        }, $content);
+        
+        return $content;
+    }
+
+    /**
+     * Extract numeric value from a variable (removes currency symbols, commas, etc.)
+     *
+     * @param mixed $value
+     * @return float
+     */
+    private function extractNumericValue($value): float
+    {
+        if (is_numeric($value)) {
+            return (float) $value;
+        }
+        
+        if (is_string($value)) {
+            // Remove common currency symbols and formatting
+            $cleaned = preg_replace('/[\$,\s]/', '', $value);
+            $cleaned = preg_replace('/[^\d\.\-]/', '', $cleaned);
+            
+            if (is_numeric($cleaned)) {
+                return (float) $cleaned;
+            }
+        }
+        
+        return 0.0;
+    }
+
+    /**
+     * Safely evaluate a mathematical expression
+     * Only allows basic arithmetic operations for security
+     *
+     * @param string $expression
+     * @return float
+     * @throws \InvalidArgumentException
+     */
+    private function evaluateMathExpression(string $expression): float
+    {
+        // Remove any whitespace
+        $expression = preg_replace('/\s+/', '', $expression);
+        
+        // Security check: only allow numbers, basic operators, and parentheses
+        if (!preg_match('/^[\d\.\+\-\*\/\%\(\)]+$/', $expression)) {
+            throw new \InvalidArgumentException('Invalid characters in mathematical expression');
+        }
+        
+        // Additional security: prevent function calls and complex expressions
+        if (preg_match('/[a-zA-Z_]/', $expression)) {
+            throw new \InvalidArgumentException('Variables not fully replaced in expression');
+        }
+        
+        // Safely evaluate using PHP's eval with strict validation
+        try {
+            // Use a calculation library for safer evaluation
+            return $this->calculateExpression($expression);
+        } catch (\Exception $e) {
+            throw new \InvalidArgumentException('Failed to evaluate expression: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Calculate mathematical expression using a simple parser
+     * Safer alternative to eval()
+     *
+     * @param string $expression
+     * @return float
+     */
+    private function calculateExpression(string $expression): float
+    {
+        // Handle parentheses first
+        while (preg_match('/\([^()]+\)/', $expression, $matches)) {
+            $subExpression = substr($matches[0], 1, -1); // Remove parentheses
+            $result = $this->calculateSimpleExpression($subExpression);
+            $expression = str_replace($matches[0], $result, $expression);
+        }
+        
+        return $this->calculateSimpleExpression($expression);
+    }
+
+    /**
+     * Calculate a simple mathematical expression without parentheses
+     * Follows proper order of operations (*, /, % before +, -)
+     *
+     * @param string $expression
+     * @return float
+     */
+    private function calculateSimpleExpression(string $expression): float
+    {
+        // Handle multiplication, division, and modulo first (left to right)
+        while (preg_match('/(-?\d+(?:\.\d+)?)\s*([*\/%])\s*(-?\d+(?:\.\d+)?)/', $expression, $matches)) {
+            $left = (float) $matches[1];
+            $operator = $matches[2];
+            $right = (float) $matches[3];
+            
+            switch ($operator) {
+                case '*':
+                    $result = $left * $right;
+                    break;
+                case '/':
+                    if ($right == 0) {
+                        throw new \InvalidArgumentException('Division by zero');
+                    }
+                    $result = $left / $right;
+                    break;
+                case '%':
+                    if ($right == 0) {
+                        throw new \InvalidArgumentException('Modulo by zero');
+                    }
+                    $result = fmod($left, $right);
+                    break;
+                default:
+                    throw new \InvalidArgumentException('Unknown operator: ' . $operator);
+            }
+            
+            $expression = str_replace($matches[0], $result, $expression);
+        }
+        
+        // Handle addition and subtraction (left to right)
+        while (preg_match('/(-?\d+(?:\.\d+)?)\s*([\+\-])\s*(-?\d+(?:\.\d+)?)/', $expression, $matches)) {
+            $left = (float) $matches[1];
+            $operator = $matches[2];
+            $right = (float) $matches[3];
+            
+            switch ($operator) {
+                case '+':
+                    $result = $left + $right;
+                    break;
+                case '-':
+                    $result = $left - $right;
+                    break;
+                default:
+                    throw new \InvalidArgumentException('Unknown operator: ' . $operator);
+            }
+            
+            $expression = str_replace($matches[0], $result, $expression);
+        }
+        
+        // Final result should be a single number
+        if (!is_numeric($expression)) {
+            throw new \InvalidArgumentException('Expression did not evaluate to a number: ' . $expression);
+        }
+        
+        return (float) $expression;
+    }
+
+    /**
+     * Format a calculated value, preserving currency formatting where appropriate
+     *
+     * @param float $value
+     * @param array $originalData
+     * @return string
+     */
+    private function formatCalculatedValue(float $value, array $originalData): string
+    {
+        // Check if any of the original values contained currency formatting
+        $hasCurrency = false;
+        foreach ($originalData as $dataValue) {
+            if (is_string($dataValue) && (strpos($dataValue, '$') !== false || strpos($dataValue, 'AUD') !== false)) {
+                $hasCurrency = true;
+                break;
+            }
+        }
+        
+        if ($hasCurrency) {
+            // Format as currency
+            return '$' . number_format($value, 2);
+        } else {
+            // Format as regular number with appropriate decimal places
+            if ($value == (int) $value) {
+                return (string) (int) $value;
+            } else {
+                return number_format($value, 2);
+            }
+        }
     }
 }
