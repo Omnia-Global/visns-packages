@@ -45,6 +45,23 @@ class ProposalAssemblyService
                 ? BrandingProfile::with('file')->find($brandingId)
                 : $this->getDefaultBranding();
 
+            // Debug branding profile loading
+            \Log::info('ProposalAssemblyService::assembleProposal - Branding profile loaded', [
+                'branding_id' => $brandingId,
+                'branding_exists' => !is_null($branding),
+                'branding_company_name' => $branding->company_name ?? 'null',
+                'branding_logo_url' => $branding->logo_url ?? 'null',
+                'branding_has_file_relationship' => !is_null($branding->file ?? null),
+                'branding_file_details' => $branding->file ? [
+                    'id' => $branding->file->id ?? 'null',
+                    'path' => $branding->file->path ?? 'null',
+                    'url' => $branding->file->url ?? 'null',
+                    'filename' => $branding->file->filename ?? 'null',
+                    'mime_type' => $branding->file->mime_type ?? 'null',
+                ] : 'no_file_relationship',
+                'branding_company_info' => $branding->company_info ?? 'null',
+            ]);
+
             // Build sections array (without variable replacement for extraction)
             $sectionsForExtraction = $this->buildSectionsForExtraction(
                 $template,
@@ -1509,31 +1526,31 @@ class ProposalAssemblyService
                     left: 0;
                     right: 0;
                     width: 100%;
-                    padding: 8px 20px;
+                    padding: 6px 15px;
                     border-bottom: 1px solid ' . ($colors['primary'] ?? '#2563eb') . ';
                     background: white;
                     display: flex;
                     align-items: center;
-                    justify-content: space-between;
                     z-index: 1000;
                     box-sizing: border-box;
-                    height: 50px;
+                    height: 45px;
                 }
                 
                 .proposal-header-logo {
                     flex-shrink: 0;
-                    margin-right: 15px;
+                    margin-right: 10px;
+                    width: 80px;
                 }
                 
                 .proposal-header-logo img {
-                    max-height: 35px;
-                    max-width: 120px;
+                    max-height: 32px;
+                    max-width: 80px;
                     width: auto;
                 }
                 
                 .proposal-header-logo .logo-placeholder {
-                    width: 35px;
-                    height: 35px;
+                    width: 32px;
+                    height: 32px;
                     background-color: ' . ($colors['primary'] ?? '#2563eb') . ';
                     color: white;
                     border-radius: 4px;
@@ -1541,28 +1558,32 @@ class ProposalAssemblyService
                     align-items: center;
                     justify-content: center;
                     font-weight: bold;
-                    font-size: 12px;
+                    font-size: 11px;
                 }
                 
                 .proposal-header-content {
                     text-align: right;
                     flex: 1;
                     min-width: 0;
+                    overflow: hidden;
                 }
                 
                 .proposal-header-content .company-name {
-                    font-size: 16px;
+                    font-size: 14px;
                     font-weight: bold;
                     color: ' . ($colors['primary'] ?? '#2563eb') . ';
-                    margin-bottom: 2px;
+                    margin-bottom: 1px;
                     font-family: ' . ($fonts['heading'] ?? 'Arial, sans-serif') . ';
-                    line-height: 1.1;
+                    line-height: 1.0;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
                 }
                 
                 .proposal-header-content .company-info {
-                    font-size: 10px;
+                    font-size: 9px;
                     color: #666;
-                    line-height: 1.2;
+                    line-height: 1.1;
                 }
                 
                 .proposal-header-content .company-info div {
@@ -1576,12 +1597,12 @@ class ProposalAssemblyService
                     font-weight: 600;
                     color: ' . ($colors['secondary'] ?? '#64748b') . ';
                     display: inline-block;
-                    width: 40px;
+                    width: 30px;
                 }
                 
                 /* Adjust body content for header space when header is enabled */
                 body.has-header {
-                    padding-top: 60px;
+                    padding-top: 55px;
                 }
                 
                 /* Skip header on cover page and first page */
@@ -1652,7 +1673,19 @@ class ProposalAssemblyService
             'branding_file_exists' => !is_null($branding->file),
             'branding_file_path' => $branding->file->path ?? 'null',
             'branding_file_url' => $branding->file->url ?? 'null',
+            'branding_file_full_details' => $branding->file ? [
+                'id' => $branding->file->id,
+                'fileable_id' => $branding->file->fileable_id ?? 'null',
+                'fileable_type' => $branding->file->fileable_type ?? 'null',
+                'path' => $branding->file->path ?? 'null',
+                'url' => $branding->file->url ?? 'null',
+                'filename' => $branding->file->filename ?? 'null',
+                'original_filename' => $branding->file->original_filename ?? 'null',
+                'mime_type' => $branding->file->mime_type ?? 'null',
+                'size' => $branding->file->size ?? 'null',
+            ] : 'no_file',
             'final_logo_url' => $logoUrl,
+            'using_placeholder' => is_null($logoUrl),
         ]);
         
         if ($logoUrl) {
@@ -1668,48 +1701,39 @@ class ProposalAssemblyService
         $html .= '<div class="company-name">' . htmlspecialchars($branding->company_name ?? 'Company Name') . '</div>';
         $html .= '<div class="company-info">';
         
-        // Build a compact info line
+        // Build a very compact info line optimized for small header
         $infoItems = [];
         
-        // Phone
+        // Phone (most important, show first)
         if (!empty($headerConfig['show_phone']) && !empty($companyInfo['phone'])) {
-            $infoItems[] = 'Ph: ' . htmlspecialchars($companyInfo['phone']);
+            $infoItems[] = htmlspecialchars($companyInfo['phone']);
         }
         
-        // Website (remove http/https for brevity)
+        // Website (remove protocol and www for brevity)
         if (!empty($headerConfig['show_website']) && !empty($companyInfo['website'])) {
             $website = $companyInfo['website'];
-            $website = preg_replace('/^https?:\/\//', '', $website);
+            $website = preg_replace('/^https?:\/\/(www\.)?/', '', $website);
             $infoItems[] = htmlspecialchars($website);
         }
         
-        // ABN
+        // ABN (abbreviate)
         if (!empty($headerConfig['show_abn']) && !empty($companyInfo['abn'])) {
-            $infoItems[] = 'ABN: ' . htmlspecialchars($companyInfo['abn']);
+            $infoItems[] = 'ABN ' . htmlspecialchars($companyInfo['abn']);
         }
         
-        // Address (show only if other info is minimal)
+        // Always show info on one line with separators to maximize space
+        if (!empty($infoItems)) {
+            $html .= '<div>' . implode(' • ', $infoItems) . '</div>';
+        }
+        
+        // Address on second line only if enabled and space allows
         if (!empty($headerConfig['show_address']) && !empty($companyInfo['address'])) {
-            // Truncate long addresses
             $address = $companyInfo['address'];
-            if (strlen($address) > 50) {
-                $address = substr($address, 0, 47) . '...';
+            // Truncate long addresses more aggressively for header
+            if (strlen($address) > 35) {
+                $address = substr($address, 0, 32) . '...';
             }
-            $infoItems[] = htmlspecialchars($address);
-        }
-        
-        // Display items in a single line if possible, or split intelligently
-        if (count($infoItems) <= 2) {
-            // Single line for 1-2 items
-            $html .= '<div>' . implode(' | ', $infoItems) . '</div>';
-        } else {
-            // Split into two lines for 3+ items
-            $firstLine = array_slice($infoItems, 0, 2);
-            $secondLine = array_slice($infoItems, 2);
-            $html .= '<div>' . implode(' | ', $firstLine) . '</div>';
-            if (!empty($secondLine)) {
-                $html .= '<div>' . implode(' | ', $secondLine) . '</div>';
-            }
+            $html .= '<div>' . htmlspecialchars($address) . '</div>';
         }
         
         $html .= '</div>';
