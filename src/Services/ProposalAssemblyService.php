@@ -54,10 +54,10 @@ class ProposalAssemblyService
                 'branding_has_file_relationship' => !is_null($branding->file ?? null),
                 'branding_file_details' => $branding->file ? [
                     'id' => $branding->file->id ?? 'null',
-                    'path' => $branding->file->path ?? 'null',
-                    'url' => $branding->file->url ?? 'null',
-                    'filename' => $branding->file->filename ?? 'null',
-                    'mime_type' => $branding->file->mime_type ?? 'null',
+                    'file_path' => $branding->file->file_path ?? 'null',
+                    'file_name' => $branding->file->file_name ?? 'null',
+                    'file_url' => $branding->file->file_url ?? 'null',
+                    'file_extension' => $branding->file->file_extension ?? 'null',
                 ] : 'no_file_relationship',
                 'branding_company_info' => $branding->company_info ?? 'null',
             ]);
@@ -1652,37 +1652,43 @@ class ProposalAssemblyService
         // Logo section
         $html .= '<div class="proposal-header-logo">';
         
-        // Check for logo_url first, then file relationship, then file path
+        // Check for logo_url first, then file relationship with correct attributes
         $logoUrl = null;
         
         // First priority: direct logo_url field
         if (!empty($branding->logo_url)) {
             $logoUrl = $branding->logo_url;
         }
-        // Second priority: file relationship
+        // Second priority: file relationship using correct File model attributes
         elseif ($branding->file) {
-            if (isset($branding->file->path)) {
-                $logoUrl = '/storage/' . $branding->file->path;
-            } elseif (isset($branding->file->url)) {
-                $logoUrl = $branding->file->url;
+            // Try the computed file_url attribute first (uses FilePathResolver)
+            if (!empty($branding->file->file_url)) {
+                $logoUrl = $branding->file->file_url;
+            }
+            // Fallback to file_path with storage prefix
+            elseif (!empty($branding->file->file_path)) {
+                $logoUrl = '/storage/' . $branding->file->file_path;
+            }
+            // Last resort: try file_full_path attribute
+            elseif (!empty($branding->file->file_full_path)) {
+                $logoUrl = $branding->file->file_full_path;
             }
         }
         
         \Log::info('ProposalAssemblyService::generateProposalHeader - Logo detection', [
             'branding_logo_url' => $branding->logo_url ?? 'null',
             'branding_file_exists' => !is_null($branding->file),
-            'branding_file_path' => $branding->file->path ?? 'null',
-            'branding_file_url' => $branding->file->url ?? 'null',
-            'branding_file_full_details' => $branding->file ? [
+            'branding_file_details' => $branding->file ? [
                 'id' => $branding->file->id,
                 'fileable_id' => $branding->file->fileable_id ?? 'null',
                 'fileable_type' => $branding->file->fileable_type ?? 'null',
-                'path' => $branding->file->path ?? 'null',
-                'url' => $branding->file->url ?? 'null',
-                'filename' => $branding->file->filename ?? 'null',
-                'original_filename' => $branding->file->original_filename ?? 'null',
-                'mime_type' => $branding->file->mime_type ?? 'null',
-                'size' => $branding->file->size ?? 'null',
+                'file_path' => $branding->file->file_path ?? 'null',
+                'file_name' => $branding->file->file_name ?? 'null',
+                'file_url' => $branding->file->file_url ?? 'null',
+                'file_full_path' => $branding->file->file_full_path ?? 'null',
+                'file_extension' => $branding->file->file_extension ?? 'null',
+                'file_size' => $branding->file->file_size ?? 'null',
+                'file_exists' => $branding->file->file_exists ?? 'null',
             ] : 'no_file',
             'final_logo_url' => $logoUrl,
             'using_placeholder' => is_null($logoUrl),
