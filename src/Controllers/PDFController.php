@@ -496,7 +496,7 @@ class PDFController extends \App\Http\Controllers\Controller
                 }
                 
                 $pdf->getDomPDF()->getCanvas()->page_script('
-                    if ($PAGE_NUM >= 1) {
+                    if ($PAGE_NUM > 1) {
                         $font = $fontMetrics->getFont("Arial", "normal");
                         $canvas->text(40, 40, "' . $companyName . ' - Page $PAGE_NUM", $font, 10, array(0,0,0));
                     }

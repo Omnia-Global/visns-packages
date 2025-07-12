@@ -1509,71 +1509,92 @@ class ProposalAssemblyService
                     left: 0;
                     right: 0;
                     width: 100%;
-                    padding: 10px 20px;
-                    border-bottom: 2px solid ' . ($colors['primary'] ?? '#2563eb') . ';
+                    padding: 8px 20px;
+                    border-bottom: 1px solid ' . ($colors['primary'] ?? '#2563eb') . ';
                     background: white;
                     display: flex;
                     align-items: center;
                     justify-content: space-between;
                     z-index: 1000;
                     box-sizing: border-box;
+                    height: 50px;
+                }
+                
+                .proposal-header-logo {
+                    flex-shrink: 0;
+                    margin-right: 15px;
                 }
                 
                 .proposal-header-logo img {
-                    max-height: 40px;
+                    max-height: 35px;
+                    max-width: 120px;
                     width: auto;
                 }
                 
                 .proposal-header-logo .logo-placeholder {
-                    width: 40px;
-                    height: 40px;
+                    width: 35px;
+                    height: 35px;
                     background-color: ' . ($colors['primary'] ?? '#2563eb') . ';
                     color: white;
-                    border-radius: 6px;
+                    border-radius: 4px;
                     display: flex;
                     align-items: center;
                     justify-content: center;
                     font-weight: bold;
-                    font-size: 14px;
+                    font-size: 12px;
                 }
                 
                 .proposal-header-content {
                     text-align: right;
                     flex: 1;
+                    min-width: 0;
                 }
                 
                 .proposal-header-content .company-name {
-                    font-size: 18px;
+                    font-size: 16px;
                     font-weight: bold;
                     color: ' . ($colors['primary'] ?? '#2563eb') . ';
-                    margin-bottom: 3px;
+                    margin-bottom: 2px;
                     font-family: ' . ($fonts['heading'] ?? 'Arial, sans-serif') . ';
+                    line-height: 1.1;
                 }
                 
                 .proposal-header-content .company-info {
-                    font-size: 12px;
+                    font-size: 10px;
                     color: #666;
-                    line-height: 1.3;
+                    line-height: 1.2;
                 }
                 
                 .proposal-header-content .company-info div {
-                    margin-bottom: 1px;
+                    margin-bottom: 0px;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
                 }
                 
                 .proposal-header-content .company-info .label {
                     font-weight: 600;
                     color: ' . ($colors['secondary'] ?? '#64748b') . ';
                     display: inline-block;
-                    width: 50px;
+                    width: 40px;
                 }
                 
                 /* Adjust body content for header space when header is enabled */
                 body.has-header {
-                    padding-top: 80px;
+                    padding-top: 60px;
                 }
                 
-                /* Skip header on cover page */
+                /* Skip header on cover page and first page */
                 .omnia-cover-page .proposal-header {
+                    display: none;
+                }
+                
+                @page :first {
+                    /* First page should not have header space */
+                    margin-top: 20px;
+                }
+                
+                body:first-child .proposal-header {
                     display: none;
                 }
             </style>
@@ -1610,11 +1631,29 @@ class ProposalAssemblyService
         // Logo section
         $html .= '<div class="proposal-header-logo">';
         
-        // Check for logo_url first, then file relationship
-        $logoUrl = $branding->logo_url;
-        if (!$logoUrl && $branding->file) {
-            $logoUrl = $branding->file->url ?? null;
+        // Check for logo_url first, then file relationship, then file path
+        $logoUrl = null;
+        
+        // First priority: direct logo_url field
+        if (!empty($branding->logo_url)) {
+            $logoUrl = $branding->logo_url;
         }
+        // Second priority: file relationship
+        elseif ($branding->file) {
+            if (isset($branding->file->path)) {
+                $logoUrl = '/storage/' . $branding->file->path;
+            } elseif (isset($branding->file->url)) {
+                $logoUrl = $branding->file->url;
+            }
+        }
+        
+        \Log::info('ProposalAssemblyService::generateProposalHeader - Logo detection', [
+            'branding_logo_url' => $branding->logo_url ?? 'null',
+            'branding_file_exists' => !is_null($branding->file),
+            'branding_file_path' => $branding->file->path ?? 'null',
+            'branding_file_url' => $branding->file->url ?? 'null',
+            'final_logo_url' => $logoUrl,
+        ]);
         
         if ($logoUrl) {
             $html .= '<img src="' . htmlspecialchars($logoUrl) . '" alt="' . htmlspecialchars($branding->company_name) . ' Logo">';
@@ -1629,28 +1668,48 @@ class ProposalAssemblyService
         $html .= '<div class="company-name">' . htmlspecialchars($branding->company_name ?? 'Company Name') . '</div>';
         $html .= '<div class="company-info">';
         
-        // Address
-        if (!empty($headerConfig['show_address'])) {
-            $address = $companyInfo['address'] ?? 'Add company address in branding profile';
-            $html .= '<div>' . htmlspecialchars($address) . '</div>';
-        }
-        
-        // Website
-        if (!empty($headerConfig['show_website'])) {
-            $website = $companyInfo['website'] ?? 'Add company website in branding profile';
-            $html .= '<div><span class="label">Website: </span>' . htmlspecialchars($website) . '</div>';
-        }
+        // Build a compact info line
+        $infoItems = [];
         
         // Phone
-        if (!empty($headerConfig['show_phone'])) {
-            $phone = $companyInfo['phone'] ?? 'Add company phone in branding profile';
-            $html .= '<div><span class="label">Phone: </span>' . htmlspecialchars($phone) . '</div>';
+        if (!empty($headerConfig['show_phone']) && !empty($companyInfo['phone'])) {
+            $infoItems[] = 'Ph: ' . htmlspecialchars($companyInfo['phone']);
+        }
+        
+        // Website (remove http/https for brevity)
+        if (!empty($headerConfig['show_website']) && !empty($companyInfo['website'])) {
+            $website = $companyInfo['website'];
+            $website = preg_replace('/^https?:\/\//', '', $website);
+            $infoItems[] = htmlspecialchars($website);
         }
         
         // ABN
-        if (!empty($headerConfig['show_abn'])) {
-            $abn = $companyInfo['abn'] ?? 'Add company ABN in branding profile';
-            $html .= '<div><span class="label">ABN: </span>' . htmlspecialchars($abn) . '</div>';
+        if (!empty($headerConfig['show_abn']) && !empty($companyInfo['abn'])) {
+            $infoItems[] = 'ABN: ' . htmlspecialchars($companyInfo['abn']);
+        }
+        
+        // Address (show only if other info is minimal)
+        if (!empty($headerConfig['show_address']) && !empty($companyInfo['address'])) {
+            // Truncate long addresses
+            $address = $companyInfo['address'];
+            if (strlen($address) > 50) {
+                $address = substr($address, 0, 47) . '...';
+            }
+            $infoItems[] = htmlspecialchars($address);
+        }
+        
+        // Display items in a single line if possible, or split intelligently
+        if (count($infoItems) <= 2) {
+            // Single line for 1-2 items
+            $html .= '<div>' . implode(' | ', $infoItems) . '</div>';
+        } else {
+            // Split into two lines for 3+ items
+            $firstLine = array_slice($infoItems, 0, 2);
+            $secondLine = array_slice($infoItems, 2);
+            $html .= '<div>' . implode(' | ', $firstLine) . '</div>';
+            if (!empty($secondLine)) {
+                $html .= '<div>' . implode(' | ', $secondLine) . '</div>';
+            }
         }
         
         $html .= '</div>';
