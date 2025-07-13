@@ -15,7 +15,10 @@ class InstallChromiumCommand extends Command
     protected $signature = 'visns:install-chromium
                            {--force : Force installation even if already detected}
                            {--node-path= : Custom path to Node.js binary}
-                           {--npm-path= : Custom path to npm binary}';
+                           {--yarn-path= : Custom path to yarn binary}
+                           {--use-npm : Use npm instead of yarn}
+                           {--local : Install locally in project (default)}
+                           {--global : Install globally (not recommended for Forge)}';
 
     /**
      * The console command description.
@@ -48,11 +51,48 @@ class InstallChromiumCommand extends Command
         $this->info('📦 Installing Puppeteer with Chromium...');
         
         try {
-            $npmPath = $this->option('npm-path') ?: 'npm';
+            $useNpm = $this->option('use-npm');
+            $isGlobal = $this->option('global');
+            $isLocal = $this->option('local') || !$isGlobal; // Default to local
             
-            // Install puppeteer globally
-            $command = "{$npmPath} install -g puppeteer";
+            if ($useNpm) {
+                $packageManager = $this->option('npm-path') ?: 'npm';
+                $installFlag = $isGlobal ? '-g' : '';
+            } else {
+                $packageManager = $this->option('yarn-path') ?: 'yarn';
+                $installFlag = $isGlobal ? 'global add' : 'add';
+            }
+            
+            // Prepare the installation command
+            if ($useNpm) {
+                $command = $isGlobal ? 
+                    "{$packageManager} install -g puppeteer" : 
+                    "{$packageManager} install puppeteer";
+            } else {
+                $command = $isGlobal ? 
+                    "{$packageManager} global add puppeteer" : 
+                    "{$packageManager} add puppeteer";
+            }
+            
             $this->info("Running: {$command}");
+            $this->info($isLocal ? "📍 Installing locally in project directory" : "🌐 Installing globally");
+            
+            // Set up environment for local installation
+            $env = $_ENV;
+            if ($isLocal) {
+                // Ensure we're in the Laravel project root
+                $projectRoot = base_path();
+                $this->info("📂 Project directory: {$projectRoot}");
+                
+                // Create local cache directory for Puppeteer if needed
+                $cacheDir = $projectRoot . '/.cache/puppeteer';
+                if (!is_dir($cacheDir)) {
+                    mkdir($cacheDir, 0755, true);
+                    $this->info("📁 Created cache directory: {$cacheDir}");
+                }
+                
+                $env['PUPPETEER_CACHE_DIR'] = $cacheDir;
+            }
             
             $process = proc_open(
                 $command,
@@ -61,11 +101,13 @@ class InstallChromiumCommand extends Command
                     1 => ['pipe', 'w'],
                     2 => ['pipe', 'w']
                 ],
-                $pipes
+                $pipes,
+                $isLocal ? base_path() : null,
+                $env
             );
 
             if (!is_resource($process)) {
-                throw new \Exception('Failed to start npm process');
+                throw new \Exception("Failed to start {$packageManager} process");
             }
 
             fclose($pipes[0]);
@@ -81,12 +123,23 @@ class InstallChromiumCommand extends Command
                 $this->error($error);
                 $this->newLine();
                 $this->info('💡 You can also try:');
-                $this->info('   • npm install -g puppeteer');
+                if ($useNpm) {
+                    $this->info('   • npm install puppeteer (local)');
+                    $this->info('   • npm install -g puppeteer (global)');
+                } else {
+                    $this->info('   • yarn add puppeteer (local)');
+                    $this->info('   • yarn global add puppeteer (global)');
+                }
                 $this->info('   • Or install Chrome/Chromium manually');
                 return 1;
             }
 
             $this->info('✅ Puppeteer installed successfully!');
+            
+            // Update .env with executable path if local installation
+            if ($isLocal) {
+                $this->updateEnvironmentFile();
+            }
             $this->newLine();
 
             // Verify installation
@@ -118,7 +171,27 @@ class InstallChromiumCommand extends Command
      */
     private function isChromiumAvailable(): bool
     {
-        // Method 1: Check common browser paths
+        // Method 1: Check local project Puppeteer installation first
+        $projectRoot = base_path();
+        $localPuppeteerPaths = [
+            // Local node_modules installation
+            $projectRoot . '/node_modules/puppeteer/.local-chromium/*/chrome-linux/chrome',
+            $projectRoot . '/node_modules/puppeteer/.local-chromium/*/chrome-*/chrome',
+            // Local cache directory
+            $projectRoot . '/.cache/puppeteer/chrome/*/chrome-linux/chrome',
+            $projectRoot . '/.cache/puppeteer/chrome/*/chrome-*/chrome',
+        ];
+
+        foreach ($localPuppeteerPaths as $pathPattern) {
+            $matches = glob($pathPattern);
+            foreach ($matches as $path) {
+                if (file_exists($path) && is_executable($path)) {
+                    return true;
+                }
+            }
+        }
+
+        // Method 2: Check common system browser paths
         $browserPaths = [
             // Linux paths (Ubuntu/Debian)
             '/usr/bin/chromium-browser',
@@ -133,13 +206,22 @@ class InstallChromiumCommand extends Command
             '/usr/lib/node_modules/puppeteer/.local-chromium/*/chrome-linux/chrome',
         ];
 
-        foreach ($browserPaths as $path) {
-            if (file_exists($path) && is_executable($path)) {
-                return true;
+        foreach ($browserPaths as $pathPattern) {
+            if (strpos($pathPattern, '*') !== false) {
+                $matches = glob($pathPattern);
+                foreach ($matches as $path) {
+                    if (file_exists($path) && is_executable($path)) {
+                        return true;
+                    }
+                }
+            } else {
+                if (file_exists($pathPattern) && is_executable($pathPattern)) {
+                    return true;
+                }
             }
         }
 
-        // Method 2: Check if browsers are in PATH
+        // Method 3: Check if browsers are in PATH
         $browsers = ['chromium-browser', 'chromium', 'google-chrome', 'chrome'];
         foreach ($browsers as $browser) {
             if ($this->commandExists($browser)) {
@@ -147,35 +229,43 @@ class InstallChromiumCommand extends Command
             }
         }
 
-        // Method 3: Try Puppeteer's chromium
-        try {
-            $command = 'node -e "console.log(require(\'puppeteer\').executablePath())"';
-            $process = proc_open(
-                $command,
-                [
-                    0 => ['pipe', 'r'],
-                    1 => ['pipe', 'w'],
-                    2 => ['pipe', 'w']
-                ],
-                $pipes
-            );
+        // Method 4: Try Puppeteer's executablePath (local first, then global)
+        $puppeteerCommands = [
+            // Local installation
+            "cd {$projectRoot} && node -e \"console.log(require('./node_modules/puppeteer').executablePath())\"",
+            // Global installation
+            'node -e "console.log(require(\'puppeteer\').executablePath())"'
+        ];
 
-            if (is_resource($process)) {
-                fclose($pipes[0]);
-                $output = trim(stream_get_contents($pipes[1]));
-                fclose($pipes[1]);
-                fclose($pipes[2]);
-                proc_close($process);
+        foreach ($puppeteerCommands as $command) {
+            try {
+                $process = proc_open(
+                    $command,
+                    [
+                        0 => ['pipe', 'r'],
+                        1 => ['pipe', 'w'],
+                        2 => ['pipe', 'w']
+                    ],
+                    $pipes
+                );
 
-                if (!empty($output) && file_exists($output)) {
-                    return true;
+                if (is_resource($process)) {
+                    fclose($pipes[0]);
+                    $output = trim(stream_get_contents($pipes[1]));
+                    fclose($pipes[1]);
+                    fclose($pipes[2]);
+                    proc_close($process);
+
+                    if (!empty($output) && file_exists($output)) {
+                        return true;
+                    }
                 }
+            } catch (\Exception $e) {
+                // Continue to next method
             }
-        } catch (\Exception $e) {
-            // Puppeteer not available, continue with other methods
         }
 
-        // Method 4: Last resort - try basic Browsershot test (less aggressive)
+        // Method 5: Last resort - try basic Browsershot test (less aggressive)
         try {
             $browsershot = new Browsershot();
             $browsershot->html('<h1>Test</h1>')->pdf();
@@ -223,6 +313,25 @@ class InstallChromiumCommand extends Command
         
         // Check specific browser paths and show which one is found
         $foundBrowsers = [];
+        $projectRoot = base_path();
+        
+        // Check local Puppeteer installations first
+        $localPuppeteerPaths = [
+            $projectRoot . '/node_modules/puppeteer/.local-chromium/*/chrome-linux/chrome',
+            $projectRoot . '/node_modules/puppeteer/.local-chromium/*/chrome-*/chrome',
+            $projectRoot . '/.cache/puppeteer/chrome/*/chrome-linux/chrome',
+            $projectRoot . '/.cache/puppeteer/chrome/*/chrome-*/chrome',
+        ];
+
+        foreach ($localPuppeteerPaths as $pathPattern) {
+            $matches = glob($pathPattern);
+            foreach ($matches as $path) {
+                if (file_exists($path) && is_executable($path)) {
+                    $foundBrowsers[] = "local puppeteer ({$path})";
+                    break 2; // Found local installation, no need to check others
+                }
+            }
+        }
         
         $browserPaths = [
             'chromium-browser' => '/usr/bin/chromium-browser',
@@ -245,32 +354,40 @@ class InstallChromiumCommand extends Command
             }
         }
 
-        // Check Puppeteer's chromium
-        try {
-            $command = 'node -e "console.log(require(\'puppeteer\').executablePath())"';
-            $process = proc_open(
-                $command,
-                [
-                    0 => ['pipe', 'r'],
-                    1 => ['pipe', 'w'],
-                    2 => ['pipe', 'w']
-                ],
-                $pipes
-            );
+        // Check Puppeteer's chromium (both local and global)
+        $puppeteerCommands = [
+            // Local installation
+            ['cmd' => "cd {$projectRoot} && node -e \"console.log(require('./node_modules/puppeteer').executablePath())\"", 'type' => 'local puppeteer'],
+            // Global installation
+            ['cmd' => 'node -e "console.log(require(\'puppeteer\').executablePath())"', 'type' => 'global puppeteer']
+        ];
 
-            if (is_resource($process)) {
-                fclose($pipes[0]);
-                $output = trim(stream_get_contents($pipes[1]));
-                fclose($pipes[1]);
-                fclose($pipes[2]);
-                proc_close($process);
+        foreach ($puppeteerCommands as $puppeteer) {
+            try {
+                $process = proc_open(
+                    $puppeteer['cmd'],
+                    [
+                        0 => ['pipe', 'r'],
+                        1 => ['pipe', 'w'],
+                        2 => ['pipe', 'w']
+                    ],
+                    $pipes
+                );
 
-                if (!empty($output) && file_exists($output)) {
-                    $foundBrowsers[] = "puppeteer chromium ({$output})";
+                if (is_resource($process)) {
+                    fclose($pipes[0]);
+                    $output = trim(stream_get_contents($pipes[1]));
+                    fclose($pipes[1]);
+                    fclose($pipes[2]);
+                    proc_close($process);
+
+                    if (!empty($output) && file_exists($output)) {
+                        $foundBrowsers[] = "{$puppeteer['type']} ({$output})";
+                    }
                 }
+            } catch (\Exception $e) {
+                // Puppeteer not available
             }
-        } catch (\Exception $e) {
-            // Puppeteer not available
         }
 
         if (!empty($foundBrowsers)) {
@@ -325,5 +442,120 @@ class InstallChromiumCommand extends Command
             $this->error('❌ Node.js not working properly!');
             return false;
         }
+    }
+
+    /**
+     * Update .env file with Puppeteer executable path
+     */
+    private function updateEnvironmentFile(): void
+    {
+        $projectRoot = base_path();
+        $envPath = $projectRoot . '/.env';
+        
+        if (!file_exists($envPath)) {
+            $this->warn('⚠️  .env file not found, skipping environment configuration');
+            return;
+        }
+
+        // Try to find the local Puppeteer executable
+        $executablePath = $this->findLocalPuppeteerExecutable();
+        
+        if (!$executablePath) {
+            $this->warn('⚠️  Could not determine Puppeteer executable path');
+            return;
+        }
+
+        $this->info("🔧 Configuring environment variables...");
+        
+        // Read current .env content
+        $envContent = file_get_contents($envPath);
+        $lines = explode("\n", $envContent);
+        $updated = false;
+        
+        // Environment variables to set/update
+        $envVars = [
+            'PUPPETEER_EXECUTABLE_PATH' => $executablePath,
+            'BROWSERSHOT_NODE_BINARY' => 'node',
+            'BROWSERSHOT_NPM_BINARY' => 'npm',
+        ];
+        
+        foreach ($envVars as $key => $value) {
+            $found = false;
+            foreach ($lines as $index => $line) {
+                if (strpos($line, $key . '=') === 0) {
+                    $lines[$index] = $key . '=' . $value;
+                    $found = true;
+                    $updated = true;
+                    break;
+                }
+            }
+            
+            if (!$found) {
+                $lines[] = $key . '=' . $value;
+                $updated = true;
+            }
+        }
+        
+        if ($updated) {
+            file_put_contents($envPath, implode("\n", $lines));
+            $this->info("✅ Updated .env with Puppeteer configuration");
+            $this->info("   • PUPPETEER_EXECUTABLE_PATH={$executablePath}");
+        }
+    }
+
+    /**
+     * Find the local Puppeteer executable path
+     */
+    private function findLocalPuppeteerExecutable(): ?string
+    {
+        $projectRoot = base_path();
+        
+        // Try using Node.js to get the executable path
+        $command = "cd {$projectRoot} && node -e \"try { console.log(require('./node_modules/puppeteer').executablePath()); } catch(e) { process.exit(1); }\"";
+        
+        try {
+            $process = proc_open(
+                $command,
+                [
+                    0 => ['pipe', 'r'],
+                    1 => ['pipe', 'w'],
+                    2 => ['pipe', 'w']
+                ],
+                $pipes
+            );
+
+            if (is_resource($process)) {
+                fclose($pipes[0]);
+                $output = trim(stream_get_contents($pipes[1]));
+                fclose($pipes[1]);
+                fclose($pipes[2]);
+                $returnCode = proc_close($process);
+
+                if ($returnCode === 0 && !empty($output) && file_exists($output)) {
+                    return $output;
+                }
+            }
+        } catch (\Exception $e) {
+            // Fall back to manual search
+        }
+        
+        // Fallback: manually search for Chrome executable
+        $searchPaths = [
+            $projectRoot . '/node_modules/puppeteer/.local-chromium/*/chrome-linux/chrome',
+            $projectRoot . '/node_modules/puppeteer/.local-chromium/*/chrome-*/chrome',
+            $projectRoot . '/.cache/puppeteer/chrome/*/chrome-linux/chrome',
+            $projectRoot . '/.cache/puppeteer/chrome/*/chrome-*/chrome',
+        ];
+
+        foreach ($searchPaths as $pathPattern) {
+            $matches = glob($pathPattern);
+            foreach ($matches as $path) {
+                if (file_exists($path) && is_executable($path)) {
+                    return $path;
+                }
+            }
+        }
+        
+        return null;
     }
 }
