@@ -47,20 +47,31 @@ class InstallChromiumCommand extends Command
             return 1;
         }
 
+        // Check package manager availability
+        $useNpm = $this->option('use-npm');
+        if (!$useNpm && !$this->checkYarn()) {
+            $this->warn('⚠️  Yarn not found, falling back to npm');
+            $useNpm = true;
+        }
+
         // Install Puppeteer (which includes Chromium)
         $this->info('📦 Installing Puppeteer with Chromium...');
         
         try {
-            $useNpm = $this->option('use-npm');
             $isGlobal = $this->option('global');
             $isLocal = $this->option('local') || !$isGlobal; // Default to local
             
             if ($useNpm) {
-                $packageManager = $this->option('npm-path') ?: 'npm';
+                $packageManager = $this->findPackageManager('npm', $this->option('npm-path'));
                 $installFlag = $isGlobal ? '-g' : '';
             } else {
-                $packageManager = $this->option('yarn-path') ?: 'yarn';
+                $packageManager = $this->findPackageManager('yarn', $this->option('yarn-path'));
                 $installFlag = $isGlobal ? 'global add' : 'add';
+            }
+
+            if (!$packageManager) {
+                $managerName = $useNpm ? 'npm' : 'yarn';
+                throw new \Exception("Could not find {$managerName} executable. Please install {$managerName} or specify custom path with --{$managerName}-path");
             }
             
             // Prepare the installation command
@@ -556,6 +567,117 @@ class InstallChromiumCommand extends Command
             }
         }
         
+        return null;
+    }
+
+    /**
+     * Check if Yarn is available
+     */
+    private function checkYarn(): bool
+    {
+        $yarnPath = $this->findPackageManager('yarn', $this->option('yarn-path'));
+        
+        if (!$yarnPath) {
+            return false;
+        }
+        
+        $process = proc_open(
+            "{$yarnPath} --version",
+            [
+                0 => ['pipe', 'r'],
+                1 => ['pipe', 'w'],
+                2 => ['pipe', 'w']
+            ],
+            $pipes
+        );
+
+        if (!is_resource($process)) {
+            return false;
+        }
+
+        fclose($pipes[0]);
+        $output = stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $returnCode = proc_close($process);
+
+        if ($returnCode === 0 && !empty(trim($output))) {
+            $this->info("✅ Yarn found: " . trim($output));
+            return true;
+        }
+        
+        return false;
+    }
+
+    /**
+     * Find package manager executable
+     */
+    private function findPackageManager(string $manager, ?string $customPath = null): ?string
+    {
+        if ($customPath) {
+            return $customPath;
+        }
+
+        // Common paths to check
+        $commonPaths = [
+            // Standard system paths
+            "/usr/local/bin/{$manager}",
+            "/usr/bin/{$manager}",
+            "/bin/{$manager}",
+            // Homebrew paths (macOS)
+            "/opt/homebrew/bin/{$manager}",
+            "/usr/local/opt/{$manager}/bin/{$manager}",
+            // Node version manager paths
+            "/usr/local/lib/node_modules/{$manager}/bin/{$manager}",
+            // User local paths
+            $_SERVER['HOME'] . "/.local/bin/{$manager}",
+            $_SERVER['HOME'] . "/bin/{$manager}",
+        ];
+
+        // Check common paths first
+        foreach ($commonPaths as $path) {
+            if (file_exists($path) && is_executable($path)) {
+                return $path;
+            }
+        }
+
+        // Try using 'which' command
+        if ($this->commandExists($manager)) {
+            $process = proc_open(
+                "which {$manager}",
+                [
+                    0 => ['pipe', 'r'],
+                    1 => ['pipe', 'w'],
+                    2 => ['pipe', 'w']
+                ],
+                $pipes
+            );
+
+            if (is_resource($process)) {
+                fclose($pipes[0]);
+                $output = trim(stream_get_contents($pipes[1]));
+                fclose($pipes[1]);
+                fclose($pipes[2]);
+                $returnCode = proc_close($process);
+
+                if ($returnCode === 0 && !empty($output) && file_exists($output)) {
+                    return $output;
+                }
+            }
+        }
+
+        // Try with full PATH environment
+        $fullPath = getenv('PATH');
+        if ($fullPath) {
+            $pathDirs = explode(':', $fullPath);
+            foreach ($pathDirs as $dir) {
+                $execPath = rtrim($dir, '/') . '/' . $manager;
+                if (file_exists($execPath) && is_executable($execPath)) {
+                    return $execPath;
+                }
+            }
+        }
+
         return null;
     }
 }
