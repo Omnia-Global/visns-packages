@@ -118,6 +118,64 @@ class InstallChromiumCommand extends Command
      */
     private function isChromiumAvailable(): bool
     {
+        // Method 1: Check common browser paths
+        $browserPaths = [
+            // Linux paths (Ubuntu/Debian)
+            '/usr/bin/chromium-browser',
+            '/usr/bin/chromium',
+            '/usr/bin/google-chrome',
+            '/usr/bin/google-chrome-stable',
+            // macOS paths
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            '/Applications/Chromium.app/Contents/MacOS/Chromium',
+            // Puppeteer global installation
+            '/usr/local/lib/node_modules/puppeteer/.local-chromium/*/chrome-linux/chrome',
+            '/usr/lib/node_modules/puppeteer/.local-chromium/*/chrome-linux/chrome',
+        ];
+
+        foreach ($browserPaths as $path) {
+            if (file_exists($path) && is_executable($path)) {
+                return true;
+            }
+        }
+
+        // Method 2: Check if browsers are in PATH
+        $browsers = ['chromium-browser', 'chromium', 'google-chrome', 'chrome'];
+        foreach ($browsers as $browser) {
+            if ($this->commandExists($browser)) {
+                return true;
+            }
+        }
+
+        // Method 3: Try Puppeteer's chromium
+        try {
+            $command = 'node -e "console.log(require(\'puppeteer\').executablePath())"';
+            $process = proc_open(
+                $command,
+                [
+                    0 => ['pipe', 'r'],
+                    1 => ['pipe', 'w'],
+                    2 => ['pipe', 'w']
+                ],
+                $pipes
+            );
+
+            if (is_resource($process)) {
+                fclose($pipes[0]);
+                $output = trim(stream_get_contents($pipes[1]));
+                fclose($pipes[1]);
+                fclose($pipes[2]);
+                proc_close($process);
+
+                if (!empty($output) && file_exists($output)) {
+                    return true;
+                }
+            }
+        } catch (\Exception $e) {
+            // Puppeteer not available, continue with other methods
+        }
+
+        // Method 4: Last resort - try basic Browsershot test (less aggressive)
         try {
             $browsershot = new Browsershot();
             $browsershot->html('<h1>Test</h1>')->pdf();
@@ -128,20 +186,103 @@ class InstallChromiumCommand extends Command
     }
 
     /**
+     * Check if a command exists in PATH
+     */
+    private function commandExists(string $command): bool
+    {
+        $whereIs = (PHP_OS == 'WINNT') ? 'where' : 'which';
+        $process = proc_open(
+            "{$whereIs} {$command}",
+            [
+                0 => ['pipe', 'r'],
+                1 => ['pipe', 'w'],
+                2 => ['pipe', 'w']
+            ],
+            $pipes
+        );
+
+        if (!is_resource($process)) {
+            return false;
+        }
+
+        fclose($pipes[0]);
+        $output = stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $returnCode = proc_close($process);
+
+        return $returnCode === 0 && !empty(trim($output));
+    }
+
+    /**
      * Display browser information
      */
     private function displayBrowserInfo(): void
     {
+        $this->info('🌐 Browser Details:');
+        
+        // Check specific browser paths and show which one is found
+        $foundBrowsers = [];
+        
+        $browserPaths = [
+            'chromium-browser' => '/usr/bin/chromium-browser',
+            'chromium' => '/usr/bin/chromium',
+            'google-chrome' => '/usr/bin/google-chrome',
+            'google-chrome-stable' => '/usr/bin/google-chrome-stable',
+        ];
+
+        foreach ($browserPaths as $name => $path) {
+            if (file_exists($path) && is_executable($path)) {
+                $foundBrowsers[] = "{$name} ({$path})";
+            }
+        }
+
+        // Check PATH browsers
+        $pathBrowsers = ['chromium-browser', 'chromium', 'google-chrome', 'chrome'];
+        foreach ($pathBrowsers as $browser) {
+            if ($this->commandExists($browser)) {
+                $foundBrowsers[] = "{$browser} (in PATH)";
+            }
+        }
+
+        // Check Puppeteer's chromium
         try {
-            $browsershot = new Browsershot();
-            
-            // Try to get browser path
-            $this->info('🌐 Browser Details:');
+            $command = 'node -e "console.log(require(\'puppeteer\').executablePath())"';
+            $process = proc_open(
+                $command,
+                [
+                    0 => ['pipe', 'r'],
+                    1 => ['pipe', 'w'],
+                    2 => ['pipe', 'w']
+                ],
+                $pipes
+            );
+
+            if (is_resource($process)) {
+                fclose($pipes[0]);
+                $output = trim(stream_get_contents($pipes[1]));
+                fclose($pipes[1]);
+                fclose($pipes[2]);
+                proc_close($process);
+
+                if (!empty($output) && file_exists($output)) {
+                    $foundBrowsers[] = "puppeteer chromium ({$output})";
+                }
+            }
+        } catch (\Exception $e) {
+            // Puppeteer not available
+        }
+
+        if (!empty($foundBrowsers)) {
+            $this->info('   • Found browsers:');
+            foreach ($foundBrowsers as $browser) {
+                $this->info("     - {$browser}");
+            }
             $this->info('   • Status: Available');
             $this->info('   • Ready for PDF generation: Yes');
-            
-        } catch (\Exception $e) {
-            $this->error('   • Error getting browser info: ' . $e->getMessage());
+        } else {
+            $this->warn('   • No browsers detected in common locations');
+            $this->info('   • You may need to configure custom browser path');
         }
     }
 
