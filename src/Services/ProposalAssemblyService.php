@@ -31,36 +31,50 @@ class ProposalAssemblyService
                 : null;
 
             // Log the incoming configuration for debugging
-            \Log::info('ProposalAssemblyService::assembleProposal - Incoming config', [
-                'template_id' => $templateId,
-                'branding_id' => $brandingId,
-                'has_proposal_data' => !empty($proposalData),
-                'sections_count' => count($customSections),
-                'header_config' => $headerConfig,
-                'header_config_type' => gettype($headerConfig),
-                'header_enabled' => $headerConfig['enabled'] ?? 'not_set',
-                'template_styling' => $template->styling ?? 'no_template_or_styling',
-            ]);
+            \Log::info(
+                'ProposalAssemblyService::assembleProposal - Incoming config',
+                [
+                    'template_id' => $templateId,
+                    'branding_id' => $brandingId,
+                    'has_proposal_data' => !empty($proposalData),
+                    'sections_count' => count($customSections),
+                    'header_config' => $headerConfig,
+                    'header_config_type' => gettype($headerConfig),
+                    'header_enabled' => $headerConfig['enabled'] ?? 'not_set',
+                    'template_styling' =>
+                        $template->styling ?? 'no_template_or_styling',
+                ]
+            );
             $branding = $brandingId
                 ? BrandingProfile::with('file')->find($brandingId)
                 : $this->getDefaultBranding();
 
             // Debug branding profile loading
-            \Log::info('ProposalAssemblyService::assembleProposal - Branding profile loaded', [
-                'branding_id' => $brandingId,
-                'branding_exists' => !is_null($branding),
-                'branding_company_name' => $branding->company_name ?? 'null',
-                'branding_logo_url' => $branding->logo_url ?? 'null',
-                'branding_has_file_relationship' => !is_null($branding->file ?? null),
-                'branding_file_details' => $branding->file ? [
-                    'id' => $branding->file->id ?? 'null',
-                    'file_path' => $branding->file->file_path ?? 'null',
-                    'file_name' => $branding->file->file_name ?? 'null',
-                    'file_url' => $branding->file->file_url ?? 'null',
-                    'file_extension' => $branding->file->file_extension ?? 'null',
-                ] : 'no_file_relationship',
-                'branding_company_info' => $branding->company_info ?? 'null',
-            ]);
+            \Log::info(
+                'ProposalAssemblyService::assembleProposal - Branding profile loaded',
+                [
+                    'branding_id' => $brandingId,
+                    'branding_exists' => !is_null($branding),
+                    'branding_company_name' =>
+                        $branding->company_name ?? 'null',
+                    'branding_logo_url' => $branding->logo_url ?? 'null',
+                    'branding_has_file_relationship' => !is_null(
+                        $branding->file ?? null
+                    ),
+                    'branding_file_details' => $branding->file
+                        ? [
+                            'id' => $branding->file->id ?? 'null',
+                            'file_path' => $branding->file->file_path ?? 'null',
+                            'file_name' => $branding->file->file_name ?? 'null',
+                            'file_url' => $branding->file->file_url ?? 'null',
+                            'file_extension' =>
+                                $branding->file->file_extension ?? 'null',
+                        ]
+                        : 'no_file_relationship',
+                    'branding_company_info' =>
+                        $branding->company_info ?? 'null',
+                ]
+            );
 
             // Build sections array (without variable replacement for extraction)
             $sectionsForExtraction = $this->buildSectionsForExtraction(
@@ -72,6 +86,16 @@ class ProposalAssemblyService
             $variablesUsed = $this->extractVariablesUsed(
                 $sectionsForExtraction
             );
+
+            // Merge branding data into proposal data for variable replacement
+            if ($branding) {
+                $proposalData['branding_company_name'] =
+                    $branding->company_name ?? null;
+                $proposalData['branding_primary_color'] =
+                    $branding->colors['primary'] ?? null;
+                $proposalData['branding_company_info'] =
+                    $branding->company_info ?? null;
+            }
 
             // Build sections array with variable replacement
             $sections = $this->buildSections(
@@ -88,17 +112,26 @@ class ProposalAssemblyService
                 $templateHeaderConfig = null;
                 if ($template && isset($template->styling['header'])) {
                     $templateHeaderConfig = $template->styling['header'];
-                    \Log::info('ProposalAssemblyService::assembleProposal - Found header config in template styling.header', [
-                        'template_header_config' => $templateHeaderConfig,
-                    ]);
-                } elseif ($template && isset($template->styling['header_config'])) {
+                    \Log::info(
+                        'ProposalAssemblyService::assembleProposal - Found header config in template styling.header',
+                        [
+                            'template_header_config' => $templateHeaderConfig,
+                        ]
+                    );
+                } elseif (
+                    $template &&
+                    isset($template->styling['header_config'])
+                ) {
                     // Fallback for old naming convention
                     $templateHeaderConfig = $template->styling['header_config'];
-                    \Log::info('ProposalAssemblyService::assembleProposal - Found header config in template styling.header_config', [
-                        'template_header_config' => $templateHeaderConfig,
-                    ]);
+                    \Log::info(
+                        'ProposalAssemblyService::assembleProposal - Found header config in template styling.header_config',
+                        [
+                            'template_header_config' => $templateHeaderConfig,
+                        ]
+                    );
                 }
-                
+
                 // Use template config or default config if we have branding
                 if ($templateHeaderConfig) {
                     $headerConfig = $templateHeaderConfig;
@@ -111,28 +144,41 @@ class ProposalAssemblyService
                         'show_website' => false,
                         'show_abn' => false,
                     ];
-                    \Log::info('ProposalAssemblyService::assembleProposal - Using default header config', [
-                        'default_header_config' => $headerConfig,
-                    ]);
+                    \Log::info(
+                        'ProposalAssemblyService::assembleProposal - Using default header config',
+                        [
+                            'default_header_config' => $headerConfig,
+                        ]
+                    );
                 }
             }
             $proposalData['header_config'] = $headerConfig;
-            
+
             // Log before HTML assembly
-            \Log::info('ProposalAssemblyService::assembleProposal - Before HTML assembly', [
-                'header_config_in_proposal_data' => $proposalData['header_config'],
-                'branding_company_name' => $branding->company_name ?? 'null',
-            ]);
-            
+            \Log::info(
+                'ProposalAssemblyService::assembleProposal - Before HTML assembly',
+                [
+                    'header_config_in_proposal_data' =>
+                        $proposalData['header_config'],
+                    'branding_company_name' =>
+                        $branding->company_name ?? 'null',
+                ]
+            );
+
             // Generate HTML content
             $html = $this->assembleHTML($sections, $branding, $proposalData);
-            
+
             // Log after HTML assembly
-            \Log::info('ProposalAssemblyService::assembleProposal - After HTML assembly', [
-                'html_length' => strlen($html),
-                'html_contains_header' => strpos($html, 'proposal-header') !== false,
-                'html_contains_has_header' => strpos($html, 'has-header') !== false,
-            ]);
+            \Log::info(
+                'ProposalAssemblyService::assembleProposal - After HTML assembly',
+                [
+                    'html_length' => strlen($html),
+                    'html_contains_header' =>
+                        strpos($html, 'proposal-header') !== false,
+                    'html_contains_has_header' =>
+                        strpos($html, 'has-header') !== false,
+                ]
+            );
 
             return [
                 'html' => $html,
@@ -383,7 +429,9 @@ class ProposalAssemblyService
         // Check if there's a cover page section
         $hasCoverPage = false;
         foreach ($sections as $section) {
-            $sectionType = is_array($section) ? ($section['section_type'] ?? null) : ($section->section_type ?? null);
+            $sectionType = is_array($section)
+                ? $section['section_type'] ?? null
+                : $section->section_type ?? null;
             if ($sectionType === 'cover_page') {
                 $hasCoverPage = true;
                 break;
@@ -394,22 +442,29 @@ class ProposalAssemblyService
         $headerConfig = $proposalData['header_config'] ?? null;
 
         // Log header config extraction
-        \Log::info('ProposalAssemblyService::assembleHTML - Header config extraction', [
-            'proposal_data_keys' => array_keys($proposalData),
-            'header_config_from_proposal_data' => $headerConfig,
-            'has_cover_page' => $hasCoverPage,
-        ]);
+        \Log::info(
+            'ProposalAssemblyService::assembleHTML - Header config extraction',
+            [
+                'proposal_data_keys' => array_keys($proposalData),
+                'header_config_from_proposal_data' => $headerConfig,
+                'has_cover_page' => $hasCoverPage,
+            ]
+        );
 
         $html = $this->getHTMLHeader($branding, $hasCoverPage, $headerConfig);
 
         foreach ($sections as $index => $section) {
             $html .= $this->renderSection($section, $branding, $proposalData);
         }
-        
-        \Log::info('ProposalAssemblyService::assembleHTML - Sections rendered', [
-            'total_sections' => count($sections),
-            'header_enabled' => $headerConfig && ($headerConfig['enabled'] ?? false),
-        ]);
+
+        \Log::info(
+            'ProposalAssemblyService::assembleHTML - Sections rendered',
+            [
+                'total_sections' => count($sections),
+                'header_enabled' =>
+                    $headerConfig && ($headerConfig['enabled'] ?? false),
+            ]
+        );
 
         $html .= $this->getHTMLFooter($branding);
 
@@ -445,7 +500,11 @@ class ProposalAssemblyService
             case 'toc':
                 return $this->renderTableOfContents($section, $proposalData);
             case 'terms_conditions':
-                return $this->renderTermsConditions($section, $branding);
+                return $this->renderTermsConditions(
+                    $section,
+                    $branding,
+                    $proposalData
+                );
             case 'review_log':
                 return $this->renderChangeLog(
                     $section,
@@ -483,11 +542,23 @@ class ProposalAssemblyService
                     $proposalData
                 );
             case 'content':
-                return $this->renderContentSection($section, $branding);
+                return $this->renderContentSection(
+                    $section,
+                    $branding,
+                    $proposalData
+                );
             case 'terms':
-                return $this->renderTermsSection($section, $branding);
+                return $this->renderTermsSection(
+                    $section,
+                    $branding,
+                    $proposalData
+                );
             default:
-                return $this->renderContentSection($section, $branding);
+                return $this->renderContentSection(
+                    $section,
+                    $branding,
+                    $proposalData
+                );
         }
     }
 
@@ -666,7 +737,7 @@ class ProposalAssemblyService
         return '
         <div class="acceptance-section" style="padding: 60px; page-break-after: avoid;">
             <h1 style="margin-bottom: 30px; color: ' .
-            ($branding->colors['primary'] ?? '#2563eb') .
+            ($branding->colors['primary'] ?? '#000000') .
             ';">' .
             $section['title'] .
             '</h1>
@@ -817,7 +888,7 @@ class ProposalAssemblyService
     {
         // Use consistent colors from renderPricingSection
         $headerColor = '#6B7280'; // Neutral gray for header
-        
+
         $html =
             '
         <div style="margin: 30px 0;">
@@ -826,7 +897,9 @@ class ProposalAssemblyService
             '</h2>
             <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; border: 1px solid #E5E7EB; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
                 <thead>
-                    <tr style="background-color: ' . $headerColor . ' !important;">
+                    <tr style="background-color: ' .
+            $headerColor .
+            ' !important;">
                         <th style="border: 1px solid #E5E7EB; padding: 16px; text-align: left; vertical-align: middle; color: white !important; font-weight: bold; font-size: 14px;">Description</th>
                         <th style="border: 1px solid #E5E7EB; padding: 16px; text-align: center; vertical-align: middle; width: 60px; color: white !important; font-weight: bold; font-size: 14px;">Qty</th>
                         <th style="border: 1px solid #E5E7EB; padding: 16px; text-align: right; vertical-align: middle; width: 120px; color: white !important; font-weight: bold; font-size: 14px;">Rate</th>
@@ -844,7 +917,9 @@ class ProposalAssemblyService
 
             $html .=
                 '
-                <tr style="background-color: ' . $rowBg . ';">
+                <tr style="background-color: ' .
+                $rowBg .
+                ';">
                     <td style="border: 1px solid #E5E7EB; padding: 14px; font-size: 14px; color: #374151; font-weight: 500;">' .
                 ($item['description'] ?? '') .
                 '</td>
@@ -930,9 +1005,12 @@ class ProposalAssemblyService
      * @param BrandingProfile $branding
      * @return string
      */
-    private function renderTermsConditions(array $section, $branding): string
-    {
-        $content = $section['content'];
+    private function renderTermsConditions(
+        array $section,
+        $branding,
+        array $proposalData
+    ): string {
+        $content = $this->replaceVariables($section['content'], $proposalData);
 
         // Use default content if section content is empty
         if (empty(trim($content))) {
@@ -940,9 +1018,9 @@ class ProposalAssemblyService
         }
 
         return '
-        <div class="terms-conditions-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
+        <div class="terms-conditions-section" style="padding: 20px 20px; page-break-inside: avoid;">
             <h1 style="margin-bottom: 30px; color: ' .
-            ($branding->colors['primary'] ?? '#2563eb') .
+            ($branding->colors['primary'] ?? '#000000') .
             ';">' .
             $section['title'] .
             '</h1>
@@ -976,9 +1054,9 @@ class ProposalAssemblyService
 
         $html =
             '
-        <div class="change-log-section" style="padding: 60px; page-break-after: avoid;">
+        <div class="change-log-section" style="padding: 20px 20px; page-break-after: avoid;">
             <h1 style="margin-bottom: 30px; color: ' .
-            ($branding->colors['primary'] ?? '#2563eb') .
+            ($branding->colors['primary'] ?? '#000000') .
             ';">' .
             $section['title'] .
             '</h1>
@@ -1028,9 +1106,9 @@ class ProposalAssemblyService
         $content = $this->replaceVariables($section['content'], $proposalData);
 
         return '
-        <div class="overview-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
+        <div class="overview-section" style="page-break-before: always; padding: 20px 20px; page-break-inside: avoid;">
             <h1 style="margin-bottom: 30px; color: ' .
-            ($branding->colors['primary'] ?? '#2563eb') .
+            ($branding->colors['primary'] ?? '#000000') .
             ';">' .
             $section['title'] .
             '</h1>
@@ -1061,9 +1139,9 @@ class ProposalAssemblyService
         $content = $this->enhanceListStyling($content);
 
         return '
-        <div class="payment-terms-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
+        <div class="payment-terms-section" style="page-break-before: always; padding: 20px 20px; page-break-inside: avoid;">
             <h1 style="margin-bottom: 30px; color: ' .
-            ($branding->colors['primary'] ?? '#2563eb') .
+            ($branding->colors['primary'] ?? '#000000') .
             '; font-size: 28px; font-weight: bold;">' .
             $section['title'] .
             '</h1>
@@ -1095,14 +1173,17 @@ class ProposalAssemblyService
             $content = $this->getDefaultAgreementSignature();
         }
 
+        // Strip border styles from the content HTML
+        $content = $this->removeBorderStyles($content);
+
         return '
-        <div class="agreement-signature-section" style="page-break-before: always; padding: 5px 20px 30px 20px; page-break-inside: avoid; border: none !important; outline: none !important;">
+        <div class="agreement-signature-section" style="padding: 20px 20px; page-break-inside: avoid; border: none !important; outline: none !important;">
             <h1 style="margin-bottom: 16px; margin-top: 0; color: ' .
-            ($branding->colors['primary'] ?? '#2563eb') .
+            ($branding->colors['primary'] ?? '#000000') .
             ';">' .
             $section['title'] .
             '</h1>
-            <div class="agreement-content" style="line-height: 1.5; border: none !important; box-shadow: none !important; outline: none !important; background: transparent !important;">
+            <div class="agreement-content" style="line-height: 1.5; border: none !important; box-shadow: none !important; outline: none !important; background: transparent !important; border-width: 0px !important; border-style: none !important; padding: 0; margin: 0;">
                 ' .
             $content .
             '
@@ -1117,14 +1198,18 @@ class ProposalAssemblyService
      * @param BrandingProfile $branding
      * @return string
      */
-    private function renderContentSection(array $section, $branding): string
-    {
-        // Enhance list styling for content sections
-        $content = $this->enhanceListStyling($section['content']);
+    private function renderContentSection(
+        array $section,
+        $branding,
+        array $proposalData
+    ): string {
+        // Replace variables and enhance list styling for content sections
+        $content = $this->replaceVariables($section['content'], $proposalData);
+        $content = $this->enhanceListStyling($content);
 
         // For content sections, don't render the section title - let the dynamic content control its own headings
         return '
-        <div class="content-section" style="padding: 20px 20px; page-break-inside: avoid;">
+        <div class="content-section" style="padding: 20px 20px; page-break-inside: avoid; page-break-after: avoid;">
             <div class="section-content" style="line-height: 1.5;">
                 ' .
             $content .
@@ -1140,15 +1225,19 @@ class ProposalAssemblyService
      * @param BrandingProfile $branding
      * @return string
      */
-    private function renderTermsSection(array $section, $branding): string
-    {
-        // Enhance list styling for terms sections
-        $content = $this->enhanceListStyling($section['content']);
+    private function renderTermsSection(
+        array $section,
+        $branding,
+        array $proposalData
+    ): string {
+        // Replace variables and enhance list styling for terms sections
+        $content = $this->replaceVariables($section['content'], $proposalData);
+        $content = $this->enhanceListStyling($content);
 
         return '
-        <div class="terms-section" style="page-break-before: always; padding: 60px; page-break-inside: avoid;">
+        <div class="terms-section" style="padding: 20px 20px; page-break-inside: avoid;">
             <h1 style="margin-bottom: 30px; color: ' .
-            ($branding->colors['primary'] ?? '#2563eb') .
+            ($branding->colors['primary'] ?? '#000000') .
             ';">' .
             $section['title'] .
             '</h1>
@@ -1188,8 +1277,11 @@ class ProposalAssemblyService
      * @param array|null $headerConfig
      * @return string
      */
-    private function getHTMLHeader($branding, $hasCoverPage = false, $headerConfig = null): string
-    {
+    private function getHTMLHeader(
+        $branding,
+        $hasCoverPage = false,
+        $headerConfig = null
+    ): string {
         // Log header generation
         \Log::info('ProposalAssemblyService::getHTMLHeader - Called', [
             'has_branding' => !is_null($branding),
@@ -1205,11 +1297,18 @@ class ProposalAssemblyService
         $cssConstants = self::getSharedCSSConstants();
 
         // Determine body class
-        $hasHeaderClass = ($headerConfig && ($headerConfig['enabled'] ?? false)) ? ' class="has-header"' : '';
-        \Log::info('ProposalAssemblyService::getHTMLHeader - Body class generation', [
-            'header_condition_met' => $headerConfig && ($headerConfig['enabled'] ?? false),
-            'body_class_string' => $hasHeaderClass,
-        ]);
+        $hasHeaderClass =
+            $headerConfig && ($headerConfig['enabled'] ?? false)
+                ? ' class="has-header"'
+                : '';
+        \Log::info(
+            'ProposalAssemblyService::getHTMLHeader - Body class generation',
+            [
+                'header_condition_met' =>
+                    $headerConfig && ($headerConfig['enabled'] ?? false),
+                'body_class_string' => $hasHeaderClass,
+            ]
+        );
 
         return '
         <!DOCTYPE html>
@@ -1223,7 +1322,9 @@ class ProposalAssemblyService
                 }
                 
                 @page :first {
-                    margin: ' . ($hasCoverPage ? '0' : '20px') . ';
+                    margin: ' .
+            ($hasCoverPage ? '0' : '20px') .
+            ';
                 }
                 
                 body {
@@ -1250,7 +1351,7 @@ class ProposalAssemblyService
                 h1 {
                     font-size: 24px;
                     color: ' .
-            ($colors['primary'] ?? '#2563eb') .
+            ($colors['primary'] ?? '#000000') .
             ';
                     font-weight: bold;
                     margin-bottom: 16px;
@@ -1262,7 +1363,7 @@ class ProposalAssemblyService
                 h2 {
                     font-size: 20px;
                     color: ' .
-            ($colors['primary'] ?? '#2563eb') .
+            ($colors['primary'] ?? '#000000') .
             ';
                     font-weight: bold;
                     margin-bottom: 14px;
@@ -1272,7 +1373,7 @@ class ProposalAssemblyService
                 h3 {
                     font-size: 18px;
                     color: ' .
-            ($colors['primary'] ?? '#2563eb') .
+            ($colors['primary'] ?? '#000000') .
             ';
                     font-weight: bold;
                     margin-bottom: 12px;
@@ -1307,7 +1408,7 @@ class ProposalAssemblyService
                 }
                 
                 .primary-bg { background-color: ' .
-            ($colors['primary'] ?? '#2563eb') .
+            ($colors['primary'] ?? '#000000') .
             '; }
                 .secondary-bg { background-color: ' .
             ($colors['secondary'] ?? '#64748b') .
@@ -1317,7 +1418,7 @@ class ProposalAssemblyService
             '; }
                 
                 .primary-text { color: ' .
-            ($colors['primary'] ?? '#2563eb') .
+            ($colors['primary'] ?? '#000000') .
             '; }
                 .secondary-text { color: ' .
             ($colors['secondary'] ?? '#64748b') .
@@ -1344,7 +1445,7 @@ class ProposalAssemblyService
                     font-size: 20px;
                     margin: 0 auto;
                     background-color: ' .
-            ($colors['primary'] ?? '#2563eb') .
+            ($colors['primary'] ?? '#000000') .
             ';
                     line-height: 80px;
                 }
@@ -1434,6 +1535,32 @@ class ProposalAssemblyService
                     background: transparent !important;
                 }
                 
+                /* Remove borders from any proposal-header elements within signature section */
+                .agreement-signature-section .proposal-header,
+                .agreement-signature-section .proposal-header *,
+                .agreement-content .proposal-header,
+                .agreement-content .proposal-header *,
+                .agreement-signature-section *,
+                .agreement-content *,
+                .agreement-signature-section div,
+                .agreement-content div,
+                .agreement-signature-section p,
+                .agreement-content p {
+                    border: none !important;
+                    outline: none !important;
+                    box-shadow: none !important;
+                    background: transparent !important;
+                }
+                
+                /* Override any global border styles for signature section */
+                .agreement-signature-section {
+                    border: none !important;
+                    border-width: 0px !important;
+                    border-style: none !important;
+                    outline: none !important;
+                    box-shadow: none !important;
+                }
+                
                 p { 
                     margin: 12px 0; 
                     font-size: 14px; 
@@ -1466,7 +1593,9 @@ class ProposalAssemblyService
                 .proposal-header {
                     width: 100%;
                     padding: 10px;
-                    border: 2px solid ' . ($colors['primary'] ?? '#2563eb') . ';
+                    border: 2px solid ' .
+            ($colors['primary'] ?? '#000000') .
+            ';
                     background: #f9f9f9;
                     margin-bottom: 15px;
                     clear: both;
@@ -1488,7 +1617,9 @@ class ProposalAssemblyService
                 .proposal-header-logo .logo-placeholder {
                     width: 40px;
                     height: 40px;
-                    background-color: ' . ($colors['primary'] ?? '#2563eb') . ';
+                    background-color: ' .
+            ($colors['primary'] ?? '#000000') .
+            ';
                     color: white;
                     text-align: center;
                     line-height: 40px;
@@ -1505,9 +1636,13 @@ class ProposalAssemblyService
                 .proposal-header-content .company-name {
                     font-size: 16px;
                     font-weight: bold;
-                    color: ' . ($colors['primary'] ?? '#2563eb') . ';
+                    color: ' .
+            ($colors['primary'] ?? '#000000') .
+            ';
                     margin-bottom: 5px;
-                    font-family: ' . ($fonts['heading'] ?? 'Arial, sans-serif') . ';
+                    font-family: ' .
+            ($fonts['heading'] ?? 'Arial, sans-serif') .
+            ';
                 }
                 
                 .proposal-header-content .company-info {
@@ -1526,7 +1661,9 @@ class ProposalAssemblyService
                 }
             </style>
         </head>
-        <body' . $hasHeaderClass . '>';
+        <body' .
+            $hasHeaderClass .
+            '>';
     }
 
     /**
@@ -1536,8 +1673,10 @@ class ProposalAssemblyService
      * @param array|null $headerConfig
      * @return string
      */
-    private function generateProposalHeader($branding, $headerConfig = null): string
-    {
+    private function generateProposalHeader(
+        $branding,
+        $headerConfig = null
+    ): string {
         \Log::info('ProposalAssemblyService::generateProposalHeader - Called', [
             'header_config' => $headerConfig,
             'header_enabled' => $headerConfig['enabled'] ?? 'not_set',
@@ -1546,11 +1685,15 @@ class ProposalAssemblyService
         ]);
 
         if (!$headerConfig || !($headerConfig['enabled'] ?? false)) {
-            \Log::info('ProposalAssemblyService::generateProposalHeader - Header disabled, returning empty string');
+            \Log::info(
+                'ProposalAssemblyService::generateProposalHeader - Header disabled, returning empty string'
+            );
             return '';
         }
 
-        \Log::info('ProposalAssemblyService::generateProposalHeader - Header enabled but using DomPDF page script instead of inline HTML');
+        \Log::info(
+            'ProposalAssemblyService::generateProposalHeader - Header enabled but using DomPDF page script instead of inline HTML'
+        );
         return ''; // Headers are now handled by DomPDF page script in PDFController
     }
 
@@ -1583,7 +1726,10 @@ class ProposalAssemblyService
 
         // Enhance data with raw numeric versions for calculations
         $enhancedData = $this->enhanceDataWithNumericVersions($data);
-        
+
+        // Add smart client variables
+        $enhancedData = $this->addSmartClientVariables($enhancedData);
+
         // First pass: Replace all simple variable placeholders
         foreach ($enhancedData as $key => $value) {
             $placeholder = '{{' . $key . '}}';
@@ -1605,9 +1751,50 @@ class ProposalAssemblyService
         }
 
         // Second pass: Process mathematical expressions
-        $content = $this->processMathematicalExpressions($content, $enhancedData);
+        $content = $this->processMathematicalExpressions(
+            $content,
+            $enhancedData
+        );
 
         return $content;
+    }
+
+    /**
+     * Add smart client variables to the data array
+     *
+     * @param array $data
+     * @return array
+     */
+    private function addSmartClientVariables(array $data): array
+    {
+        // clients_label should be the COMPANY name (who the client is engaging)
+        // The text reads "you agree to engage {{clients_label}}" - so this is the service provider company
+        if (!isset($data['clients_label'])) {
+            if (isset($data['company_name'])) {
+                $data['clients_label'] = $data['company_name'];
+            } elseif (isset($data['branding_company_name'])) {
+                $data['clients_label'] = $data['branding_company_name'];
+            } elseif (isset($data['user_company_name'])) {
+                $data['clients_label'] = $data['user_company_name'];
+            } else {
+                $data['clients_label'] = 'LKD Fitouts'; // fallback
+            }
+        }
+
+        // If company_name is not set but we have branding info, use that
+        if (
+            !isset($data['company_name']) &&
+            isset($data['branding_company_name'])
+        ) {
+            $data['company_name'] = $data['branding_company_name'];
+        }
+
+        // Also ensure we have customer/client variables properly mapped
+        if (!isset($data['customer_name']) && isset($data['client_name'])) {
+            $data['customer_name'] = $data['client_name'];
+        }
+
+        return $data;
     }
 
     /**
@@ -1714,7 +1901,7 @@ class ProposalAssemblyService
                 'name' => 'Default',
                 'company_name' => config('app.name', 'Your Company'),
                 'colors' => [
-                    'primary' => '#2563eb',
+                    'primary' => '#000000',
                     'secondary' => '#64748b',
                     'accent' => '#059669',
                 ],
@@ -1850,6 +2037,37 @@ class ProposalAssemblyService
     }
 
     /**
+     * Remove border styles from HTML content
+     *
+     * @param string $content
+     * @return string
+     */
+    private function removeBorderStyles(string $content): string
+    {
+        // Remove border-related style attributes
+        $content = preg_replace('/border\s*:\s*[^;]+;?/i', '', $content);
+        $content = preg_replace('/border-width\s*:\s*[^;]+;?/i', '', $content);
+        $content = preg_replace('/border-style\s*:\s*[^;]+;?/i', '', $content);
+        $content = preg_replace('/border-color\s*:\s*[^;]+;?/i', '', $content);
+        $content = preg_replace('/border-radius\s*:\s*[^;]+;?/i', '', $content);
+        $content = preg_replace('/box-shadow\s*:\s*[^;]+;?/i', '', $content);
+        $content = preg_replace('/outline\s*:\s*[^;]+;?/i', '', $content);
+
+        // Clean up any empty style attributes or double semicolons
+        $content = preg_replace('/style\s*=\s*["\']\s*["\']/i', '', $content);
+        $content = preg_replace('/;+/', ';', $content);
+        $content = preg_replace_callback(
+            '/style\s*=\s*["\'][^"\']*;\s*["\']/i',
+            function ($matches) {
+                return str_replace(';;', ';', $matches[0]);
+            },
+            $content
+        );
+
+        return $content;
+    }
+
+    /**
      * Get default agreement and signature section (static content)
      *
      * @return string
@@ -1857,35 +2075,31 @@ class ProposalAssemblyService
     private function getDefaultAgreementSignature(): string
     {
         return '
-        <div style="border: none !important; outline: none !important; box-shadow: none !important; background: transparent !important; padding: 0; margin: 0;">
-            <p style="margin-bottom: 20px; line-height: 1.5;">We are excited about the opportunity to work with you on this project and deliver a solution that meets your needs and exceeds your expectations. To proceed, please review the details of the proposal and provide your acceptance by signing below.</p>
-            
-            <p style="margin-bottom: 30px; line-height: 1.5;">By signing this document, you agree to the scope outlined in this proposal and authorize us to commence work on the project as described.</p>
-            
-            <div style="margin-bottom: 40px;">
-                <span style="font-weight: bold; font-size: inherit;">Name *:</span>
-                <span style="border-bottom: 1px dotted #666; display: inline-block; width: 400px; margin-left: 20px; height: 18px;"></span>
-            </div>
-            
-            <div style="margin-bottom: 40px;">
-                <span style="font-weight: bold; font-size: inherit;">Company Name *:</span>
-                <span style="border-bottom: 1px dotted #666; display: inline-block; width: 300px; margin-left: 20px; height: 18px;"></span>
-            </div>
-            
-            <div style="margin-bottom: 40px;">
-                <span style="font-weight: bold; font-size: inherit;">ABN:</span>
-                <span style="border-bottom: 1px dotted #666; display: inline-block; width: 400px; margin-left: 60px; height: 18px;"></span>
-            </div>
-            
-            <div style="margin-bottom: 60px;">
-                <span style="font-weight: bold; font-size: inherit;">Signature *:</span>
-                <span style="border-bottom: 1px solid #333; display: inline-block; width: 350px; margin-left: 20px; height: 30px;"></span>
-            </div>
-            
-            <div style="margin-bottom: 40px;">
-                <span style="font-weight: bold; font-size: inherit;">Date *:</span>
-                <span style="border-bottom: 1px dotted #666; display: inline-block; width: 400px; margin-left: 60px; height: 18px;"></span>
-            </div>
+        <p style="margin-bottom: 20px; line-height: 1.5; border: none !important;">By signing the Approval to Proceed, you agree to engage {{company_name}} to complete the Scope of Works outlined within this Fee Proposal in accordance with our Terms of Engagement.</p>
+        
+        <div style="margin-bottom: 40px; border: none !important;">
+            <span style="font-weight: bold; font-size: inherit;">Name *:</span>
+            <span style="border-bottom: 1px dotted #666; display: inline-block; width: 400px; margin-left: 20px; height: 18px;"></span>
+        </div>
+        
+        <div style="margin-bottom: 40px; border: none !important;">
+            <span style="font-weight: bold; font-size: inherit;">Company Name *:</span>
+            <span style="border-bottom: 1px dotted #666; display: inline-block; width: 300px; margin-left: 20px; height: 18px;"></span>
+        </div>
+        
+        <div style="margin-bottom: 40px; border: none !important;">
+            <span style="font-weight: bold; font-size: inherit;">ABN:</span>
+            <span style="border-bottom: 1px dotted #666; display: inline-block; width: 400px; margin-left: 60px; height: 18px;"></span>
+        </div>
+        
+        <div style="margin-bottom: 60px; border: none !important;">
+            <span style="font-weight: bold; font-size: inherit;">Signature *:</span>
+            <span style="border-bottom: 1px solid #333; display: inline-block; width: 350px; margin-left: 20px; height: 30px;"></span>
+        </div>
+        
+        <div style="margin-bottom: 40px; border: none !important;">
+            <span style="font-weight: bold; font-size: inherit;">Date *:</span>
+            <span style="border-bottom: 1px dotted #666; display: inline-block; width: 400px; margin-left: 60px; height: 18px;"></span>
         </div>';
     }
 
@@ -2170,17 +2384,17 @@ class ProposalAssemblyService
     private function enhanceDataWithNumericVersions(array $data): array
     {
         $enhancedData = $data;
-        
+
         foreach ($data as $key => $value) {
             // Skip if this is already a raw version
             if (str_ends_with($key, '_raw')) {
                 continue;
             }
-            
+
             // Check if this looks like a formatted currency or numeric value
             if (is_string($value)) {
                 $numericValue = $this->extractNumericValue($value);
-                
+
                 // Only create raw version if we found a meaningful numeric value
                 // and it's not already exactly the same as the original
                 if ($numericValue > 0 && $numericValue != $value) {
@@ -2190,17 +2404,20 @@ class ProposalAssemblyService
                 // For direct numeric values, also provide a raw version for consistency
                 $enhancedData[$key . '_raw'] = (float) $value;
             }
-            
+
             // Special handling for mathematical expressions in template content
             // If we find expressions using this variable, make sure raw version exists
-            if (is_string($value) && (strpos($value, '$') !== false || is_numeric($value))) {
+            if (
+                is_string($value) &&
+                (strpos($value, '$') !== false || is_numeric($value))
+            ) {
                 $numericValue = $this->extractNumericValue($value);
                 if ($numericValue > 0) {
                     $enhancedData[$key . '_for_calculation'] = $numericValue;
                 }
             }
         }
-        
+
         return $enhancedData;
     }
 
@@ -2212,76 +2429,102 @@ class ProposalAssemblyService
      * @param array $data
      * @return string
      */
-    private function processMathematicalExpressions(string $content, array $data): string
-    {
+    private function processMathematicalExpressions(
+        string $content,
+        array $data
+    ): string {
         // First, let's handle expressions with variables still in them
-        $content = preg_replace_callback('/\{\{[^}]+\}\}\s*[\+\-\*\/\%]\s*[\d\.\{\}a-zA-Z_\+\-\*\/\%\s]+/', function ($matches) use ($data) {
-            $expression = $matches[0];
-            
-            try {
-                // Replace variables in the expression with their numeric values
-                foreach ($data as $key => $value) {
-                    $placeholder = '{{' . $key . '}}';
-                    if (strpos($expression, $placeholder) !== false) {
-                        $numericValue = $this->extractNumericValue($value);
-                        $expression = str_replace($placeholder, $numericValue, $expression);
+        $content = preg_replace_callback(
+            '/\{\{[^}]+\}\}\s*[\+\-\*\/\%]\s*[\d\.\{\}a-zA-Z_\+\-\*\/\%\s]+/',
+            function ($matches) use ($data) {
+                $expression = $matches[0];
+
+                try {
+                    // Replace variables in the expression with their numeric values
+                    foreach ($data as $key => $value) {
+                        $placeholder = '{{' . $key . '}}';
+                        if (strpos($expression, $placeholder) !== false) {
+                            $numericValue = $this->extractNumericValue($value);
+                            $expression = str_replace(
+                                $placeholder,
+                                $numericValue,
+                                $expression
+                            );
+                        }
                     }
+
+                    // Evaluate the mathematical expression safely
+                    $result = $this->evaluateMathExpression($expression);
+
+                    // Format the result
+                    return $this->formatCalculatedValue($result, $data);
+                } catch (\Exception $e) {
+                    \Log::warning(
+                        'Failed to evaluate math expression: ' .
+                            $expression .
+                            ' - ' .
+                            $e->getMessage()
+                    );
+                    return $matches[0];
                 }
-                
-                // Evaluate the mathematical expression safely
-                $result = $this->evaluateMathExpression($expression);
-                
-                // Format the result
-                return $this->formatCalculatedValue($result, $data);
-                
-            } catch (\Exception $e) {
-                \Log::warning('Failed to evaluate math expression: ' . $expression . ' - ' . $e->getMessage());
-                return $matches[0];
-            }
-        }, $content);
-        
+            },
+            $content
+        );
+
         // Then handle pure numeric expressions like "2222 * 0.1"
-        $content = preg_replace_callback('/\b(\d+(?:\.\d+)?)\s*([\+\-\*\/\%])\s*(\d+(?:\.\d+)?)\b/', function ($matches) use ($data) {
-            $left = (float) $matches[1];
-            $operator = $matches[2];
-            $right = (float) $matches[3];
-            
-            try {
-                switch ($operator) {
-                    case '+':
-                        $result = $left + $right;
-                        break;
-                    case '-':
-                        $result = $left - $right;
-                        break;
-                    case '*':
-                        $result = $left * $right;
-                        break;
-                    case '/':
-                        if ($right == 0) {
-                            throw new \InvalidArgumentException('Division by zero');
-                        }
-                        $result = $left / $right;
-                        break;
-                    case '%':
-                        if ($right == 0) {
-                            throw new \InvalidArgumentException('Modulo by zero');
-                        }
-                        $result = fmod($left, $right);
-                        break;
-                    default:
-                        return $matches[0];
+        $content = preg_replace_callback(
+            '/\b(\d+(?:\.\d+)?)\s*([\+\-\*\/\%])\s*(\d+(?:\.\d+)?)\b/',
+            function ($matches) use ($data) {
+                $left = (float) $matches[1];
+                $operator = $matches[2];
+                $right = (float) $matches[3];
+
+                try {
+                    switch ($operator) {
+                        case '+':
+                            $result = $left + $right;
+                            break;
+                        case '-':
+                            $result = $left - $right;
+                            break;
+                        case '*':
+                            $result = $left * $right;
+                            break;
+                        case '/':
+                            if ($right == 0) {
+                                throw new \InvalidArgumentException(
+                                    'Division by zero'
+                                );
+                            }
+                            $result = $left / $right;
+                            break;
+                        case '%':
+                            if ($right == 0) {
+                                throw new \InvalidArgumentException(
+                                    'Modulo by zero'
+                                );
+                            }
+                            $result = fmod($left, $right);
+                            break;
+                        default:
+                            return $matches[0];
+                    }
+
+                    // Format the result
+                    return $this->formatCalculatedValue($result, $data);
+                } catch (\Exception $e) {
+                    \Log::warning(
+                        'Failed to evaluate simple math expression: ' .
+                            $matches[0] .
+                            ' - ' .
+                            $e->getMessage()
+                    );
+                    return $matches[0];
                 }
-                
-                // Format the result
-                return $this->formatCalculatedValue($result, $data);
-                
-            } catch (\Exception $e) {
-                \Log::warning('Failed to evaluate simple math expression: ' . $matches[0] . ' - ' . $e->getMessage());
-                return $matches[0];
-            }
-        }, $content);
-        
+            },
+            $content
+        );
+
         return $content;
     }
 
@@ -2296,17 +2539,17 @@ class ProposalAssemblyService
         if (is_numeric($value)) {
             return (float) $value;
         }
-        
+
         if (is_string($value)) {
             // Remove common currency symbols and formatting
             $cleaned = preg_replace('/[\$,\s]/', '', $value);
             $cleaned = preg_replace('/[^\d\.\-]/', '', $cleaned);
-            
+
             if (is_numeric($cleaned)) {
                 return (float) $cleaned;
             }
         }
-        
+
         return 0.0;
     }
 
@@ -2322,23 +2565,29 @@ class ProposalAssemblyService
     {
         // Remove any whitespace
         $expression = preg_replace('/\s+/', '', $expression);
-        
+
         // Security check: only allow numbers, basic operators, and parentheses
         if (!preg_match('/^[\d\.\+\-\*\/\%\(\)]+$/', $expression)) {
-            throw new \InvalidArgumentException('Invalid characters in mathematical expression');
+            throw new \InvalidArgumentException(
+                'Invalid characters in mathematical expression'
+            );
         }
-        
+
         // Additional security: prevent function calls and complex expressions
         if (preg_match('/[a-zA-Z_]/', $expression)) {
-            throw new \InvalidArgumentException('Variables not fully replaced in expression');
+            throw new \InvalidArgumentException(
+                'Variables not fully replaced in expression'
+            );
         }
-        
+
         // Safely evaluate using PHP's eval with strict validation
         try {
             // Use a calculation library for safer evaluation
             return $this->calculateExpression($expression);
         } catch (\Exception $e) {
-            throw new \InvalidArgumentException('Failed to evaluate expression: ' . $e->getMessage());
+            throw new \InvalidArgumentException(
+                'Failed to evaluate expression: ' . $e->getMessage()
+            );
         }
     }
 
@@ -2357,7 +2606,7 @@ class ProposalAssemblyService
             $result = $this->calculateSimpleExpression($subExpression);
             $expression = str_replace($matches[0], $result, $expression);
         }
-        
+
         return $this->calculateSimpleExpression($expression);
     }
 
@@ -2371,11 +2620,17 @@ class ProposalAssemblyService
     private function calculateSimpleExpression(string $expression): float
     {
         // Handle multiplication, division, and modulo first (left to right)
-        while (preg_match('/(-?\d+(?:\.\d+)?)\s*([*\/%])\s*(-?\d+(?:\.\d+)?)/', $expression, $matches)) {
+        while (
+            preg_match(
+                '/(-?\d+(?:\.\d+)?)\s*([*\/%])\s*(-?\d+(?:\.\d+)?)/',
+                $expression,
+                $matches
+            )
+        ) {
             $left = (float) $matches[1];
             $operator = $matches[2];
             $right = (float) $matches[3];
-            
+
             switch ($operator) {
                 case '*':
                     $result = $left * $right;
@@ -2393,18 +2648,26 @@ class ProposalAssemblyService
                     $result = fmod($left, $right);
                     break;
                 default:
-                    throw new \InvalidArgumentException('Unknown operator: ' . $operator);
+                    throw new \InvalidArgumentException(
+                        'Unknown operator: ' . $operator
+                    );
             }
-            
+
             $expression = str_replace($matches[0], $result, $expression);
         }
-        
+
         // Handle addition and subtraction (left to right)
-        while (preg_match('/(-?\d+(?:\.\d+)?)\s*([\+\-])\s*(-?\d+(?:\.\d+)?)/', $expression, $matches)) {
+        while (
+            preg_match(
+                '/(-?\d+(?:\.\d+)?)\s*([\+\-])\s*(-?\d+(?:\.\d+)?)/',
+                $expression,
+                $matches
+            )
+        ) {
             $left = (float) $matches[1];
             $operator = $matches[2];
             $right = (float) $matches[3];
-            
+
             switch ($operator) {
                 case '+':
                     $result = $left + $right;
@@ -2413,17 +2676,21 @@ class ProposalAssemblyService
                     $result = $left - $right;
                     break;
                 default:
-                    throw new \InvalidArgumentException('Unknown operator: ' . $operator);
+                    throw new \InvalidArgumentException(
+                        'Unknown operator: ' . $operator
+                    );
             }
-            
+
             $expression = str_replace($matches[0], $result, $expression);
         }
-        
+
         // Final result should be a single number
         if (!is_numeric($expression)) {
-            throw new \InvalidArgumentException('Expression did not evaluate to a number: ' . $expression);
+            throw new \InvalidArgumentException(
+                'Expression did not evaluate to a number: ' . $expression
+            );
         }
-        
+
         return (float) $expression;
     }
 
@@ -2434,17 +2701,23 @@ class ProposalAssemblyService
      * @param array $originalData
      * @return string
      */
-    private function formatCalculatedValue(float $value, array $originalData): string
-    {
+    private function formatCalculatedValue(
+        float $value,
+        array $originalData
+    ): string {
         // Check if any of the original values contained currency formatting
         $hasCurrency = false;
         foreach ($originalData as $dataValue) {
-            if (is_string($dataValue) && (strpos($dataValue, '$') !== false || strpos($dataValue, 'AUD') !== false)) {
+            if (
+                is_string($dataValue) &&
+                (strpos($dataValue, '$') !== false ||
+                    strpos($dataValue, 'AUD') !== false)
+            ) {
                 $hasCurrency = true;
                 break;
             }
         }
-        
+
         if ($hasCurrency) {
             // Format as currency
             return '$' . number_format($value, 2);
@@ -2484,34 +2757,46 @@ class ProposalAssemblyService
             $localPath = $tempDir . '/' . $localFilename;
 
             // Check if we already have this file locally (and it's recent)
-            if (file_exists($localPath) && (time() - filemtime($localPath)) < 3600) {
+            if (
+                file_exists($localPath) &&
+                time() - filemtime($localPath) < 3600
+            ) {
                 // File exists and is less than 1 hour old, use it
                 // For DomPDF, we need an absolute file path, not a web URL
                 return $localPath;
             }
 
             // Download the image from S3
-            \Log::info('ProposalAssemblyService::ensureLocalImageForPDF - Downloading image from S3', [
-                'file_id' => $file->id,
-                'source_url' => $file->file_url,
-                'local_path' => $localPath,
-            ]);
+            \Log::info(
+                'ProposalAssemblyService::ensureLocalImageForPDF - Downloading image from S3',
+                [
+                    'file_id' => $file->id,
+                    'source_url' => $file->file_url,
+                    'local_path' => $localPath,
+                ]
+            );
 
             $imageData = file_get_contents($file->file_url);
             if ($imageData === false) {
-                \Log::warning('ProposalAssemblyService::ensureLocalImageForPDF - Failed to download image', [
-                    'file_id' => $file->id,
-                    'source_url' => $file->file_url,
-                ]);
+                \Log::warning(
+                    'ProposalAssemblyService::ensureLocalImageForPDF - Failed to download image',
+                    [
+                        'file_id' => $file->id,
+                        'source_url' => $file->file_url,
+                    ]
+                );
                 return $file->file_url; // Fallback to original URL
             }
 
             // Save locally
             if (file_put_contents($localPath, $imageData) === false) {
-                \Log::warning('ProposalAssemblyService::ensureLocalImageForPDF - Failed to save image locally', [
-                    'file_id' => $file->id,
-                    'local_path' => $localPath,
-                ]);
+                \Log::warning(
+                    'ProposalAssemblyService::ensureLocalImageForPDF - Failed to save image locally',
+                    [
+                        'file_id' => $file->id,
+                        'local_path' => $localPath,
+                    ]
+                );
                 return $file->file_url; // Fallback to original URL
             }
 
@@ -2520,27 +2805,32 @@ class ProposalAssemblyService
             if (!file_exists($publicTempDir)) {
                 mkdir($publicTempDir, 0755, true);
             }
-            
+
             $publicPath = $publicTempDir . '/' . $localFilename;
             if (!file_exists($publicPath)) {
                 copy($localPath, $publicPath);
             }
 
-            \Log::info('ProposalAssemblyService::ensureLocalImageForPDF - Image downloaded successfully', [
-                'file_id' => $file->id,
-                'local_path' => $localPath,
-            ]);
+            \Log::info(
+                'ProposalAssemblyService::ensureLocalImageForPDF - Image downloaded successfully',
+                [
+                    'file_id' => $file->id,
+                    'local_path' => $localPath,
+                ]
+            );
 
             // For DomPDF, we need an absolute file path, not a web URL
             return $localPath;
-
         } catch (\Exception $e) {
-            \Log::error('ProposalAssemblyService::ensureLocalImageForPDF - Exception occurred', [
-                'file_id' => $file->id ?? 'unknown',
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-            
+            \Log::error(
+                'ProposalAssemblyService::ensureLocalImageForPDF - Exception occurred',
+                [
+                    'file_id' => $file->id ?? 'unknown',
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                ]
+            );
+
             // Return original URL as fallback
             return $file->file_url ?? null;
         }

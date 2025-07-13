@@ -842,84 +842,81 @@ class PDFController extends \App\Http\Controllers\Controller
                 if (isset($branding->file) && $branding->file) {
                     $logoUrl = $branding->file->file_url ?? '';
                     if ($logoUrl) {
-                        // For S3 URLs or external images, download them locally for PDF generation
-                        $localLogoUrl = $logoUrl;
-                        
-                        // Debug S3 detection
+                        // Convert image to base64 data URI for reliable PDF embedding
+                        $finalLogoUrl = $logoUrl;
                         $isS3 = (strpos($logoUrl, 's3.amazonaws.com') !== false) || 
                                (strpos($logoUrl, 'amazonaws.com') !== false) || 
                                (strpos($logoUrl, '.s3.') !== false);
-                        Log::info('PDFController::generateProposalPDFSpatie - S3 Detection Debug', [
-                            'url' => $logoUrl,
-                            'contains_s3_amazonaws' => strpos($logoUrl, 's3.amazonaws.com') !== false,
-                            'contains_amazonaws' => strpos($logoUrl, 'amazonaws.com') !== false,
-                            'contains_dot_s3' => strpos($logoUrl, '.s3.') !== false,
-                            'is_s3_detected' => $isS3
-                        ]);
                         
-                        if ($isS3) {
+                        // For external URLs (especially S3), convert to base64 data URI
+                        if (str_starts_with($logoUrl, 'http')) {
                             try {
-                                // Download S3 image to public storage directory
-                                $tempDir = storage_path('app/public/temp/pdf-images');
-                                if (!file_exists($tempDir)) {
-                                    mkdir($tempDir, 0755, true);
-                                }
-                                
-                                $extension = pathinfo($branding->file->file_name ?? 'logo.png', PATHINFO_EXTENSION);
-                                $localPath = $tempDir . '/logo_' . $branding->file->id . '_' . time() . '.' . $extension;
-                                
-                                // Download image content
-                                Log::info('PDFController::generateProposalPDFSpatie - Attempting to download S3 image', [
-                                    'url' => $logoUrl
+                                Log::info('PDFController::generateProposalPDFSpatie - Converting logo to base64', [
+                                    'url' => $logoUrl,
+                                    'is_s3' => $isS3
                                 ]);
                                 
                                 $imageContent = file_get_contents($logoUrl);
-                                Log::info('PDFController::generateProposalPDFSpatie - Download result', [
-                                    'success' => $imageContent !== false,
-                                    'size' => $imageContent !== false ? strlen($imageContent) : 0
-                                ]);
-                                
                                 if ($imageContent !== false) {
-                                    file_put_contents($localPath, $imageContent);
-                                    // Create a web-accessible URL through Laravel's storage
-                                    $relativePath = 'temp/pdf-images/' . basename($localPath);
-                                    $localLogoUrl = url('storage/' . $relativePath);
+                                    // Detect image MIME type
+                                    $finfo = new \finfo(FILEINFO_MIME_TYPE);
+                                    $mimeType = $finfo->buffer($imageContent);
                                     
-                                    Log::info('PDFController::generateProposalPDFSpatie - S3 Logo downloaded locally', [
+                                    // Fallback to filename extension if finfo fails
+                                    if (!$mimeType || $mimeType === 'application/octet-stream') {
+                                        $extension = strtolower(pathinfo($branding->file->file_name ?? 'logo.png', PATHINFO_EXTENSION));
+                                        $mimeType = match($extension) {
+                                            'png' => 'image/png',
+                                            'jpg', 'jpeg' => 'image/jpeg',
+                                            'gif' => 'image/gif',
+                                            'svg' => 'image/svg+xml',
+                                            'webp' => 'image/webp',
+                                            default => 'image/png'
+                                        };
+                                    }
+                                    
+                                    // Create base64 data URI
+                                    $base64 = base64_encode($imageContent);
+                                    $finalLogoUrl = "data:{$mimeType};base64,{$base64}";
+                                    
+                                    Log::info('PDFController::generateProposalPDFSpatie - Logo converted to base64', [
                                         'original_url' => $logoUrl,
-                                        'local_path' => $localPath,
-                                        'local_url' => $localLogoUrl,
-                                        'file_size' => strlen($imageContent)
+                                        'mime_type' => $mimeType,
+                                        'base64_length' => strlen($base64),
+                                        'data_uri_length' => strlen($finalLogoUrl)
                                     ]);
                                 } else {
-                                    Log::warning('PDFController::generateProposalPDFSpatie - Failed to download S3 logo', [
+                                    Log::warning('PDFController::generateProposalPDFSpatie - Failed to fetch image for base64 conversion', [
                                         'url' => $logoUrl
                                     ]);
                                 }
                             } catch (\Exception $e) {
-                                Log::error('PDFController::generateProposalPDFSpatie - Error downloading S3 logo', [
+                                Log::error('PDFController::generateProposalPDFSpatie - Error converting logo to base64', [
                                     'url' => $logoUrl,
                                     'error' => $e->getMessage()
                                 ]);
+                                // Fallback to original URL
+                                $finalLogoUrl = $logoUrl;
                             }
                         } else {
-                            // Ensure we have a full absolute URL for local files
-                            if (!str_starts_with($logoUrl, 'http') && !str_starts_with($logoUrl, 'file://')) {
-                                $localLogoUrl = url($logoUrl);
+                            // For local URLs, ensure we have a full absolute URL
+                            if (!str_starts_with($logoUrl, 'file://')) {
+                                $finalLogoUrl = url($logoUrl);
                             }
                         }
                         
                         Log::info('PDFController::generateProposalPDFSpatie - Logo URL processing', [
                             'original_url' => $logoUrl,
-                            'final_url' => $localLogoUrl,
-                            'is_s3' => str_contains($logoUrl, 's3.') || str_contains($logoUrl, 'amazonaws.com'),
+                            'final_url' => $finalLogoUrl,
+                            'is_s3' => $isS3,
+                            'is_external' => str_starts_with($logoUrl, 'http'),
                             'file_info' => [
                                 'filename' => $branding->file->file_name ?? '',
                                 'mime_type' => $branding->file->mime_type ?? '',
                             ]
                         ]);
                         
-                        $logoHtml = '<img src="' . htmlspecialchars($localLogoUrl) . '" style="height: 35px; width: auto; margin-right: 15px;" alt="Company Logo">';
+                        $logoHtml = '<img src="' . htmlspecialchars($finalLogoUrl) . '" style="height: 28px; width: auto; margin-right: 15px;" alt="Company Logo">';
                     }
                 }
                 
