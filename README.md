@@ -43,6 +43,17 @@ A comprehensive Laravel package that provides enhanced authentication, file mana
         -   [Generating PDFs from Views](#generating-pdfs-from-views)
         -   [Generating PDFs from HTML](#generating-pdfs-from-html)
         -   [Custom PDF Options](#custom-pdf-options)
+        -   [Generating Proposal PDFs with Headers](#generating-proposal-pdfs-with-headers)
+    -   [Proposal System \& Branding Profiles](#proposal-system--branding-profiles)
+        -   [Branding Profiles](#branding-profiles)
+        -   [Proposal Assembly Service](#proposal-assembly-service)
+        -   [PDF Controller Enhancements](#pdf-controller-enhancements)
+        -   [Styling Optimizations](#styling-optimizations)
+        -   [Frontend Integration](#frontend-integration)
+        -   [Database Migrations](#database-migrations)
+        -   [Configuration Options](#configuration-options)
+        -   [API Endpoints](#api-endpoints)
+        -   [Development Commands](#development-commands)
     -   [Dynamic Controller](#dynamic-controller)
         -   [Basic Usage](#basic-usage)
         -   [Filtering](#filtering)
@@ -178,6 +189,16 @@ php artisan migrate
     -   Generate PDFs from HTML content
     -   Customizable paper size and orientation
     -   Support for custom PDF options
+
+-   **Proposal System & Branding Profiles**
+
+    -   Professional proposal PDF generation with headers
+    -   Company branding profiles with logo, colors, and fonts
+    -   Configurable header content (phone, email, website, address, ABN)
+    -   S3 logo support with automatic local caching for PDF compatibility
+    -   Template-based proposal assembly with dynamic variables
+    -   Multi-page support with headers on every page except cover
+    -   React components for branding profile management
 
 -   **Dynamic Controller**
 
@@ -836,7 +857,7 @@ Users can save their report configurations for later use and share them with oth
 
 ## PDF Generation
 
-The package includes a powerful PDF generation system using the Laravel-DomPDF package. This allows you to generate PDFs from Laravel views or HTML content with customizable options.
+The package includes a powerful PDF generation system supporting both DomPDF and Spatie Laravel PDF (Chrome-based) for generating PDFs from Laravel views or HTML content with customizable options.
 
 ### Generating PDFs from Views
 
@@ -929,12 +950,434 @@ fetch('/ajax/pdf/generate-quote', {
 });
 ```
 
+### Spatie Laravel PDF (Chrome-based) - Recommended
+
+The package now includes **Spatie Laravel PDF** support for superior PDF generation using Chrome/Chromium. This provides better CSS support, native header/footer functionality, and more reliable rendering.
+
+#### Installation
+
+Spatie Laravel PDF is automatically installed with the package. For Chromium, run the installation command:
+
+```bash
+php artisan visns:install-chromium
+```
+
+#### Generating Proposal PDFs with Spatie
+
+```javascript
+fetch('/ajax/pdf/generate-proposal-spatie', {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+        proposal_data: {
+            // Proposal data object
+        },
+        template_id: 6,
+        branding_id: 1,
+        header_config: {
+            enabled: true,
+            show_phone: true,
+            show_email: true,
+            show_website: true,
+            show_address: false,
+            show_abn: false
+        },
+        filename: 'proposal.pdf',
+        download: true
+    }),
+});
+```
+
+**Spatie PDF Features:**
+- Superior CSS rendering with Chrome engine
+- Native browser header and footer support
+- Automatic page numbering in footer ("Page X of Y")
+- Company logo display in headers with full URL support
+- Better image handling (including S3 images)
+- Improved font rendering and layout
+- Headers appear on every page except the first (cover) page
+- Company information is automatically pulled from branding profiles
+- Configurable visibility of contact details (phone, email, website, address, ABN)
+
+### Legacy DomPDF Support
+
+The original DomPDF implementation is still available for backward compatibility:
+
+```javascript
+fetch('/ajax/pdf/generate-proposal', {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+        proposal_data: {
+            // Proposal data object
+        },
+        template_id: 6,
+        branding_id: 1,
+        header_config: {
+            enabled: true,
+            show_phone: true,
+            show_email: true,
+            show_website: true,
+            show_address: false,
+            show_abn: false
+        },
+        filename: 'proposal.pdf',
+        download: true
+    }),
+});
+```
+
 The same endpoints are also available via the API with authentication required:
 
 -   `POST /api/pdf/generate`
 -   `POST /api/pdf/generate-from-html`
 -   `POST /api/pdf/generate-custom`
 -   `POST /api/pdf/generate-quote`
+-   `POST /api/pdf/generate-proposal` (DomPDF)
+-   `POST /api/pdf/generate-proposal-spatie` (Spatie PDF - Recommended)
+
+## Proposal System & Branding Profiles
+
+The package includes a comprehensive proposal generation system with branding profile support. This system allows you to create professional proposal PDFs with customizable templates, company branding, and header configurations.
+
+### Branding Profiles
+
+Branding profiles store company information and visual branding that can be applied to proposals and other documents.
+
+#### BrandingProfile Model Features
+
+The `BrandingProfile` model provides:
+
+- **Company Information**: Name, address, phone, email, website, ABN
+- **Visual Branding**: Logo upload, color schemes (primary, secondary, accent), fonts
+- **PDF Integration**: Automatic header generation with company details
+- **Template Association**: Link branding profiles to proposal templates
+
+#### Company Information Management
+
+```php
+// Create or update branding profile with company info
+$brandingProfile = BrandingProfile::create([
+    'name' => 'LKD Fitouts Brand',
+    'company_name' => 'LKD Fitouts CRM',
+    'company_info' => [
+        'address' => 'Suite 101, 123 Business Street, Sydney NSW 2000',
+        'phone' => '(02) 1234 5678',
+        'email' => 'info@lkdfitouts.com.au',
+        'website' => 'www.lkdfitouts.com.au',
+        'abn' => '12 345 678 901',
+    ],
+    'colors' => [
+        'primary' => '#2563eb',
+        'secondary' => '#64748b',
+        'accent' => '#059669',
+    ],
+]);
+
+// Get formatted company information
+$contactInfo = $brandingProfile->getContactInfo();
+$formattedAddress = $brandingProfile->getFormattedAddress();
+$cssVariables = $brandingProfile->getCSSVariables();
+```
+
+#### Logo Management with S3 Support
+
+The system includes intelligent logo handling for PDF generation:
+
+```php
+// The ProposalAssemblyService automatically handles S3 logos
+private function ensureLocalImageForPDF($file)
+{
+    // Downloads S3 images to local temp directory for DomPDF compatibility
+    $tempDir = storage_path('app/temp/pdf-images');
+    $localPath = $tempDir . '/logo_' . $file->id . '.' . $extension;
+    
+    // Download and cache image locally
+    $imageData = file_get_contents($file->file_url);
+    file_put_contents($localPath, $imageData);
+    
+    return $localPath;
+}
+```
+
+### Proposal Assembly Service
+
+The `ProposalAssemblyService` handles the complex process of building complete proposal HTML from templates, data, and branding.
+
+#### Key Features
+
+- **Template Processing**: Assembles sections from proposal templates
+- **Variable Replacement**: Dynamic content substitution using `{{variable}}` syntax
+- **Branding Integration**: Applies colors, fonts, and company information
+- **Header Generation**: Creates professional headers with company details
+- **CSS Optimization**: Optimized styling for PDF rendering
+
+#### Header Configuration
+
+```php
+// Header configuration options
+$headerConfig = [
+    'enabled' => true,
+    'show_phone' => true,
+    'show_email' => true,
+    'show_website' => true,
+    'show_address' => false,
+    'show_abn' => false,
+];
+
+// Headers are automatically generated on every page except cover page
+$proposalData = $proposalService->assembleProposal([
+    'template_id' => 6,
+    'branding_id' => 1,
+    'proposal_data' => $data,
+    'header_config' => $headerConfig,
+]);
+```
+
+### PDF Controller Enhancements
+
+The `PDFController` has been enhanced with advanced proposal generation capabilities:
+
+#### DomPDF Page Script Integration
+
+```php
+// Page script for headers on every page
+$pageScript = '
+if ($PAGE_NUM > 1) {
+    // Draw header background
+    $canvas->rectangle(20, 20, 555, 60, array(0.9, 0.9, 0.9), 2);
+    $canvas->line(20, 80, 575, 80, array(0.2, 0.4, 0.8), 2);
+    
+    // Company name
+    $font_bold = $fontMetrics->getFont("Arial", "bold");
+    $canvas->text(30, 45, "' . addslashes($companyName) . '", $font_bold, 16, array(0.2, 0.4, 0.8));
+    
+    // Contact information
+    $font_regular = $fontMetrics->getFont("Arial", "normal");
+    $canvas->text(30, 65, "' . addslashes($headerText) . '", $font_regular, 10, array(0.3, 0.3, 0.3));
+    
+    // Page number
+    $canvas->text(500, 45, "Page $PAGE_NUM", $font_regular, 12, array(0.4, 0.4, 0.4));
+}';
+
+$pdf->getDomPDF()->getCanvas()->page_script($pageScript);
+```
+
+#### Enhanced DomPDF Options
+
+```php
+$options = [
+    'isHtml5ParserEnabled' => true,
+    'isRemoteEnabled' => true,
+    'isPhpEnabled' => true,
+    'defaultFont' => 'sans-serif',
+    'dpi' => 150,
+    'enable_remote' => true,
+    'enable_font_subsetting' => true,
+    'enable_css_float' => true,
+];
+```
+
+### Styling Optimizations
+
+The proposal system includes optimized CSS for PDF rendering:
+
+#### Font Size Optimizations
+
+```css
+/* Optimized font sizes for better space utilization */
+h1 { font-size: 24px; color: #2563eb; }
+h2 { font-size: 20px; color: #2563eb; }
+h3 { font-size: 18px; color: #2563eb; }
+p, li { font-size: 14px; line-height: 1.5; }
+
+/* Header-specific styling */
+.proposal-header {
+    width: 100%;
+    padding: 10px;
+    border: 2px solid #2563eb;
+    background: #f9f9f9;
+}
+
+.proposal-header-content .company-name {
+    font-size: 16px;
+    font-weight: bold;
+    color: #2563eb;
+}
+
+.proposal-header-content .company-info {
+    font-size: 10px;
+    color: #333;
+    line-height: 1.3;
+}
+```
+
+### Frontend Integration
+
+The system includes React components for managing branding profiles:
+
+#### BrandingProfileCompanyInfo Component
+
+```javascript
+// Enhanced company information editor
+const BrandingProfileCompanyInfo = ({ brandingProfile, onSave, onCancel }) => {
+    const [companyInfo, setCompanyInfo] = useState({
+        address: '',
+        website: '',
+        phone: '',
+        email: '',
+        abn: '',
+        ...brandingProfile?.company_info || {}
+    });
+
+    const handleSave = async () => {
+        const response = await fetch(`/ajax/branding-profiles/${brandingProfile.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...brandingProfile,
+                company_info: companyInfo
+            })
+        });
+        // Handle response...
+    };
+
+    // Render form fields for all company information
+};
+```
+
+### Database Migrations
+
+The proposal system includes comprehensive database support:
+
+#### Branding Profiles Table
+
+```php
+Schema::create('branding_profiles', function (Blueprint $table) {
+    $table->id();
+    $table->string('name');
+    $table->string('company_name');
+    $table->string('logo_url')->nullable();
+    $table->json('colors')->nullable();
+    $table->json('fonts')->nullable();
+    $table->json('company_info')->nullable(); // Enhanced with email support
+    $table->boolean('is_default')->default(false);
+    $table->timestamps();
+    $table->softDeletes();
+});
+```
+
+#### Proposal Templates Table
+
+```php
+Schema::create('proposal_templates', function (Blueprint $table) {
+    $table->id();
+    $table->string('name');
+    $table->text('description')->nullable();
+    $table->unsignedBigInteger('branding_profile_id')->nullable();
+    $table->json('styling')->nullable(); // Includes header configuration
+    $table->timestamps();
+    $table->softDeletes();
+    
+    $table->foreign('branding_profile_id')
+          ->references('id')
+          ->on('branding_profiles')
+          ->onDelete('set null');
+});
+```
+
+### Configuration Options
+
+```php
+// In config/visns-packages.php
+'proposal' => [
+    'features' => [
+        'enable_proposal_mode' => true,
+        'enable_template_builder' => true,
+        'enable_branding_profiles' => true,
+        'enable_dynamic_variables' => true,
+    ],
+    'templates' => [
+        'default_template_name' => 'Default Business Proposal',
+        'auto_generate_toc' => true,
+        'variable_prefix' => '{{',
+        'variable_suffix' => '}}',
+    ],
+    'pdf' => [
+        'default_paper' => 'a4',
+        'default_orientation' => 'portrait',
+        'default_margins' => '40px',
+        'enable_page_numbers' => true,
+    ],
+    'branding' => [
+        'logo_max_size' => '2MB',
+        'logo_allowed_types' => ['jpg', 'jpeg', 'png', 'svg'],
+        'default_colors' => [
+            'primary' => '#2563eb',
+            'secondary' => '#64748b', 
+            'accent' => '#059669',
+        ],
+    ],
+    'sections' => [
+        'allow_custom_sections' => true,
+        'required_sections' => ['cover_page', 'toc', 'overview', 'quote_items'],
+        'static_sections' => ['terms_conditions', 'agreement_signature'],
+    ],
+],
+```
+
+### API Endpoints
+
+The proposal system provides comprehensive API endpoints:
+
+```php
+// Branding Profiles
+GET    /ajax/branding-profiles                     // List profiles
+POST   /ajax/branding-profiles                     // Create profile
+GET    /ajax/branding-profiles/{id}                // Get profile
+PUT    /ajax/branding-profiles/{id}                // Update profile
+DELETE /ajax/branding-profiles/{id}                // Delete profile
+POST   /ajax/branding-profiles/table               // Table data
+POST   /ajax/branding-profiles/dropdown            // Dropdown data
+GET    /ajax/branding-profiles/{id}/css            // Get CSS
+POST   /ajax/branding-profiles/{id}/upload-logo    // Upload logo
+
+// Proposal Templates
+GET    /ajax/proposal-templates                    // List templates
+POST   /ajax/proposal-templates                    // Create template
+GET    /ajax/proposal-templates/{id}               // Get template
+PUT    /ajax/proposal-templates/{id}               // Update template
+DELETE /ajax/proposal-templates/{id}               // Delete template
+POST   /ajax/proposal-templates/{id}/preview       // Preview template
+POST   /ajax/proposal-templates/{id}/duplicate     // Duplicate template
+
+// PDF Generation
+POST   /ajax/pdf/generate-proposal                 // Generate proposal PDF
+POST   /ajax/pdf/preview-proposal                  // Preview proposal HTML
+```
+
+### Development Commands
+
+```bash
+# Install Chromium for Spatie PDF generation (recommended)
+php artisan visns:install-chromium
+
+# Seed default proposal templates
+php artisan db:seed --class="Visnsstudio\VisnsPackages\Database\Seeders\DefaultProposalTemplateSeeder"
+
+# Publish proposal migrations and seeders
+php artisan vendor:publish --tag=visns-packages-migrations
+php artisan vendor:publish --tag=visns-packages-seeders
+
+# Run migrations to create proposal tables
+php artisan migrate
+```
+
+This comprehensive proposal system provides everything needed for professional document generation with full branding integration and advanced header functionality.
 
 ## Dynamic Controller
 
@@ -1899,6 +2342,7 @@ Route::prefix('ajax/pdf')
         Route::post('/generate-custom', 'generateCustomPDF');
         Route::post('/generate-quote', 'generateQuotePDF');
         Route::post('/generate-proposal', 'generateProposalPDF');
+        Route::post('/generate-proposal-spatie', 'generateProposalPDFSpatie'); // New Spatie endpoint
         Route::post('/preview-proposal', 'previewProposalHTML');
     });
 
@@ -1912,6 +2356,7 @@ Route::prefix('api/pdf')
         Route::post('/generate-custom', 'generateCustomPDF');
         Route::post('/generate-quote', 'generateQuotePDF');
         Route::post('/generate-proposal', 'generateProposalPDF');
+        Route::post('/generate-proposal-spatie', 'generateProposalPDFSpatie'); // New Spatie endpoint
         Route::post('/preview-proposal', 'previewProposalHTML');
     });
 ```

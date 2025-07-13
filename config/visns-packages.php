@@ -494,6 +494,36 @@ return [
                 'show_footer' => true,
                 'footer_content' => '{{company_name}} | Page {PAGE_NUM} of {PAGE_COUNT}',
             ],
+            
+            /*
+            |----------------------------------------------------------------------
+            | Spatie PDF Settings (Chrome-based PDF generation)
+            |----------------------------------------------------------------------
+            |
+            | Modern PDF generation using Chrome/Chromium for better CSS support
+            | and reliable header/footer functionality.
+            |
+            */
+            'spatie' => [
+                'enabled' => env('VISNS_SPATIE_PDF_ENABLED', true),
+                'default_engine' => env('VISNS_PDF_ENGINE', 'spatie'), // 'dompdf' or 'spatie'
+                'chromium_path' => env('VISNS_CHROMIUM_PATH', null), // Auto-detected if null
+                'node_path' => env('VISNS_NODE_PATH', null), // Auto-detected if null
+                'timeout' => env('VISNS_PDF_TIMEOUT', 60), // seconds
+                'options' => [
+                    'printBackground' => true,
+                    'displayHeaderFooter' => true,
+                    'preferCSSPageSize' => true,
+                    'generateTaggedPDF' => false,
+                    'waitUntil' => 'networkidle0',
+                ],
+                'margins' => [
+                    'top' => '20mm',
+                    'right' => '15mm', 
+                    'bottom' => '20mm',
+                    'left' => '15mm',
+                ],
+            ],
         ],
 
         /*

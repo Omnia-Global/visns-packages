@@ -23,7 +23,9 @@
         "pragmarx/google2fa": "^8.0",
         "phpoffice/phpspreadsheet": "^1.29",
         "barryvdh/laravel-dompdf": "^3.0",
-        "tecnickcom/tcpdf": "^6.7"
+        "tecnickcom/tcpdf": "^6.7",
+        "spatie/laravel-pdf": "^1.6",
+        "spatie/browsershot": "^5.0"
     },
     "require-dev": {
         "phpunit/phpunit": "^10.0",

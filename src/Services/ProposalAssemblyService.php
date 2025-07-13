@@ -141,6 +141,7 @@ class ProposalAssemblyService
                 'metadata' => [
                     'template' => $template,
                     'branding' => $branding,
+                    'header_config' => $headerConfig,
                     'generated_at' => now()->toISOString(),
                     'total_pages' => $this->estimatePageCount($sections),
                 ],
@@ -401,9 +402,14 @@ class ProposalAssemblyService
 
         $html = $this->getHTMLHeader($branding, $hasCoverPage, $headerConfig);
 
-        foreach ($sections as $section) {
+        foreach ($sections as $index => $section) {
             $html .= $this->renderSection($section, $branding, $proposalData);
         }
+        
+        \Log::info('ProposalAssemblyService::assembleHTML - Sections rendered', [
+            'total_sections' => count($sections),
+            'header_enabled' => $headerConfig && ($headerConfig['enabled'] ?? false),
+        ]);
 
         $html .= $this->getHTMLFooter($branding);
 
@@ -1456,46 +1462,48 @@ class ProposalAssemblyService
                     text-indent: 0;
                 }
                 
-                /* Proposal Header Styles */
+                /* Proposal Header Styles - Ultra-simplified for DomPDF compatibility */
                 .proposal-header {
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                    padding: 20px 0;
-                    border-bottom: 2px solid ' . ($colors['primary'] ?? '#2563eb') . ';
-                    margin-bottom: 30px;
+                    width: 100%;
+                    padding: 10px;
+                    border: 2px solid ' . ($colors['primary'] ?? '#2563eb') . ';
+                    background: #f9f9f9;
+                    margin-bottom: 15px;
+                    clear: both;
+                    overflow: hidden;
                 }
                 
                 .proposal-header-logo {
-                    flex-shrink: 0;
-                    margin-right: 20px;
+                    float: left;
+                    width: 100px;
+                    margin-right: 15px;
                 }
                 
                 .proposal-header-logo img {
-                    max-height: 60px;
+                    max-height: 40px;
+                    max-width: 100px;
                     width: auto;
                 }
                 
                 .proposal-header-logo .logo-placeholder {
-                    width: 60px;
-                    height: 60px;
+                    width: 40px;
+                    height: 40px;
                     background-color: ' . ($colors['primary'] ?? '#2563eb') . ';
                     color: white;
-                    border-radius: 8px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
+                    text-align: center;
+                    line-height: 40px;
                     font-weight: bold;
-                    font-size: 18px;
+                    font-size: 12px;
                 }
                 
                 .proposal-header-content {
-                    flex: 1;
+                    float: right;
                     text-align: right;
+                    max-width: 300px;
                 }
                 
                 .proposal-header-content .company-name {
-                    font-size: 24px;
+                    font-size: 16px;
                     font-weight: bold;
                     color: ' . ($colors['primary'] ?? '#2563eb') . ';
                     margin-bottom: 5px;
@@ -1503,124 +1511,22 @@ class ProposalAssemblyService
                 }
                 
                 .proposal-header-content .company-info {
-                    font-size: 14px;
-                    color: #666;
-                    line-height: 1.4;
+                    font-size: 10px;
+                    color: #333;
+                    line-height: 1.3;
                 }
                 
                 .proposal-header-content .company-info div {
                     margin-bottom: 2px;
                 }
                 
-                .proposal-header-content .company-info .label {
-                    font-weight: 600;
-                    color: ' . ($colors['secondary'] ?? '#64748b') . ';
-                    display: inline-block;
-                    width: 70px;
-                }
-                
-                /* Header CSS for DomPDF - using script approach */
-                .proposal-header {
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    width: 100%;
-                    padding: 6px 15px;
-                    border-bottom: 1px solid ' . ($colors['primary'] ?? '#2563eb') . ';
-                    background: white;
-                    display: flex;
-                    align-items: center;
-                    z-index: 1000;
-                    box-sizing: border-box;
-                    height: 45px;
-                }
-                
-                .proposal-header-logo {
-                    flex-shrink: 0;
-                    margin-right: 10px;
-                    width: 80px;
-                }
-                
-                .proposal-header-logo img {
-                    max-height: 32px;
-                    max-width: 80px;
-                    width: auto;
-                }
-                
-                .proposal-header-logo .logo-placeholder {
-                    width: 32px;
-                    height: 32px;
-                    background-color: ' . ($colors['primary'] ?? '#2563eb') . ';
-                    color: white;
-                    border-radius: 4px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    font-weight: bold;
-                    font-size: 11px;
-                }
-                
-                .proposal-header-content {
-                    text-align: right;
-                    flex: 1;
-                    min-width: 0;
-                    overflow: hidden;
-                }
-                
-                .proposal-header-content .company-name {
-                    font-size: 14px;
-                    font-weight: bold;
-                    color: ' . ($colors['primary'] ?? '#2563eb') . ';
-                    margin-bottom: 1px;
-                    font-family: ' . ($fonts['heading'] ?? 'Arial, sans-serif') . ';
-                    line-height: 1.0;
-                    white-space: nowrap;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                }
-                
-                .proposal-header-content .company-info {
-                    font-size: 9px;
-                    color: #666;
-                    line-height: 1.1;
-                }
-                
-                .proposal-header-content .company-info div {
-                    margin-bottom: 0px;
-                    white-space: nowrap;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                }
-                
-                .proposal-header-content .company-info .label {
-                    font-weight: 600;
-                    color: ' . ($colors['secondary'] ?? '#64748b') . ';
-                    display: inline-block;
-                    width: 30px;
-                }
-                
-                /* Adjust body content for header space when header is enabled */
-                body.has-header {
-                    padding-top: 55px;
-                }
-                
-                /* Skip header on cover page and first page */
+                /* Hide header on cover page only */
                 .omnia-cover-page .proposal-header {
-                    display: none;
-                }
-                
-                @page :first {
-                    /* First page should not have header space */
-                    margin-top: 20px;
-                }
-                
-                body:first-child .proposal-header {
-                    display: none;
+                    display: none !important;
                 }
             </style>
         </head>
-        <body' . $hasHeaderClass . '>' . $this->generateProposalHeader($branding, $headerConfig);
+        <body' . $hasHeaderClass . '>';
     }
 
     /**
@@ -1644,114 +1550,8 @@ class ProposalAssemblyService
             return '';
         }
 
-        \Log::info('ProposalAssemblyService::generateProposalHeader - Header enabled, generating HTML');
-
-        $companyInfo = $branding->company_info ?? [];
-        $html = '<div class="proposal-header">';
-        
-        // Logo section
-        $html .= '<div class="proposal-header-logo">';
-        
-        // Check for logo_url first, then file relationship with correct attributes
-        $logoUrl = null;
-        
-        // First priority: direct logo_url field
-        if (!empty($branding->logo_url)) {
-            $logoUrl = $branding->logo_url;
-        }
-        // Second priority: file relationship using correct File model attributes
-        elseif ($branding->file) {
-            // Try the computed file_url attribute first (uses FilePathResolver)
-            if (!empty($branding->file->file_url)) {
-                $logoUrl = $branding->file->file_url;
-            }
-            // Fallback to file_path with storage prefix
-            elseif (!empty($branding->file->file_path)) {
-                $logoUrl = '/storage/' . $branding->file->file_path;
-            }
-            // Last resort: try file_full_path attribute
-            elseif (!empty($branding->file->file_full_path)) {
-                $logoUrl = $branding->file->file_full_path;
-            }
-        }
-        
-        \Log::info('ProposalAssemblyService::generateProposalHeader - Logo detection', [
-            'branding_logo_url' => $branding->logo_url ?? 'null',
-            'branding_file_exists' => !is_null($branding->file),
-            'branding_file_details' => $branding->file ? [
-                'id' => $branding->file->id,
-                'fileable_id' => $branding->file->fileable_id ?? 'null',
-                'fileable_type' => $branding->file->fileable_type ?? 'null',
-                'file_path' => $branding->file->file_path ?? 'null',
-                'file_name' => $branding->file->file_name ?? 'null',
-                'file_url' => $branding->file->file_url ?? 'null',
-                'file_full_path' => $branding->file->file_full_path ?? 'null',
-                'file_extension' => $branding->file->file_extension ?? 'null',
-                'file_size' => $branding->file->file_size ?? 'null',
-                'file_exists' => $branding->file->file_exists ?? 'null',
-            ] : 'no_file',
-            'final_logo_url' => $logoUrl,
-            'using_placeholder' => is_null($logoUrl),
-        ]);
-        
-        if ($logoUrl) {
-            $html .= '<img src="' . htmlspecialchars($logoUrl) . '" alt="' . htmlspecialchars($branding->company_name) . ' Logo">';
-        } else {
-            $initials = strtoupper(substr($branding->company_name ?? 'COMPANY', 0, 3));
-            $html .= '<div class="logo-placeholder">' . $initials . '</div>';
-        }
-        $html .= '</div>';
-        
-        // Company info section
-        $html .= '<div class="proposal-header-content">';
-        $html .= '<div class="company-name">' . htmlspecialchars($branding->company_name ?? 'Company Name') . '</div>';
-        $html .= '<div class="company-info">';
-        
-        // Build a very compact info line optimized for small header
-        $infoItems = [];
-        
-        // Phone (most important, show first)
-        if (!empty($headerConfig['show_phone']) && !empty($companyInfo['phone'])) {
-            $infoItems[] = htmlspecialchars($companyInfo['phone']);
-        }
-        
-        // Website (remove protocol and www for brevity)
-        if (!empty($headerConfig['show_website']) && !empty($companyInfo['website'])) {
-            $website = $companyInfo['website'];
-            $website = preg_replace('/^https?:\/\/(www\.)?/', '', $website);
-            $infoItems[] = htmlspecialchars($website);
-        }
-        
-        // ABN (abbreviate)
-        if (!empty($headerConfig['show_abn']) && !empty($companyInfo['abn'])) {
-            $infoItems[] = 'ABN ' . htmlspecialchars($companyInfo['abn']);
-        }
-        
-        // Always show info on one line with separators to maximize space
-        if (!empty($infoItems)) {
-            $html .= '<div>' . implode(' • ', $infoItems) . '</div>';
-        }
-        
-        // Address on second line only if enabled and space allows
-        if (!empty($headerConfig['show_address']) && !empty($companyInfo['address'])) {
-            $address = $companyInfo['address'];
-            // Truncate long addresses more aggressively for header
-            if (strlen($address) > 35) {
-                $address = substr($address, 0, 32) . '...';
-            }
-            $html .= '<div>' . htmlspecialchars($address) . '</div>';
-        }
-        
-        $html .= '</div>';
-        $html .= '</div>';
-        $html .= '</div>';
-        
-        \Log::info('ProposalAssemblyService::generateProposalHeader - Generated header HTML', [
-            'html_length' => strlen($html),
-            'html_preview' => substr($html, 0, 200) . '...',
-        ]);
-        
-        return $html;
+        \Log::info('ProposalAssemblyService::generateProposalHeader - Header enabled but using DomPDF page script instead of inline HTML');
+        return ''; // Headers are now handled by DomPDF page script in PDFController
     }
 
     /**
@@ -2655,6 +2455,94 @@ class ProposalAssemblyService
             } else {
                 return number_format($value, 2);
             }
+        }
+    }
+
+    /**
+     * Ensure image is available locally for PDF generation
+     * Downloads S3 images to temporary local storage for DomPDF compatibility
+     *
+     * @param File $file
+     * @return string|null
+     */
+    private function ensureLocalImageForPDF($file)
+    {
+        try {
+            if (empty($file->file_url)) {
+                return null;
+            }
+
+            // Create temporary directory for PDF images
+            $tempDir = storage_path('app/temp/pdf-images');
+            if (!file_exists($tempDir)) {
+                mkdir($tempDir, 0755, true);
+            }
+
+            // Generate local filename based on file ID and extension
+            $extension = $file->file_extension ?? 'png';
+            $localFilename = 'logo_' . $file->id . '.' . $extension;
+            $localPath = $tempDir . '/' . $localFilename;
+
+            // Check if we already have this file locally (and it's recent)
+            if (file_exists($localPath) && (time() - filemtime($localPath)) < 3600) {
+                // File exists and is less than 1 hour old, use it
+                // For DomPDF, we need an absolute file path, not a web URL
+                return $localPath;
+            }
+
+            // Download the image from S3
+            \Log::info('ProposalAssemblyService::ensureLocalImageForPDF - Downloading image from S3', [
+                'file_id' => $file->id,
+                'source_url' => $file->file_url,
+                'local_path' => $localPath,
+            ]);
+
+            $imageData = file_get_contents($file->file_url);
+            if ($imageData === false) {
+                \Log::warning('ProposalAssemblyService::ensureLocalImageForPDF - Failed to download image', [
+                    'file_id' => $file->id,
+                    'source_url' => $file->file_url,
+                ]);
+                return $file->file_url; // Fallback to original URL
+            }
+
+            // Save locally
+            if (file_put_contents($localPath, $imageData) === false) {
+                \Log::warning('ProposalAssemblyService::ensureLocalImageForPDF - Failed to save image locally', [
+                    'file_id' => $file->id,
+                    'local_path' => $localPath,
+                ]);
+                return $file->file_url; // Fallback to original URL
+            }
+
+            // Create symlink in public storage if needed
+            $publicTempDir = storage_path('app/public/temp/pdf-images');
+            if (!file_exists($publicTempDir)) {
+                mkdir($publicTempDir, 0755, true);
+            }
+            
+            $publicPath = $publicTempDir . '/' . $localFilename;
+            if (!file_exists($publicPath)) {
+                copy($localPath, $publicPath);
+            }
+
+            \Log::info('ProposalAssemblyService::ensureLocalImageForPDF - Image downloaded successfully', [
+                'file_id' => $file->id,
+                'local_path' => $localPath,
+            ]);
+
+            // For DomPDF, we need an absolute file path, not a web URL
+            return $localPath;
+
+        } catch (\Exception $e) {
+            \Log::error('ProposalAssemblyService::ensureLocalImageForPDF - Exception occurred', [
+                'file_id' => $file->id ?? 'unknown',
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            
+            // Return original URL as fallback
+            return $file->file_url ?? null;
         }
     }
 }

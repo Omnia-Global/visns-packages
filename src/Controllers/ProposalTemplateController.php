@@ -461,20 +461,23 @@ class ProposalTemplateController extends \App\Http\Controllers\Controller
                 'header_config' => $template->styling['header'] ?? null,
             ]);
 
-            // Use PDFController to generate the PDF
+            // Use PDFController to generate the PDF with proper proposal functionality
             $pdfController = app(\Visnsstudio\VisnsPackages\Controllers\PDFController::class);
             
             $pdfRequest = new \Illuminate\Http\Request();
             $pdfRequest->merge([
-                'html' => $proposalData['html'],
+                'proposal_data' => json_encode($sampleData),
+                'template_id' => $id,
+                'branding_id' => $brandingId,
                 'filename' => 'proposal-template-' . $template->id . '.pdf',
-                'options' => [
-                    'format' => 'A4',
-                    'orientation' => 'portrait',
-                ]
+                'paper' => 'a4',
+                'orientation' => 'portrait',
+                'download' => true,
+                'sections' => [],
+                'header_config' => $template->styling['header'] ?? null,
             ]);
 
-            return $pdfController->generatePDFFromHTML($pdfRequest);
+            return $pdfController->generateProposalPDF($pdfRequest);
 
         } catch (\Exception $e) {
             Log::error('Error generating PDF from template: ' . $e->getMessage());

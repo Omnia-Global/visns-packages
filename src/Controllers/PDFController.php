@@ -6,6 +6,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\View;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Spatie\LaravelPdf\Facades\Pdf as SpatiePdf;
+use Spatie\Browsershot\Browsershot;
 
 class PDFController extends \App\Http\Controllers\Controller
 {
@@ -443,6 +445,8 @@ class PDFController extends \App\Http\Controllers\Controller
                 'html_length' => strlen($proposalData['html']),
                 'html_contains_header' => strpos($proposalData['html'], 'proposal-header') !== false,
                 'html_contains_has_header_class' => strpos($proposalData['html'], 'has-header') !== false,
+                'header_count' => substr_count($proposalData['html'], 'proposal-header'),
+                'html_snippet_with_headers' => $this->extractHeaderSnippets($proposalData['html']),
             ]);
 
             // Get filename (default: proposal.pdf)
@@ -454,7 +458,7 @@ class PDFController extends \App\Http\Controllers\Controller
             // Get orientation (default: portrait)
             $orientation = $validated['orientation'] ?? 'portrait';
 
-            // Set enhanced options for proposal PDFs
+            // Set enhanced options for proposal PDFs with remote image support
             $options = [
                 'isHtml5ParserEnabled' => true,
                 'isRemoteEnabled' => true,
@@ -466,44 +470,135 @@ class PDFController extends \App\Http\Controllers\Controller
                 'defaultPaperOrientation' => $orientation,
                 'isFontSubsettingEnabled' => true,
                 'isJavascriptEnabled' => false,
-                'debugKeepTemp' => false,
+                'debugKeepTemp' => true, // Keep temp files for debugging
+                'debugCss' => true, // Enable CSS debugging
                 'chroot' => public_path(),
+                // Enable remote content loading for S3 images
+                'enable_remote' => true,
+                'enable_font_subsetting' => true,
+                'enable_css_float' => true,
             ];
 
-            // Generate PDF using the assembled HTML content
-            $pdf = PDF::loadHTML($proposalData['html'])
-                ->setOptions($options)
-                ->setPaper($paper, $orientation);
-                
-            // Add header to each page if header is enabled
-            Log::info('PDFController::generateProposalPDF - Header check', [
-                'header_config_isset' => isset($validated['header_config']),
-                'header_config_enabled' => $validated['header_config']['enabled'] ?? 'not_set',
-                'header_condition_met' => isset($validated['header_config']) && ($validated['header_config']['enabled'] ?? false),
+            // Log a sample of the HTML being sent to DomPDF
+            Log::info('PDFController::generateProposalPDF - HTML sample for DomPDF', [
+                'html_start' => substr($proposalData['html'], 0, 1000),
+                'html_end' => substr($proposalData['html'], -1000),
+                'first_header_position' => strpos($proposalData['html'], 'proposal-header'),
             ]);
+
+            // Save HTML to file for debugging
+            file_put_contents(storage_path('app/debug_proposal.html'), $proposalData['html']);
+
+            // Check if headers should be enabled - check both request and metadata
+            $headerConfig = $validated['header_config'] ?? $proposalData['metadata']['header_config'] ?? null;
+            $hasHeaders = $headerConfig && ($headerConfig['enabled'] ?? false);
             
-            // Check if headers should be enabled (from request, HTML contains headers, or branding is available)
-            $hasHeaders = (isset($validated['header_config']) && ($validated['header_config']['enabled'] ?? false)) || 
-                         strpos($proposalData['html'], 'proposal-header') !== false ||
-                         strpos($proposalData['html'], 'has-header') !== false;
+            // Generate PDF using the assembled HTML content
+            $pdf = PDF::setOptions($options)
+                ->setPaper($paper, $orientation);
             
-            if ($hasHeaders) {
-                Log::info('PDFController::generateProposalPDF - Adding header script to PDF');
-                // Get company name from branding metadata if available
-                $companyName = 'Company Name';
-                if (isset($proposalData['metadata']['branding']->company_name)) {
-                    $companyName = $proposalData['metadata']['branding']->company_name;
+            // Set page script BEFORE loading HTML - disabled to get working PDF first
+            if ($hasHeaders && false) { // DISABLED - page scripts cause blank PDF
+                Log::info('PDFController::generateProposalPDF - Setting page script before HTML load');
+                
+                // Build the page script with all necessary data
+                $companyName = 'LKD Fitouts CRM';
+                $headerText = 'Ph: (02) 1234 5678 | www.lkdfitouts.com.au';
+                $logoPath = '/Users/reyhan.thee/Projects/lkd-fitouts-crm/storage/app/temp/pdf-images/logo_6.png';
+                
+                if (isset($proposalData['metadata']['branding'])) {
+                    $branding = $proposalData['metadata']['branding'];
+                    $companyName = $branding->company_name ?? 'LKD Fitouts CRM';
+                    $companyInfo = $branding->company_info ?? [];
+                    
+                    // Build header content
+                    $headerContent = [];
+                    if ($headerConfig['show_phone'] ?? false && !empty($companyInfo['phone'] ?? '')) {
+                        $headerContent[] = 'Ph: ' . $companyInfo['phone'];
+                    }
+                    if ($headerConfig['show_email'] ?? false && !empty($companyInfo['email'] ?? '')) {
+                        $headerContent[] = $companyInfo['email'];
+                    }
+                    if ($headerConfig['show_website'] ?? false && !empty($companyInfo['website'] ?? '')) {
+                        $headerContent[] = $companyInfo['website'];
+                    }
+                    $headerText = implode(' | ', $headerContent);
+                    
+                    // Get logo path
+                    if ($branding->file && $branding->file->file_path) {
+                        $cachedLogoPath = storage_path('app/temp/pdf-images/logo_' . $branding->file->id . '.' . ($branding->file->file_extension ?? 'png'));
+                        if (file_exists($cachedLogoPath)) {
+                            $logoPath = $cachedLogoPath;
+                        }
+                    }
                 }
                 
-                $pdf->getDomPDF()->getCanvas()->page_script('
-                    if ($PAGE_NUM > 1) {
-                        $font = $fontMetrics->getFont("Arial", "normal");
-                        $canvas->text(40, 40, "' . $companyName . ' - Page $PAGE_NUM", $font, 10, array(0,0,0));
-                    }
-                ');
-            } else {
-                Log::info('PDFController::generateProposalPDF - Headers not detected, skipping header script');
+                // Create working page script with proper PHP syntax
+                $escapedCompanyName = addslashes($companyName);
+                $escapedHeaderText = addslashes($headerText);
+                
+                $preLoadPageScript = '
+                if ($PAGE_NUM > 1) {
+                    $font = $fontMetrics->getFont("helvetica");
+                    
+                    // Draw header background
+                    $canvas->rectangle(50, 50, 495, 50, array(0.95, 0.95, 0.95), 1);
+                    
+                    // Company name
+                    $canvas->text(60, 75, "' . $escapedCompanyName . '", $font, 14, array(0.2, 0.4, 0.8));
+                    
+                    // Contact info
+                    $canvas->text(60, 90, "' . $escapedHeaderText . '", $font, 10, array(0.3, 0.3, 0.3));
+                    
+                    // Page number
+                    $canvas->text(500, 75, "Page " . $PAGE_NUM, $font, 12, array(0.4, 0.4, 0.4));
+                }';
+                
+                try {
+                    // Check if we can access the canvas
+                    $domPDF = $pdf->getDomPDF();
+                    Log::info('PDFController::generateProposalPDF - DomPDF instance obtained');
+                    
+                    $canvas = $domPDF->getCanvas();
+                    Log::info('PDFController::generateProposalPDF - Canvas instance obtained', [
+                        'canvas_class' => get_class($canvas),
+                    ]);
+                    
+                    $canvas->page_script($preLoadPageScript);
+                    Log::info('PDFController::generateProposalPDF - Pre-load page script set successfully');
+                } catch (\Exception $e) {
+                    Log::error('PDFController::generateProposalPDF - Pre-load page script failed', [
+                        'error' => $e->getMessage(),
+                    ]);
+                    
+                    // Fallback: Try CSS-based headers by modifying the HTML
+                    Log::info('PDFController::generateProposalPDF - Attempting CSS fallback header approach');
+                    $cssHeader = '
+                    @page {
+                        margin-top: 100px;
+                        @top-center {
+                            content: "' . addslashes($companyName) . ' - ' . addslashes($headerText) . '";
+                            font-family: Arial, sans-serif;
+                            font-size: 10px;
+                            color: #333;
+                            border-bottom: 1px solid #2563eb;
+                            padding: 10px;
+                        }
+                    }';
+                    
+                    // Inject the CSS into the HTML
+                    $proposalData['html'] = str_replace(
+                        '</style>',
+                        $cssHeader . '</style>',
+                        $proposalData['html']
+                    );
+                    
+                    Log::info('PDFController::generateProposalPDF - CSS header fallback applied');
+                }
             }
+            
+            // Now load the HTML
+            $pdf->loadHTML($proposalData['html']);
 
             // Return PDF as download or inline
             $download = $validated['download'] ?? true;
@@ -666,5 +761,343 @@ class PDFController extends \App\Http\Controllers\Controller
                 500
             );
         }
+    }
+
+    /**
+     * Generate a Proposal PDF using Spatie Laravel PDF (Chrome-based)
+     * Modern approach with better header and CSS support
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\Response
+     */
+    public function generateProposalPDFSpatie(Request $request)
+    {
+        try {
+            // Handle JSON string from form submission
+            $proposalData = $request->input('proposal_data');
+            if (is_string($proposalData)) {
+                $proposalData = json_decode($proposalData, true);
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    throw new \InvalidArgumentException('Invalid JSON in proposal_data: ' . json_last_error_msg());
+                }
+            }
+            
+            // Validate request
+            $validated = $request->validate([
+                'proposal_data' => 'required',
+                'template_id' => 'nullable|integer',
+                'branding_id' => 'nullable|integer',
+                'filename' => 'nullable|string',
+                'paper' => 'nullable|string',
+                'orientation' => 'nullable|string|in:portrait,landscape',
+                'download' => 'nullable|boolean',
+                'sections' => 'nullable|array',
+                'header_config' => 'nullable|array',
+            ]);
+            
+            // Ensure proposal_data is an array after parsing
+            if (!is_array($proposalData)) {
+                throw new \InvalidArgumentException('The proposal data must be an array.');
+            }
+            
+            // Override the validated proposal_data with our parsed version
+            $validated['proposal_data'] = $proposalData;
+
+            // Use the proposal assembly service to build the proposal
+            $proposalService = app(\Visnsstudio\VisnsPackages\Services\ProposalAssemblyService::class);
+            
+            // Build the config array for the proposal assembly service
+            $assemblyConfig = [
+                'template_id' => $validated['template_id'] ?? null,
+                'branding_id' => $validated['branding_id'] ?? null,
+                'proposal_data' => $validated['proposal_data'] ?? [],
+                'sections' => $validated['sections'] ?? [],
+                'header_config' => $validated['header_config'] ?? null,
+            ];
+            
+            $proposalData = $proposalService->assembleProposal($assemblyConfig);
+
+            // Get filename (default: proposal.pdf)
+            $filename = $validated['filename'] ?? 'proposal-' . date('Y-m-d') . '.pdf';
+
+            // Get paper size (default: a4)
+            $paper = $validated['paper'] ?? 'a4';
+
+            // Get orientation (default: portrait)
+            $orientation = $validated['orientation'] ?? 'portrait';
+
+            // Check if headers should be enabled
+            $headerConfig = $validated['header_config'] ?? $proposalData['metadata']['header_config'] ?? null;
+            $hasHeaders = $headerConfig && ($headerConfig['enabled'] ?? false);
+
+            // Build header HTML for Spatie PDF
+            $headerHtml = '';
+            if ($hasHeaders && isset($proposalData['metadata']['branding'])) {
+                $branding = $proposalData['metadata']['branding'];
+                $companyName = $branding->company_name ?? 'LKD Fitouts CRM';
+                $companyInfo = $branding->company_info ?? [];
+                
+                // Get logo information
+                $logoHtml = '';
+                if (isset($branding->file) && $branding->file) {
+                    $logoUrl = $branding->file->file_url ?? '';
+                    if ($logoUrl) {
+                        // For S3 URLs or external images, download them locally for PDF generation
+                        $localLogoUrl = $logoUrl;
+                        
+                        // Debug S3 detection
+                        $isS3 = (strpos($logoUrl, 's3.amazonaws.com') !== false) || 
+                               (strpos($logoUrl, 'amazonaws.com') !== false) || 
+                               (strpos($logoUrl, '.s3.') !== false);
+                        Log::info('PDFController::generateProposalPDFSpatie - S3 Detection Debug', [
+                            'url' => $logoUrl,
+                            'contains_s3_amazonaws' => strpos($logoUrl, 's3.amazonaws.com') !== false,
+                            'contains_amazonaws' => strpos($logoUrl, 'amazonaws.com') !== false,
+                            'contains_dot_s3' => strpos($logoUrl, '.s3.') !== false,
+                            'is_s3_detected' => $isS3
+                        ]);
+                        
+                        if ($isS3) {
+                            try {
+                                // Download S3 image to public storage directory
+                                $tempDir = storage_path('app/public/temp/pdf-images');
+                                if (!file_exists($tempDir)) {
+                                    mkdir($tempDir, 0755, true);
+                                }
+                                
+                                $extension = pathinfo($branding->file->file_name ?? 'logo.png', PATHINFO_EXTENSION);
+                                $localPath = $tempDir . '/logo_' . $branding->file->id . '_' . time() . '.' . $extension;
+                                
+                                // Download image content
+                                Log::info('PDFController::generateProposalPDFSpatie - Attempting to download S3 image', [
+                                    'url' => $logoUrl
+                                ]);
+                                
+                                $imageContent = file_get_contents($logoUrl);
+                                Log::info('PDFController::generateProposalPDFSpatie - Download result', [
+                                    'success' => $imageContent !== false,
+                                    'size' => $imageContent !== false ? strlen($imageContent) : 0
+                                ]);
+                                
+                                if ($imageContent !== false) {
+                                    file_put_contents($localPath, $imageContent);
+                                    // Create a web-accessible URL through Laravel's storage
+                                    $relativePath = 'temp/pdf-images/' . basename($localPath);
+                                    $localLogoUrl = url('storage/' . $relativePath);
+                                    
+                                    Log::info('PDFController::generateProposalPDFSpatie - S3 Logo downloaded locally', [
+                                        'original_url' => $logoUrl,
+                                        'local_path' => $localPath,
+                                        'local_url' => $localLogoUrl,
+                                        'file_size' => strlen($imageContent)
+                                    ]);
+                                } else {
+                                    Log::warning('PDFController::generateProposalPDFSpatie - Failed to download S3 logo', [
+                                        'url' => $logoUrl
+                                    ]);
+                                }
+                            } catch (\Exception $e) {
+                                Log::error('PDFController::generateProposalPDFSpatie - Error downloading S3 logo', [
+                                    'url' => $logoUrl,
+                                    'error' => $e->getMessage()
+                                ]);
+                            }
+                        } else {
+                            // Ensure we have a full absolute URL for local files
+                            if (!str_starts_with($logoUrl, 'http') && !str_starts_with($logoUrl, 'file://')) {
+                                $localLogoUrl = url($logoUrl);
+                            }
+                        }
+                        
+                        Log::info('PDFController::generateProposalPDFSpatie - Logo URL processing', [
+                            'original_url' => $logoUrl,
+                            'final_url' => $localLogoUrl,
+                            'is_s3' => str_contains($logoUrl, 's3.') || str_contains($logoUrl, 'amazonaws.com'),
+                            'file_info' => [
+                                'filename' => $branding->file->file_name ?? '',
+                                'mime_type' => $branding->file->mime_type ?? '',
+                            ]
+                        ]);
+                        
+                        $logoHtml = '<img src="' . htmlspecialchars($localLogoUrl) . '" style="height: 35px; width: auto; margin-right: 15px;" alt="Company Logo">';
+                    }
+                }
+                
+                // Build comprehensive company info for right side
+                $companyInfoLines = [];
+                
+                // Add company name if different from branding company name
+                if (!empty($companyInfo['name']) && $companyInfo['name'] !== $companyName) {
+                    $companyInfoLines[] = $companyInfo['name'];
+                }
+                
+                // Add address if enabled and available
+                if ($headerConfig['show_address'] ?? false && !empty($companyInfo['address'])) {
+                    $companyInfoLines[] = $companyInfo['address'];
+                }
+                
+                // Add phone if enabled and available
+                if ($headerConfig['show_phone'] ?? false && !empty($companyInfo['phone'])) {
+                    $companyInfoLines[] = 'Ph: ' . $companyInfo['phone'];
+                }
+                
+                // Add email if available
+                if (!empty($companyInfo['email'])) {
+                    $companyInfoLines[] = $companyInfo['email'];
+                }
+                
+                // Add website if enabled and available
+                if ($headerConfig['show_website'] ?? false && !empty($companyInfo['website'])) {
+                    $companyInfoLines[] = $companyInfo['website'];
+                }
+                
+                // Add ABN if enabled and available
+                if ($headerConfig['show_abn'] ?? false && !empty($companyInfo['abn'])) {
+                    $companyInfoLines[] = 'ABN: ' . $companyInfo['abn'];
+                }
+                
+                $headerHtml = '
+                <div style="
+                    font-family: Arial, sans-serif; 
+                    font-size: 9px; 
+                    padding: 10px 20px; 
+ 
+                    margin: 0; 
+                    width: 100%; 
+                    box-sizing: border-box;
+                    background: white;
+                    height: 50px;
+                    display: flex;
+                    align-items: center;
+                ">
+                    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                        <div style="display: flex; align-items: center; flex: 1;">
+                            ' . $logoHtml . '
+                        </div>
+                        <div style="text-align: right; max-width: 50%;">
+                            <div style="color: #333; font-size: 8px; line-height: 1.2;">
+                                ' . implode('<br>', array_map('htmlspecialchars', $companyInfoLines)) . '
+                            </div>
+                        </div>
+                    </div>
+                </div>';
+            }
+
+            // Modify HTML to add proper spacing for headers
+            $finalHtml = $proposalData['html'];
+            if ($hasHeaders && !empty($headerHtml)) {
+                // Add CSS to ensure content doesn't overlap with fixed header on all pages
+                $headerSpacing = '
+                <style>
+                    @page {
+                        margin-top: 70px !important;
+                        margin-bottom: 50px !important;
+                        margin-left: 20px !important;
+                        margin-right: 20px !important;
+                    }
+                    
+                    body { 
+                        margin: 0 !important;
+                        padding: 0 !important;
+                    }
+                    
+                    /* Reduce spacing on first page */
+                    body > div:first-child {
+                        margin-top: 5px !important;
+                    }
+                    
+                    /* Reduce spacing for main headings */
+                    h1:first-of-type {
+                        margin-top: 10px !important;
+                    }
+                    
+                    /* Ensure proper spacing for subsequent content blocks */
+                    h1, h2, h3, .section {
+                        margin-top: 15px !important;
+                    }
+                    
+                    /* Page break handling */
+                    .section, .stage {
+                        page-break-inside: avoid !important;
+                    }
+                </style>';
+                
+                // Insert the spacing CSS into the HTML head
+                $finalHtml = str_replace('</head>', $headerSpacing . '</head>', $finalHtml);
+            }
+
+            // Create PDF using Spatie Laravel PDF
+            $pdf = SpatiePdf::html($finalHtml)
+                ->format($paper);
+                
+            // Set margins based on whether headers are enabled
+            if ($hasHeaders && !empty($headerHtml)) {
+                // Use CSS @page margins when headers are enabled (smaller margins for compact header)
+                $pdf->margins(0, 0, 0, 0);
+                
+                // Enable browser headers and footers, then add header and footer
+                $pdf->withBrowsershot(function (Browsershot $browsershot) use ($headerHtml) {
+                    $browsershot->showBrowserHeaderAndFooter();
+                    
+                    // Add footer with page numbering
+                    $footerHtml = '
+                    <div style="
+                        font-family: Arial, sans-serif; 
+                        font-size: 10px; 
+                        color: #666; 
+                        text-align: center;
+                        padding: 10px 0;
+                        width: 100%;
+                        height: 25px;
+                        line-height: 25px;
+                        background: transparent;
+                    ">
+                        Page <span class="pageNumber"></span> of <span class="totalPages"></span>
+                    </div>';
+                    
+                    $browsershot->footerHtml($footerHtml);
+                    $browsershot->headerHtml($headerHtml);
+                });
+            } else {
+                // Standard margins when no headers
+                $pdf->margins(20, 20, 20, 20);
+            }
+
+            // Return PDF as download or inline
+            return $pdf->name($filename);
+        } catch (\Exception $e) {
+            Log::error('Error generating Spatie Proposal PDF: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error generating Proposal PDF',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Extract header snippets from HTML for debugging
+     *
+     * @param string $html
+     * @return array
+     */
+    private function extractHeaderSnippets($html)
+    {
+        $snippets = [];
+        preg_match_all('/<div class="proposal-header[^>]*>.*?<\/div>/s', $html, $matches);
+        
+        foreach ($matches[0] as $index => $match) {
+            $snippets[] = [
+                'index' => $index,
+                'length' => strlen($match),
+                'preview' => substr(strip_tags($match), 0, 100) . '...',
+                'contains_img' => strpos($match, '<img') !== false,
+                'contains_company_name' => strpos($match, 'LKD Fitouts') !== false,
+            ];
+        }
+        
+        return $snippets;
     }
 }

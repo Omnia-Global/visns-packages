@@ -5,6 +5,7 @@ namespace Visnsstudio\VisnsPackages;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Route;
 use Visnsstudio\VisnsPackages\Commands\PublishMigrationsCommand;
+use Visnsstudio\VisnsPackages\Commands\InstallChromiumCommand;
 use Visnsstudio\VisnsPackages\Commands\MeilisearchConfigureCommand;
 use Visnsstudio\VisnsPackages\Commands\MeilisearchDebugCommand;
 use Visnsstudio\VisnsPackages\Commands\MeilisearchTestCommand;
@@ -35,6 +36,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
         // Register basic commands
         $commands = [
             PublishMigrationsCommand::class,
+            InstallChromiumCommand::class,
             UpdateModelsWithRelationshipSorting::class,
         ];
 
@@ -338,6 +340,10 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                                 'generateProposalPDF'
                             );
                             Route::post(
+                                '/generate-proposal-spatie',
+                                'generateProposalPDFSpatie'
+                            );
+                            Route::post(
                                 '/preview-proposal',
                                 'previewProposalPDF'
                             );
@@ -424,6 +430,10 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                             Route::post(
                                 '/generate-proposal',
                                 'generateProposalPDF'
+                            );
+                            Route::post(
+                                '/generate-proposal-spatie',
+                                'generateProposalPDFSpatie'
                             );
                             Route::post(
                                 '/preview-proposal',
