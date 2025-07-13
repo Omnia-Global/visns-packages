@@ -950,6 +950,104 @@ fetch('/ajax/pdf/generate-quote', {
 });
 ```
 
+### Manual Puppeteer Setup for New Projects
+
+If the automated `php artisan visns:install-chromium` command doesn't work (especially on Laravel Forge servers), you can manually set up Puppeteer:
+
+#### Option 1: Local Project Installation (Recommended for Forge)
+
+```bash
+# Navigate to your project directory
+cd /path/to/your/laravel/project
+
+# Install Puppeteer locally using Yarn (preferred)
+yarn add puppeteer
+
+# Or using npm
+npm install puppeteer
+
+# Create cache directory for Puppeteer (if needed)
+mkdir -p .cache/puppeteer
+```
+
+#### Option 2: System-wide Chrome Installation
+
+For production servers, you can install Chrome system-wide:
+
+```bash
+# Ubuntu/Debian systems
+wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list'
+sudo apt-get update
+sudo apt-get install google-chrome-stable
+
+# Install required dependencies
+sudo apt-get install -y \
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libdbus-1-3 \
+    libatspi2.0-0 \
+    libx11-6 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libxcb1 \
+    libxkbcommon0 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2
+```
+
+#### Option 3: Configure Existing Chromium
+
+If you have Chromium installed (like on your staging server):
+
+```bash
+# Add this to your .env file
+PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+
+# Or for Chrome
+PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+```
+
+#### Deployment Script Integration
+
+For Laravel Forge, add this to your deployment script:
+
+```bash
+# If using local Puppeteer installation
+yarn install
+# or
+npm ci
+
+# Ensure Puppeteer can download Chromium (if needed)
+yarn add puppeteer
+```
+
+#### Troubleshooting
+
+**If you get permission errors:**
+- Use local installation instead of global (`yarn add puppeteer` vs `yarn global add puppeteer`)
+- Ensure the web server user has access to the Chrome/Chromium binary
+- Check file permissions on the executable
+
+**If Chrome/Chromium isn't found:**
+- Verify the executable path: `which google-chrome-stable` or `which chromium-browser`
+- Set the correct path in your `.env` file using `PUPPETEER_EXECUTABLE_PATH`
+- Test the binary: `/usr/bin/google-chrome-stable --version`
+
+**For Laravel Forge specifically:**
+- Use local project installation (`yarn add puppeteer`)
+- Avoid global installations which often have permission issues
+- The automated command handles this setup but may fail due to PATH issues in PHP
+
 ### Spatie Laravel PDF (Chrome-based) - Recommended
 
 The package now includes **Spatie Laravel PDF** support for superior PDF generation using Chrome/Chromium. This provides better CSS support, native header/footer functionality, and more reliable rendering.

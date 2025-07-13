@@ -1036,6 +1036,13 @@ class PDFController extends \App\Http\Controllers\Controller
                 $pdf->withBrowsershot(function (Browsershot $browsershot) use ($headerHtml) {
                     $browsershot->showBrowserHeaderAndFooter();
                     
+                    // Add sandbox bypass arguments for staging server compatibility
+                    $browsershot->addChromiumArguments([
+                        'no-sandbox',
+                        'disable-setuid-sandbox',
+                        'disable-dev-shm-usage'
+                    ]);
+                    
                     // Add footer with page numbering
                     $footerHtml = '
                     <div style="
@@ -1058,6 +1065,15 @@ class PDFController extends \App\Http\Controllers\Controller
             } else {
                 // Standard margins when no headers
                 $pdf->margins(20, 20, 20, 20);
+                
+                // Add sandbox bypass arguments for staging server compatibility
+                $pdf->withBrowsershot(function (Browsershot $browsershot) {
+                    $browsershot->addChromiumArguments([
+                        'no-sandbox',
+                        'disable-setuid-sandbox',
+                        'disable-dev-shm-usage'
+                    ]);
+                });
             }
 
             // Return PDF as download or inline
