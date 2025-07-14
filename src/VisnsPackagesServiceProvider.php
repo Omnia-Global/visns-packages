@@ -482,6 +482,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                         Route::delete('/{id}', 'destroy');
                         Route::post('/table', 'table');
                         Route::post('/dropdown', 'dropdown');
+                        Route::post('/sort/{id}', 'templateSort');
                     });
 
                 Route::prefix("ajax/{$entity}/json")
