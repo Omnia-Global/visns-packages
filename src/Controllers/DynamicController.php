@@ -3305,14 +3305,20 @@ class DynamicController extends \App\Http\Controllers\Controller
      */
     protected function isMeilisearchHealthy()
     {
-        return Cache::remember('meilisearch_health', 60, function () {
+        return Cache::remember('meilisearch_health', 10, function () {
             try {
                 // Check if MeiliSearch client is available
                 if (!class_exists('\MeiliSearch\Client')) {
                     return false;
                 }
 
-                $client = app(\MeiliSearch\Client::class);
+                // Create client with fast timeout for health check
+                $client = new \MeiliSearch\Client(
+                    config('scout.meilisearch.host', 'http://localhost:7700'),
+                    config('scout.meilisearch.key'),
+                    ['timeout' => 2] // 2 second timeout
+                );
+                
                 $client->health();
                 return true;
             } catch (\Exception $e) {
@@ -3336,18 +3342,26 @@ class DynamicController extends \App\Http\Controllers\Controller
         // Get the model class
         $modelClass = get_class($this->model);
 
-        // Perform search using Scout
-        $searchResults = $modelClass::search($searchTerm)->keys();
+        // Perform search using Scout with timeout protection
+        try {
+            // Set a short timeout for the search operation
+            $searchResults = $modelClass::search($searchTerm)
+                ->options(['timeout' => 3]) // 3 second timeout for search
+                ->keys();
 
-        if ($searchResults->isEmpty()) {
-            // No results, apply impossible condition
-            $query->whereRaw('1 = 0');
-        } else {
-            // Filter by found IDs while preserving other query conditions
-            $query->whereIn(
-                $this->model->getKeyName(),
-                $searchResults->toArray()
-            );
+            if ($searchResults->isEmpty()) {
+                // No results, apply impossible condition
+                $query->whereRaw('1 = 0');
+            } else {
+                // Filter by found IDs while preserving other query conditions
+                $query->whereIn(
+                    $this->model->getKeyName(),
+                    $searchResults->toArray()
+                );
+            }
+        } catch (\Exception $e) {
+            // If search fails, rethrow to trigger fallback in calling code
+            throw $e;
         }
     }
 }

@@ -1857,6 +1857,25 @@ The search will use Meilisearch if available, providing:
 
 If Meilisearch is not available or fails, the search will automatically fall back to SQL LIKE queries using the model's `customSearch` scope.
 
+#### Fast Timeout and Fallback
+
+The package includes optimized timeout handling for Meilisearch to ensure fast response times when the search server is unavailable:
+
+**Health Check Optimization:**
+- Health checks use a 2-second timeout instead of default HTTP timeout (60+ seconds)
+- Health status is cached for 10 seconds to reduce repeated checks
+- Immediate fallback to database search when Meilisearch is detected as unhealthy
+
+**Search Operation Timeout:**
+- Search operations have a 3-second timeout to prevent long waits
+- Quick detection of server unavailability triggers immediate fallback
+- Total timeout reduced from ~60 seconds to ~5 seconds maximum
+
+**Benefits:**
+- Faster response times when Meilisearch server is down or slow
+- Seamless user experience with automatic database fallback
+- No impact on performance when Meilisearch is working correctly
+
 ### Basic Usage
 
 The `DynamicController` is accessed through URLs like:
