@@ -1,0 +1,12 @@
+# Exclude development files from package distribution
+tests/ export-ignore
+.github/ export-ignore
+.gitignore export-ignore
+.editorconfig export-ignore
+phpunit.xml export-ignore
+README.md export-ignore
+TODO.md export-ignore
+CLAUDE.md export-ignore
+.prettierrc.json export-ignore
+package.json export-ignore
+yarn.lock export-ignore
