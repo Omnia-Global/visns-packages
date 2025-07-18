@@ -738,7 +738,8 @@ class DynamicController extends \App\Http\Controllers\Controller
             $result = $this->respondWithAll($query);
             \Log::info('DynamicController::list() - Query executed successfully', [
                 'model' => $this->model,
-                'result_count' => is_array($result) ? count($result) : (isset($result['data']) ? count($result['data']) : 'unknown')
+                'result_type' => get_class($result),
+                'result_status' => $result instanceof \Illuminate\Http\JsonResponse ? $result->getStatusCode() : 'unknown'
             ]);
 
             return $result;
