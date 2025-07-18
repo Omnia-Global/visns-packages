@@ -735,11 +735,12 @@ class DynamicController extends \App\Http\Controllers\Controller
                 'query_sql' => $query->toSql()
             ]);
 
-            $result = $this->respondWithAll($query);
+            $result = $this->paginateAndRespond($query, $request->input('take', 10));
             \Log::info('DynamicController::list() - Query executed successfully', [
                 'model' => $this->model,
                 'result_type' => get_class($result),
-                'result_status' => $result instanceof \Illuminate\Http\JsonResponse ? $result->getStatusCode() : 'unknown'
+                'result_status' => $result instanceof \Illuminate\Http\JsonResponse ? $result->getStatusCode() : 'unknown',
+                'pagination_size' => $request->input('take', 10)
             ]);
 
             return $result;
