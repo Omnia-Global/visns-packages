@@ -735,13 +735,24 @@ class DynamicController extends \App\Http\Controllers\Controller
                 'query_sql' => $query->toSql()
             ]);
 
-            $result = $this->paginateAndRespond($query, $request->input('take', 10));
-            \Log::info('DynamicController::list() - Query executed successfully', [
-                'model' => $this->model,
-                'result_type' => get_class($result),
-                'result_status' => $result instanceof \Illuminate\Http\JsonResponse ? $result->getStatusCode() : 'unknown',
-                'pagination_size' => $request->input('take', 10)
-            ]);
+            // Check if pagination is requested via 'take' parameter
+            if ($request->has('take')) {
+                $result = $this->paginateAndRespond($query, $request->input('take'));
+                \Log::info('DynamicController::list() - Query executed with pagination', [
+                    'model' => $this->model,
+                    'result_type' => get_class($result),
+                    'result_status' => $result instanceof \Illuminate\Http\JsonResponse ? $result->getStatusCode() : 'unknown',
+                    'pagination_size' => $request->input('take')
+                ]);
+            } else {
+                // Backward compatibility: return all records when no 'take' parameter
+                $result = $this->respondWithAll($query);
+                \Log::info('DynamicController::list() - Query executed without pagination (all records)', [
+                    'model' => $this->model,
+                    'result_type' => get_class($result),
+                    'result_status' => $result instanceof \Illuminate\Http\JsonResponse ? $result->getStatusCode() : 'unknown'
+                ]);
+            }
 
             return $result;
 
