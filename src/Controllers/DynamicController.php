@@ -699,13 +699,63 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     public function list(Request $request)
     {
-        $query = $this->initializeQuery();
+        try {
+            \Log::info('DynamicController::list() started', [
+                'model' => $this->model,
+                'request_data' => $request->all(),
+                'method' => $request->method(),
+                'url' => $request->url()
+            ]);
 
-        $this->applyRelationships($query);
-        $this->applyCustomOrderAndSearch($query, $request);
-        $this->applyFilters($query, $request);
+            $query = $this->initializeQuery();
+            \Log::info('DynamicController::list() - Query initialized', [
+                'model' => $this->model,
+                'query_sql' => $query->toSql()
+            ]);
 
-        return $this->respondWithAll($query);
+            $this->applyRelationships($query);
+            \Log::info('DynamicController::list() - Relationships applied', [
+                'model' => $this->model,
+                'query_sql' => $query->toSql()
+            ]);
+
+            $this->applyCustomOrderAndSearch($query, $request);
+            \Log::info('DynamicController::list() - Custom order and search applied', [
+                'model' => $this->model,
+                'sortBy' => $request->input('sortBy'),
+                'sort' => $request->input('sort'),
+                'search' => $request->input('search'),
+                'query_sql' => $query->toSql()
+            ]);
+
+            $this->applyFilters($query, $request);
+            \Log::info('DynamicController::list() - Filters applied', [
+                'model' => $this->model,
+                'where_conditions' => $request->input('where'),
+                'query_sql' => $query->toSql()
+            ]);
+
+            $result = $this->respondWithAll($query);
+            \Log::info('DynamicController::list() - Query executed successfully', [
+                'model' => $this->model,
+                'result_count' => is_array($result) ? count($result) : (isset($result['data']) ? count($result['data']) : 'unknown')
+            ]);
+
+            return $result;
+
+        } catch (\Exception $e) {
+            \Log::error('DynamicController::list() - Exception occurred', [
+                'model' => $this->model,
+                'error_message' => $e->getMessage(),
+                'error_code' => $e->getCode(),
+                'error_file' => $e->getFile(),
+                'error_line' => $e->getLine(),
+                'stack_trace' => $e->getTraceAsString(),
+                'request_data' => $request->all()
+            ]);
+
+            throw $e;
+        }
     }
 
     protected function initializeQuery()
@@ -722,41 +772,127 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     protected function applyCustomOrderAndSearch($query, Request $request)
     {
-        if (method_exists($this->model, 'scopeCustomOrder')) {
-            $query->customOrder(
-                $request->input('sortBy'),
-                $request->input('sort')
-            );
-        }
+        try {
+            \Log::info('DynamicController::applyCustomOrderAndSearch() started', [
+                'model' => $this->model,
+                'sortBy' => $request->input('sortBy'),
+                'sort' => $request->input('sort'),
+                'search' => $request->input('search'),
+                'has_custom_order' => method_exists($this->model, 'scopeCustomOrder'),
+                'has_custom_search' => method_exists($this->model, 'scopeCustomSearch')
+            ]);
 
-        // Enhanced search logic with Meilisearch support
-        $searchTerm = $request->input('search');
-        if ($searchTerm) {
-            if ($this->shouldUseMeilisearch($this->model)) {
-                try {
-                    $this->applyMeilisearchFilter($query, $searchTerm);
-                } catch (\Exception $e) {
-                    // Log the error and fallback to custom search
-                    Log::warning(
-                        'Meilisearch search failed, falling back to custom search: ' .
-                            $e->getMessage()
-                    );
-                    if (method_exists($this->model, 'scopeCustomSearch')) {
-                        $query->customSearch($searchTerm);
-                    }
-                }
-            } elseif (method_exists($this->model, 'scopeCustomSearch')) {
-                $query->customSearch($searchTerm);
+            if (method_exists($this->model, 'scopeCustomOrder')) {
+                \Log::info('DynamicController::applyCustomOrderAndSearch() - Applying custom order', [
+                    'model' => $this->model,
+                    'sortBy' => $request->input('sortBy'),
+                    'sort' => $request->input('sort')
+                ]);
+
+                $query->customOrder(
+                    $request->input('sortBy'),
+                    $request->input('sort')
+                );
             }
+
+            // Enhanced search logic with Meilisearch support
+            $searchTerm = $request->input('search');
+            if ($searchTerm) {
+                \Log::info('DynamicController::applyCustomOrderAndSearch() - Applying search', [
+                    'model' => $this->model,
+                    'search_term' => $searchTerm,
+                    'should_use_meilisearch' => $this->shouldUseMeilisearch($this->model)
+                ]);
+
+                if ($this->shouldUseMeilisearch($this->model)) {
+                    try {
+                        \Log::info('DynamicController::applyCustomOrderAndSearch() - Using Meilisearch');
+                        $this->applyMeilisearchFilter($query, $searchTerm);
+                    } catch (\Exception $e) {
+                        // Log the error and fallback to custom search
+                        \Log::warning('Meilisearch search failed, falling back to custom search', [
+                            'model' => $this->model,
+                            'error' => $e->getMessage(),
+                            'search_term' => $searchTerm
+                        ]);
+                        
+                        if (method_exists($this->model, 'scopeCustomSearch')) {
+                            \Log::info('DynamicController::applyCustomOrderAndSearch() - Using custom search fallback');
+                            $query->customSearch($searchTerm);
+                        }
+                    }
+                } elseif (method_exists($this->model, 'scopeCustomSearch')) {
+                    \Log::info('DynamicController::applyCustomOrderAndSearch() - Using custom search');
+                    $query->customSearch($searchTerm);
+                }
+            }
+
+            \Log::info('DynamicController::applyCustomOrderAndSearch() completed', [
+                'model' => $this->model,
+                'final_query_sql' => $query->toSql()
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('DynamicController::applyCustomOrderAndSearch() - Exception occurred', [
+                'model' => $this->model,
+                'error_message' => $e->getMessage(),
+                'error_code' => $e->getCode(),
+                'error_file' => $e->getFile(),
+                'error_line' => $e->getLine(),
+                'search_term' => $request->input('search'),
+                'sortBy' => $request->input('sortBy'),
+                'sort' => $request->input('sort')
+            ]);
+
+            throw $e;
         }
     }
 
     protected function applyFilters($query, Request $request)
     {
-        if ($request->has('where') && $request->filled('where')) {
-            foreach ($request->input('where') as $condition) {
-                $this->applyFilterCondition($query, $condition);
+        try {
+            \Log::info('DynamicController::applyFilters() started', [
+                'model' => $this->model,
+                'has_where' => $request->has('where'),
+                'where_filled' => $request->filled('where'),
+                'where_conditions' => $request->input('where', [])
+            ]);
+
+            if ($request->has('where') && $request->filled('where')) {
+                $conditions = $request->input('where');
+                \Log::info('DynamicController::applyFilters() - Processing conditions', [
+                    'model' => $this->model,
+                    'condition_count' => count($conditions),
+                    'conditions' => $conditions
+                ]);
+
+                foreach ($conditions as $index => $condition) {
+                    \Log::info('DynamicController::applyFilters() - Applying condition', [
+                        'model' => $this->model,
+                        'condition_index' => $index,
+                        'condition' => $condition
+                    ]);
+
+                    $this->applyFilterCondition($query, $condition);
+                }
             }
+
+            \Log::info('DynamicController::applyFilters() completed', [
+                'model' => $this->model,
+                'final_query_sql' => $query->toSql()
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('DynamicController::applyFilters() - Exception occurred', [
+                'model' => $this->model,
+                'error_message' => $e->getMessage(),
+                'error_code' => $e->getCode(),
+                'error_file' => $e->getFile(),
+                'error_line' => $e->getLine(),
+                'where_conditions' => $request->input('where', [])
+            ]);
+
+            throw $e;
         }
     }
 
@@ -1201,26 +1337,62 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     protected function respondWithAll($query)
     {
-        $data = $query->get();
+        try {
+            \Log::info('DynamicController::respondWithAll() started', [
+                'model' => $this->model,
+                'query_sql' => $query->toSql(),
+                'query_bindings' => $query->getBindings()
+            ]);
 
-        // Check if the model has excludedFields method
-        if (method_exists($this->model, 'excludedFields')) {
-            $excludedFields = $this->model->excludedFields();
+            $data = $query->get();
+            \Log::info('DynamicController::respondWithAll() - Data retrieved', [
+                'model' => $this->model,
+                'data_count' => $data->count(),
+                'memory_usage' => memory_get_usage(true)
+            ]);
 
-            // Loop through the data and remove the excluded fields
-            $data = $data->map(function ($item) use ($excludedFields) {
-                $itemArray = $item->toArray();
+            // Check if the model has excludedFields method
+            if (method_exists($this->model, 'excludedFields')) {
+                $excludedFields = $this->model->excludedFields();
+                \Log::info('DynamicController::respondWithAll() - Applying excluded fields', [
+                    'model' => $this->model,
+                    'excluded_fields' => $excludedFields
+                ]);
 
-                // Remove the excluded fields
-                foreach ($excludedFields as $field) {
-                    unset($itemArray[$field]);
-                }
+                // Loop through the data and remove the excluded fields
+                $data = $data->map(function ($item) use ($excludedFields) {
+                    $itemArray = $item->toArray();
 
-                return $itemArray;
-            });
+                    // Remove the excluded fields
+                    foreach ($excludedFields as $field) {
+                        unset($itemArray[$field]);
+                    }
+
+                    return $itemArray;
+                });
+            }
+
+            \Log::info('DynamicController::respondWithAll() - Response prepared successfully', [
+                'model' => $this->model,
+                'final_data_count' => is_countable($data) ? count($data) : 'unknown'
+            ]);
+
+            return response()->json($data, 200);
+
+        } catch (\Exception $e) {
+            \Log::error('DynamicController::respondWithAll() - Exception occurred', [
+                'model' => $this->model,
+                'error_message' => $e->getMessage(),
+                'error_code' => $e->getCode(),
+                'error_file' => $e->getFile(),
+                'error_line' => $e->getLine(),
+                'stack_trace' => $e->getTraceAsString(),
+                'query_sql' => $query->toSql() ?? 'N/A',
+                'query_bindings' => $query->getBindings() ?? []
+            ]);
+
+            throw $e;
         }
-
-        return response()->json($data, 200);
     }
 
     /**
