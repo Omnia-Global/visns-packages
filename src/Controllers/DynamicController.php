@@ -933,6 +933,12 @@ class DynamicController extends \App\Http\Controllers\Controller
         $operator = strtoupper($groupCondition['operator'] ?? 'AND');
         $conditions = $groupCondition['conditions'] ?? [];
         
+        \Log::info('DynamicController::applyGroupConditions() - Processing group', [
+            'operator' => $operator,
+            'condition_count' => count($conditions),
+            'conditions' => $conditions
+        ]);
+        
         if (empty($conditions)) {
             return;
         }
@@ -940,6 +946,12 @@ class DynamicController extends \App\Http\Controllers\Controller
         // Apply grouped conditions with OR/AND logic
         $query->where(function ($subQuery) use ($conditions, $operator) {
             foreach ($conditions as $index => $condition) {
+                \Log::info('DynamicController::applyGroupConditions() - Processing condition', [
+                    'index' => $index,
+                    'operator' => $operator,
+                    'condition' => $condition
+                ]);
+                
                 if ($index === 0) {
                     // First condition - always use 'where'
                     $this->applySingleCondition($subQuery, $condition);
@@ -956,10 +968,20 @@ class DynamicController extends \App\Http\Controllers\Controller
                 }
             }
         });
+        
+        \Log::info('DynamicController::applyGroupConditions() - Completed group processing', [
+            'query_sql' => $query->toSql()
+        ]);
     }
 
     protected function applySingleCondition($query, $condition)
     {
+        // Handle nested groups
+        if (isset($condition['group']) && $condition['group']) {
+            $this->applyGroupConditions($query, $condition);
+            return;
+        }
+        
         // Handle whereDoesntHave case
         if (isset($condition['whereDoesntHave'])) {
             $relation = $condition['whereDoesntHave'];
