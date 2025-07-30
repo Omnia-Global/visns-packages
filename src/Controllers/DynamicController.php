@@ -911,6 +911,69 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     protected function applyFilterCondition($query, $condition)
     {
+        // NEW: Check for group conditions first
+        if (isset($condition['group']) && $condition['group']) {
+            $this->applyGroupConditions($query, $condition);
+            return;
+        }
+
+        // EXISTING: All current logic preserved exactly
+        $value = $condition['value'] ?? null;
+        $casts = $this->model->getCasts();
+
+        if (isset($condition['id']) && isset($casts[$condition['id']])) {
+            $value = $this->castValue($value, $casts[$condition['id']]);
+        }
+
+        $this->applyConditionBasedOnOperator($query, $condition, $value);
+    }
+
+    protected function applyGroupConditions($query, $groupCondition)
+    {
+        $operator = strtoupper($groupCondition['operator'] ?? 'AND');
+        $conditions = $groupCondition['conditions'] ?? [];
+        
+        if (empty($conditions)) {
+            return;
+        }
+        
+        // Apply grouped conditions with OR/AND logic
+        $query->where(function ($subQuery) use ($conditions, $operator) {
+            foreach ($conditions as $index => $condition) {
+                if ($index === 0) {
+                    // First condition - always use 'where'
+                    $this->applySingleCondition($subQuery, $condition);
+                } else {
+                    // Subsequent conditions - use OR/AND based on operator
+                    if ($operator === 'OR') {
+                        $subQuery->orWhere(function ($orQuery) use ($condition) {
+                            $this->applySingleCondition($orQuery, $condition);
+                        });
+                    } else {
+                        // Default to AND
+                        $this->applySingleCondition($subQuery, $condition);
+                    }
+                }
+            }
+        });
+    }
+
+    protected function applySingleCondition($query, $condition)
+    {
+        // Handle whereDoesntHave case
+        if (isset($condition['whereDoesntHave'])) {
+            $relation = $condition['whereDoesntHave'];
+            if (is_string($relation)) {
+                $query->whereDoesntHave($relation);
+            } elseif (is_array($relation)) {
+                foreach ($relation as $rel) {
+                    $query->whereDoesntHave($rel);
+                }
+            }
+            return;
+        }
+        
+        // Handle regular conditions using existing logic
         $value = $condition['value'] ?? null;
         $casts = $this->model->getCasts();
 
@@ -1106,6 +1169,19 @@ class DynamicController extends \App\Http\Controllers\Controller
             } elseif (is_array($whereHas)) {
                 foreach ($whereHas as $relation) {
                     $query->whereHas($relation);
+                }
+            }
+            return;
+        }
+
+        // NEW: Special case for whereDoesntHave (no id/value needed)
+        $whereDoesntHave = $condition['whereDoesntHave'] ?? [];
+        if (empty($id) && !empty($whereDoesntHave)) {
+            if (is_string($whereDoesntHave)) {
+                $query->whereDoesntHave($whereDoesntHave);
+            } elseif (is_array($whereDoesntHave)) {
+                foreach ($whereDoesntHave as $relation) {
+                    $query->whereDoesntHave($relation);
                 }
             }
             return;
