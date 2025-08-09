@@ -451,10 +451,12 @@ class ProposalAssemblyService
             ]
         );
 
-        $html = $this->getHTMLHeader($branding, $hasCoverPage, $headerConfig);
-
+        $html = trim($this->getHTMLHeader($branding, $hasCoverPage, $headerConfig));
+        
         foreach ($sections as $index => $section) {
-            $html .= $this->renderSection($section, $branding, $proposalData);
+            $sectionHtml = $this->renderSection($section, $branding, $proposalData);
+            // Trim whitespace from section HTML to prevent blank pages
+            $html .= trim($sectionHtml);
         }
 
         \Log::info(
@@ -579,7 +581,7 @@ class ProposalAssemblyService
         $logoHtml = $this->renderBrandingLogo($branding);
 
         return '
-        <div class="omnia-cover-page" style="page-break-after: always; padding: 0; background-color: #1f2937 !important; color: white !important; height: 297mm; position: relative; font-family: Arial, sans-serif; margin: 0; box-sizing: border-box; width: 100%; overflow: hidden;">
+        <div class="omnia-cover-page" style="page-break-after: always; padding: 0; background-color: #1f2937 !important; color: white !important; height: 297mm; position: relative; font-family: Arial, sans-serif; margin: 0; box-sizing: border-box; width: 100%; overflow: hidden; page-break-inside: avoid;">
             
             <div class="cover-content" style="position: absolute; top: 45%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 90%; max-width: 600px;">
                 <div class="logo-section" style="margin-bottom: 40px;">
@@ -671,6 +673,22 @@ class ProposalAssemblyService
         // Use manually defined TOC items if no headings found
         if (empty($tocItems)) {
             $tocItems = $section['toc_items'] ?? [];
+        }
+        
+        // Check if TOC has meaningful content (not just placeholders)
+        $hasRealContent = false;
+        foreach ($tocItems as $item) {
+            $title = $item['title'] ?? '';
+            // Skip items that are empty or look like placeholders [Heading 1], [Heading 2], etc.
+            if (!empty($title) && !preg_match('/^\[.*\]$/', $title)) {
+                $hasRealContent = true;
+                break;
+            }
+        }
+        
+        // If no real content, skip the TOC entirely to avoid blank page
+        if (!$hasRealContent || empty($tocItems)) {
+            return '';
         }
 
         $tocHtml = '
@@ -1318,13 +1336,7 @@ class ProposalAssemblyService
             <title>Proposal</title>
             <style>
                 @page {
-                    margin: 20px;
-                }
-                
-                @page :first {
-                    margin: ' .
-            ($hasCoverPage ? '0' : '20px') .
-            ';
+                    margin: 0;
                 }
                 
                 body {
@@ -1334,8 +1346,22 @@ class ProposalAssemblyService
                     font-size: 16px;
                     line-height: 1.6;
                     color: #333;
-                    margin: 0;
-                    padding: 0;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                }
+                
+                /* Ensure first child starts at top of page */
+                body > *:first-child {
+                    margin-top: 0 !important;
+                    padding-top: 0 !important;
+                }
+                
+                /* Force cover page to start at page top */
+                .omnia-cover-page {
+                    position: relative;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    page-break-before: avoid !important;
                 }
                 
                 h1, h2, h3, h4, h5, h6 {
