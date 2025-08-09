@@ -583,14 +583,14 @@ class ProposalAssemblyService
         return '
         <div class="omnia-cover-page" style="page-break-after: always; padding: 0; background-color: #1f2937 !important; color: white !important; height: 297mm; position: relative; font-family: Arial, sans-serif; margin: 0; box-sizing: border-box; width: 100%; overflow: hidden; page-break-inside: avoid;">
             
-            <div class="cover-content" style="position: absolute; top: 45%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 90%; max-width: 600px;">
+            <div class="cover-content" style="position: absolute; top: 45%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 85%; max-width: 1000px; padding: 0 20px; box-sizing: border-box;">
                 <div class="logo-section" style="margin-bottom: 40px;">
                     ' .
             $logoHtml .
             '
                 </div>
                 <div>
-                    <h1 style="font-size: 48px; font-weight: bold; margin: 0; color: #4ade80 !important; line-height: 1.2; text-shadow: 1px 1px 2px rgba(0,0,0,0.3);">' .
+                    <h1 style="font-size: 72px; font-weight: bold; margin: 0; color: #4ade80 !important; line-height: 1.1; text-shadow: 1px 1px 2px rgba(0,0,0,0.3); word-wrap: break-word; hyphens: auto; max-width: 100%;">' .
             ($proposalData['document_title'] ?? '[Document Title]') .
             '</h1>
                 </div>
@@ -692,7 +692,7 @@ class ProposalAssemblyService
         }
 
         $tocHtml = '
-        <div class="table-of-contents" style="page-break-after: always; padding: 80px;">
+        <div class="table-of-contents" style="page-break-after: always; padding: 20px;">
             <h1 style="font-size: 32px; font-weight: bold; margin-bottom: 40px; text-align: left;">Contents</h1>
             <table class="toc-table" style="width: 100%; border-collapse: collapse; margin-top: 40px;">';
 
@@ -753,7 +753,7 @@ class ProposalAssemblyService
         array $proposalData
     ): string {
         return '
-        <div class="acceptance-section" style="padding: 60px; page-break-after: avoid;">
+        <div class="acceptance-section" style="padding: 20px; page-break-after: avoid;">
             <h1 style="margin-bottom: 30px; color: ' .
             ($branding->colors['primary'] ?? '#000000') .
             ';">' .
@@ -780,13 +780,15 @@ class ProposalAssemblyService
         $branding,
         array $proposalData
     ): string {
-        // Neutral color scheme for better readability
-        $headerColor = '#6B7280'; // Neutral gray for header
-        $totalColor = '#4B5563'; // Darker gray for total row
+        // Get intelligent colors from branding profile
+        $colors = $this->getTableColors($branding);
+        $tableColor = $colors['header']; // Both header and total use the same color now
+        $headerColor = $tableColor;
+        $totalColor = $tableColor;
 
         $html =
             '
-    <div class="pricing-section" style="padding: 40px; page-break-inside: avoid;">
+    <div class="pricing-section" style="padding: 20px; page-break-inside: avoid;">
         <h1 style="margin-bottom: 30px; color: #1F2937; font-size: 28px; font-weight: bold;">' .
             $section['title'] .
             '</h1>
@@ -902,10 +904,11 @@ class ProposalAssemblyService
      * @param array $items
      * @return string
      */
-    private function renderItemsTable(string $title, array $items): string
+    private function renderItemsTable(string $title, array $items, $branding = null): string
     {
-        // Use consistent colors from renderPricingSection
-        $headerColor = '#6B7280'; // Neutral gray for header
+        // Use branding colors if available, with fallback to neutral
+        $colors = $this->getTableColors($branding);
+        $headerColor = $colors['header'];
 
         $html =
             '
@@ -968,7 +971,7 @@ class ProposalAssemblyService
      * @param array $proposalData
      * @return string
      */
-    private function renderTotalsSection(array $proposalData): string
+    private function renderTotalsSection(array $proposalData, $branding = null): string
     {
         $subtotal = $this->calculateSubtotal($proposalData);
         $discount = $proposalData['discount'] ?? 0;
@@ -977,6 +980,10 @@ class ProposalAssemblyService
         $subtotalAfterDiscount = $subtotal - $discountAmount;
         $taxAmount = $subtotalAfterDiscount * $taxRate;
         $total = $subtotalAfterDiscount + $taxAmount;
+
+        // Get branding colors for consistent styling
+        $colors = $this->getTableColors($branding);
+        $totalColor = $colors['total'];
 
         return '
         <div style="margin-top: 30px; text-align: right;">
@@ -1006,7 +1013,7 @@ class ProposalAssemblyService
             number_format($taxAmount, 2) .
             '</td>
                 </tr>
-                <tr style="background-color: #4B5563 !important;">
+                <tr style="background-color: ' . $totalColor . ' !important;">
                     <td style="border: 1px solid #E5E7EB; border-top: 2px solid #D1D5DB; padding: 14px; font-size: 15px; color: white !important; font-weight: bold;">Total:</td>
                     <td style="border: 1px solid #E5E7EB; border-top: 2px solid #D1D5DB; padding: 14px; text-align: right; font-size: 16px; color: white !important; font-weight: bold;">$' .
             number_format($total, 2) .
@@ -1036,7 +1043,7 @@ class ProposalAssemblyService
         }
 
         return '
-        <div class="terms-conditions-section" style="padding: 20px 20px; page-break-inside: avoid;">
+        <div class="terms-conditions-section" style="padding: 20px; page-break-inside: avoid;">
             <h1 style="margin-bottom: 30px; color: ' .
             ($branding->colors['primary'] ?? '#000000') .
             ';">' .
@@ -1072,7 +1079,7 @@ class ProposalAssemblyService
 
         $html =
             '
-        <div class="change-log-section" style="padding: 20px 20px; page-break-after: avoid;">
+        <div class="change-log-section" style="padding: 20px; page-break-after: avoid;">
             <h1 style="margin-bottom: 30px; color: ' .
             ($branding->colors['primary'] ?? '#000000') .
             ';">' .
@@ -1124,7 +1131,7 @@ class ProposalAssemblyService
         $content = $this->replaceVariables($section['content'], $proposalData);
 
         return '
-        <div class="overview-section" style="page-break-before: always; padding: 20px 20px; page-break-inside: avoid;">
+        <div class="overview-section" style="page-break-before: always; padding: 20px; page-break-inside: avoid;">
             <h1 style="margin-bottom: 30px; color: ' .
             ($branding->colors['primary'] ?? '#000000') .
             ';">' .
@@ -1157,7 +1164,7 @@ class ProposalAssemblyService
         $content = $this->enhanceListStyling($content);
 
         return '
-        <div class="payment-terms-section" style="page-break-before: always; padding: 20px 20px; page-break-inside: avoid;">
+        <div class="payment-terms-section" style="page-break-before: always; padding: 20px; page-break-inside: avoid;">
             <h1 style="margin-bottom: 30px; color: ' .
             ($branding->colors['primary'] ?? '#000000') .
             '; font-size: 28px; font-weight: bold;">' .
@@ -1195,7 +1202,7 @@ class ProposalAssemblyService
         $content = $this->removeBorderStyles($content);
 
         return '
-        <div class="agreement-signature-section" style="padding: 20px 20px; page-break-inside: avoid; border: none !important; outline: none !important;">
+        <div class="agreement-signature-section" style="padding: 20px; page-break-inside: avoid; border: none !important; outline: none !important;">
             <h1 style="margin-bottom: 16px; margin-top: 0; color: ' .
             ($branding->colors['primary'] ?? '#000000') .
             ';">' .
@@ -1227,7 +1234,7 @@ class ProposalAssemblyService
 
         // For content sections, don't render the section title - let the dynamic content control its own headings
         return '
-        <div class="content-section" style="padding: 20px 20px; page-break-inside: avoid; page-break-after: avoid;">
+        <div class="content-section" style="padding: 20px; page-break-inside: avoid; page-break-after: avoid;">
             <div class="section-content" style="line-height: 1.5;">
                 ' .
             $content .
@@ -1253,7 +1260,7 @@ class ProposalAssemblyService
         $content = $this->enhanceListStyling($content);
 
         return '
-        <div class="terms-section" style="padding: 20px 20px; page-break-inside: avoid;">
+        <div class="terms-section" style="padding: 20px; page-break-inside: avoid;">
             <h1 style="margin-bottom: 30px; color: ' .
             ($branding->colors['primary'] ?? '#000000') .
             ';">' .
@@ -1285,6 +1292,160 @@ class ProposalAssemblyService
             'font_family' => 'Arial, sans-serif',
             'text_color' => '#374151',
         ];
+    }
+
+    /**
+     * Get intelligent table colors based on branding profile
+     * Ensures good readability and contrast
+     * 
+     * @param mixed $branding BrandingProfile or null
+     * @return array
+     */
+    private function getTableColors($branding): array
+    {
+        // Default fallback colors for good readability
+        $defaultColors = [
+            'header' => '#6B7280', // Neutral gray
+            'total' => '#4B5563', // Darker gray
+        ];
+
+        // If no branding provided, use defaults
+        if (!$branding || !isset($branding->colors)) {
+            return $defaultColors;
+        }
+
+        $brandingColors = $branding->colors ?? [];
+        $primary = $brandingColors['primary'] ?? null;
+        $secondary = $brandingColors['secondary'] ?? null;
+        $accent = $brandingColors['accent'] ?? null;
+
+        // Use the same color for both header and total for symmetrical design
+        $tableColor = $this->selectReadableTableColor([$primary, $secondary, $accent], $defaultColors['header']);
+
+        return [
+            'header' => $tableColor,
+            'total' => $tableColor,
+        ];
+    }
+
+    /**
+     * Select a readable color for table backgrounds
+     * Checks contrast ratio and color brightness
+     * 
+     * @param array $candidateColors
+     * @param string $fallback
+     * @return string
+     */
+    private function selectReadableTableColor(array $candidateColors, string $fallback): string
+    {
+        foreach ($candidateColors as $color) {
+            if (!$color || !$this->isValidHexColor($color)) {
+                continue;
+            }
+
+            // Check if color has good contrast and isn't too light
+            if ($this->isGoodTableBackgroundColor($color)) {
+                return $color;
+            }
+
+            // Try darkening the color if it's too light
+            $darkenedColor = $this->darkenColor($color, 0.3);
+            if ($this->isGoodTableBackgroundColor($darkenedColor)) {
+                return $darkenedColor;
+            }
+        }
+
+        return $fallback;
+    }
+
+    /**
+     * Check if a color is suitable for table background with white text
+     * 
+     * @param string $hexColor
+     * @return bool
+     */
+    private function isGoodTableBackgroundColor(string $hexColor): bool
+    {
+        $rgb = $this->hexToRgb($hexColor);
+        if (!$rgb) return false;
+
+        // Calculate relative luminance
+        $luminance = $this->getRelativeLuminance($rgb);
+        
+        // White text (luminance = 1) on colored background
+        // WCAG AA requires contrast ratio of at least 4.5:1 for normal text
+        // For table headers, we want at least 3:1 for good readability
+        $contrastRatio = (1 + 0.05) / ($luminance + 0.05);
+        
+        return $contrastRatio >= 3.0;
+    }
+
+    /**
+     * Convert hex color to RGB array
+     * 
+     * @param string $hex
+     * @return array|null
+     */
+    private function hexToRgb(string $hex): ?array
+    {
+        $hex = ltrim($hex, '#');
+        if (strlen($hex) !== 6) return null;
+
+        return [
+            'r' => hexdec(substr($hex, 0, 2)),
+            'g' => hexdec(substr($hex, 2, 2)),
+            'b' => hexdec(substr($hex, 4, 2)),
+        ];
+    }
+
+    /**
+     * Calculate relative luminance of an RGB color
+     * 
+     * @param array $rgb
+     * @return float
+     */
+    private function getRelativeLuminance(array $rgb): float
+    {
+        $convert = function($value) {
+            $value = $value / 255;
+            return $value <= 0.03928 ? $value / 12.92 : pow(($value + 0.055) / 1.055, 2.4);
+        };
+
+        $r = $convert($rgb['r']);
+        $g = $convert($rgb['g']);
+        $b = $convert($rgb['b']);
+
+        return 0.2126 * $r + 0.7152 * $g + 0.0722 * $b;
+    }
+
+    /**
+     * Darken a hex color by a percentage
+     * 
+     * @param string $hex
+     * @param float $percent (0.0 to 1.0)
+     * @return string
+     */
+    private function darkenColor(string $hex, float $percent): string
+    {
+        $rgb = $this->hexToRgb($hex);
+        if (!$rgb) return $hex;
+
+        $rgb['r'] = max(0, $rgb['r'] * (1 - $percent));
+        $rgb['g'] = max(0, $rgb['g'] * (1 - $percent));
+        $rgb['b'] = max(0, $rgb['b'] * (1 - $percent));
+
+        return sprintf('#%02x%02x%02x', $rgb['r'], $rgb['g'], $rgb['b']);
+    }
+
+    /**
+     * Validate hex color format
+     * 
+     * @param string $hex
+     * @return bool
+     */
+    private function isValidHexColor(string $hex): bool
+    {
+        return preg_match('/^#[a-fA-F0-9]{6}$/', $hex) === 1;
     }
 
     /**
@@ -1514,13 +1675,7 @@ class ProposalAssemblyService
                     border: none !important;
                 }
                 
-                table th {
-                    background-color: ' .
-            $cssConstants['table_header_bg'] .
-            ' !important;
-                    color: white !important;
-                    font-weight: bold;
-                }
+                /* Table headers now use individual branding colors per table */
                 
                 table tr:nth-child(even) {
                     background-color: ' .
