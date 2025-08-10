@@ -451,10 +451,16 @@ class ProposalAssemblyService
             ]
         );
 
-        $html = trim($this->getHTMLHeader($branding, $hasCoverPage, $headerConfig));
-        
+        $html = trim(
+            $this->getHTMLHeader($branding, $hasCoverPage, $headerConfig)
+        );
+
         foreach ($sections as $index => $section) {
-            $sectionHtml = $this->renderSection($section, $branding, $proposalData);
+            $sectionHtml = $this->renderSection(
+                $section,
+                $branding,
+                $proposalData
+            );
             // Trim whitespace from section HTML to prevent blank pages
             $html .= trim($sectionHtml);
         }
@@ -583,24 +589,28 @@ class ProposalAssemblyService
         return '
         <div class="omnia-cover-page" style="page-break-after: always; padding: 0; background-color: #1f2937 !important; color: white !important; height: 297mm; position: relative; font-family: Arial, sans-serif; margin: 0; box-sizing: border-box; width: 100%; overflow: hidden; page-break-inside: avoid;">
             
-            <div class="cover-content" style="position: absolute; top: 45%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 85%; max-width: 1000px; padding: 0 20px; box-sizing: border-box;">
-                <div class="logo-section" style="margin-bottom: 40px;">
-                    ' .
+            <!-- Logo positioned in upper left -->
+            <div class="logo-section" style="position: absolute; top: 60px; left: 60px; z-index: 10;">
+                ' .
             $logoHtml .
             '
-                </div>
-                <div>
-                    <h1 style="font-size: 72px; font-weight: bold; margin: 0; color: #4ade80 !important; line-height: 1.1; text-shadow: 1px 1px 2px rgba(0,0,0,0.3); word-wrap: break-word; hyphens: auto; max-width: 100%;">' .
-            ($proposalData['document_title'] ?? '[Document Title]') .
-            '</h1>
-                </div>
             </div>
             
-            <div class="cover-footer" style="position: absolute; bottom: 30px; left: 0; right: 0; text-align: center; width: 100%;">
-                <p style="font-size: 14px; color: #a3a3a3 !important; margin: 0;">' .
-            ($branding->company_name ?? 'Visns Studio CRM') .
-            ' &nbsp;&nbsp;|&nbsp;&nbsp; ' .
-            ($branding->company_info['acn'] ?? 'ACN: 674 383 987') .
+            <!-- Quote title left-aligned in middle vertical area -->
+            <div class="cover-title" style="position: absolute; top: 50%; left: 60px; transform: translateY(-50%); text-align: left; width: calc(100% - 120px); max-width: 1000px; padding: 0; box-sizing: border-box;">
+                <h1 style="font-size: 72px; font-weight: 300; margin: 0; color: #6EE7B7 !important; line-height: 1.2; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); word-wrap: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; letter-spacing: -0.5px;">' .
+            ($proposalData['document_title'] ?? '[Document Title]') .
+            '</h1>
+            </div>
+            
+            <!-- Company details at bottom -->
+            <div class="cover-footer" style="position: absolute; bottom: 40px; left: 60px; text-align: left; z-index: 10;">
+                <p style="font-size: 16px; color: white !important; margin: 0; font-weight: 500; letter-spacing: 0.5px;">' .
+            strtoupper(
+                $branding->company_name ?? 'OMNIA GLOBAL GROUP PTY LTD'
+            ) .
+            ' &nbsp;&nbsp;ACN ' .
+            ($branding->company_info['acn'] ?? '674 383 987') .
             '</p>
             </div>
         </div>';
@@ -620,12 +630,12 @@ class ProposalAssemblyService
             $companyName = $branding->company_name ?? 'Company Logo';
 
             return '
-            <div style="margin: 0 auto; text-align: center;">
+            <div style="text-align: left;">
                 <img src="' .
                 $logoUrl .
                 '" alt="' .
                 $companyName .
-                '" style="max-width: 450px; max-height: 180px; object-fit: contain;" />
+                '" style="max-width: 320px; max-height: 120px; object-fit: contain;" />
             </div>';
         }
 
@@ -634,20 +644,20 @@ class ProposalAssemblyService
             $companyName = $branding->company_name ?? 'Company Logo';
 
             return '
-            <div style="margin: 0 auto; text-align: center;">
+            <div style="text-align: left;">
                 <img src="' .
                 $branding->logo_url .
                 '" alt="' .
                 $companyName .
-                '" style="max-width: 450px; max-height: 180px; object-fit: contain;" />
+                '" style="max-width: 320px; max-height: 120px; object-fit: contain;" />
             </div>';
         }
 
         // Fallback to company name text if no logo available
         $companyName = $branding->company_name ?? 'OmniaGlobal';
         return '
-        <div style="width: 200px; height: 80px; background: white; border-radius: 10px; margin: 0 auto; display: flex; align-items: center; justify-content: center;">
-            <span style="color: #2d6a4f; font-size: 24px; font-weight: bold;">' .
+        <div style="width: 280px; height: 80px; background: rgba(255,255,255,0.95); border-radius: 12px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+            <span style="color: #059669; font-size: 26px; font-weight: bold; letter-spacing: -0.5px;">' .
             $companyName .
             '</span>
         </div>';
@@ -674,7 +684,7 @@ class ProposalAssemblyService
         if (empty($tocItems)) {
             $tocItems = $section['toc_items'] ?? [];
         }
-        
+
         // Check if TOC has meaningful content (not just placeholders)
         $hasRealContent = false;
         foreach ($tocItems as $item) {
@@ -685,15 +695,15 @@ class ProposalAssemblyService
                 break;
             }
         }
-        
+
         // If no real content, skip the TOC entirely to avoid blank page
         if (!$hasRealContent || empty($tocItems)) {
             return '';
         }
 
         $tocHtml = '
-        <div class="table-of-contents" style="page-break-after: always; padding: 20px;">
-            <h1 style="font-size: 32px; font-weight: bold; margin-bottom: 40px; text-align: left;">Contents</h1>
+        <div class="table-of-contents" style="page-break-after: always; padding: 70px 90px;">
+            <h1 style="font-size: 32px; font-weight: bold; margin-bottom: 40px; text-align: left;">{{TOC_TITLE}}</h1>
             <table class="toc-table" style="width: 100%; border-collapse: collapse; margin-top: 40px;">';
 
         foreach ($tocItems as $item) {
@@ -729,6 +739,14 @@ class ProposalAssemblyService
             </table>
         </div>';
 
+        // Replace the placeholder with the actual section title
+        // Use a safe approach to avoid PDF rendering issues
+        $sectionTitle = isset($section['title']) && !empty(trim($section['title'])) 
+            ? trim($section['title'])
+            : 'Contents';
+        
+        $tocHtml = str_replace('{{TOC_TITLE}}', htmlspecialchars($sectionTitle), $tocHtml);
+
         return $tocHtml;
     }
 
@@ -753,7 +771,7 @@ class ProposalAssemblyService
         array $proposalData
     ): string {
         return '
-        <div class="acceptance-section" style="padding: 20px; page-break-after: avoid;">
+        <div class="acceptance-section" style="padding: 30px 40px; page-break-after: avoid;">
             <h1 style="margin-bottom: 30px; color: ' .
             ($branding->colors['primary'] ?? '#000000') .
             ';">' .
@@ -788,7 +806,7 @@ class ProposalAssemblyService
 
         $html =
             '
-    <div class="pricing-section" style="padding: 20px; page-break-inside: avoid;">
+    <div class="pricing-section" style="padding: 30px 40px; page-break-inside: avoid;">
         <h1 style="margin-bottom: 30px; color: #1F2937; font-size: 28px; font-weight: bold;">' .
             $section['title'] .
             '</h1>
@@ -904,8 +922,11 @@ class ProposalAssemblyService
      * @param array $items
      * @return string
      */
-    private function renderItemsTable(string $title, array $items, $branding = null): string
-    {
+    private function renderItemsTable(
+        string $title,
+        array $items,
+        $branding = null
+    ): string {
         // Use branding colors if available, with fallback to neutral
         $colors = $this->getTableColors($branding);
         $headerColor = $colors['header'];
@@ -971,8 +992,10 @@ class ProposalAssemblyService
      * @param array $proposalData
      * @return string
      */
-    private function renderTotalsSection(array $proposalData, $branding = null): string
-    {
+    private function renderTotalsSection(
+        array $proposalData,
+        $branding = null
+    ): string {
         $subtotal = $this->calculateSubtotal($proposalData);
         $discount = $proposalData['discount'] ?? 0;
         $taxRate = 0.1; // 10% GST
@@ -1013,7 +1036,9 @@ class ProposalAssemblyService
             number_format($taxAmount, 2) .
             '</td>
                 </tr>
-                <tr style="background-color: ' . $totalColor . ' !important;">
+                <tr style="background-color: ' .
+            $totalColor .
+            ' !important;">
                     <td style="border: 1px solid #E5E7EB; border-top: 2px solid #D1D5DB; padding: 14px; font-size: 15px; color: white !important; font-weight: bold;">Total:</td>
                     <td style="border: 1px solid #E5E7EB; border-top: 2px solid #D1D5DB; padding: 14px; text-align: right; font-size: 16px; color: white !important; font-weight: bold;">$' .
             number_format($total, 2) .
@@ -1043,7 +1068,7 @@ class ProposalAssemblyService
         }
 
         return '
-        <div class="terms-conditions-section" style="padding: 20px; page-break-inside: avoid;">
+        <div class="terms-conditions-section" style="padding: 30px 40px; page-break-inside: avoid;">
             <h1 style="margin-bottom: 30px; color: ' .
             ($branding->colors['primary'] ?? '#000000') .
             ';">' .
@@ -1079,7 +1104,7 @@ class ProposalAssemblyService
 
         $html =
             '
-        <div class="change-log-section" style="padding: 20px; page-break-after: avoid;">
+        <div class="change-log-section" style="padding: 30px 40px; page-break-after: avoid;">
             <h1 style="margin-bottom: 30px; color: ' .
             ($branding->colors['primary'] ?? '#000000') .
             ';">' .
@@ -1131,7 +1156,7 @@ class ProposalAssemblyService
         $content = $this->replaceVariables($section['content'], $proposalData);
 
         return '
-        <div class="overview-section" style="page-break-before: always; padding: 20px; page-break-inside: avoid;">
+        <div class="overview-section" style="page-break-before: always; padding: 30px 40px; page-break-inside: avoid;">
             <h1 style="margin-bottom: 30px; color: ' .
             ($branding->colors['primary'] ?? '#000000') .
             ';">' .
@@ -1164,7 +1189,7 @@ class ProposalAssemblyService
         $content = $this->enhanceListStyling($content);
 
         return '
-        <div class="payment-terms-section" style="page-break-before: always; padding: 20px; page-break-inside: avoid;">
+        <div class="payment-terms-section" style="page-break-before: always; padding: 30px 40px; page-break-inside: avoid;">
             <h1 style="margin-bottom: 30px; color: ' .
             ($branding->colors['primary'] ?? '#000000') .
             '; font-size: 28px; font-weight: bold;">' .
@@ -1202,7 +1227,7 @@ class ProposalAssemblyService
         $content = $this->removeBorderStyles($content);
 
         return '
-        <div class="agreement-signature-section" style="padding: 20px; page-break-inside: avoid; border: none !important; outline: none !important;">
+        <div class="agreement-signature-section" style="padding: 30px 40px; page-break-inside: avoid; border: none !important; outline: none !important;">
             <h1 style="margin-bottom: 16px; margin-top: 0; color: ' .
             ($branding->colors['primary'] ?? '#000000') .
             ';">' .
@@ -1234,7 +1259,7 @@ class ProposalAssemblyService
 
         // For content sections, don't render the section title - let the dynamic content control its own headings
         return '
-        <div class="content-section" style="padding: 20px; page-break-inside: avoid; page-break-after: avoid;">
+        <div class="content-section" style="padding: 30px 40px; page-break-inside: avoid; page-break-after: avoid;">
             <div class="section-content" style="line-height: 1.5;">
                 ' .
             $content .
@@ -1260,7 +1285,7 @@ class ProposalAssemblyService
         $content = $this->enhanceListStyling($content);
 
         return '
-        <div class="terms-section" style="padding: 20px; page-break-inside: avoid;">
+        <div class="terms-section" style="padding: 30px 40px; page-break-inside: avoid;">
             <h1 style="margin-bottom: 30px; color: ' .
             ($branding->colors['primary'] ?? '#000000') .
             ';">' .
@@ -1297,7 +1322,7 @@ class ProposalAssemblyService
     /**
      * Get intelligent table colors based on branding profile
      * Ensures good readability and contrast
-     * 
+     *
      * @param mixed $branding BrandingProfile or null
      * @return array
      */
@@ -1320,7 +1345,10 @@ class ProposalAssemblyService
         $accent = $brandingColors['accent'] ?? null;
 
         // Use the same color for both header and total for symmetrical design
-        $tableColor = $this->selectReadableTableColor([$primary, $secondary, $accent], $defaultColors['header']);
+        $tableColor = $this->selectReadableTableColor(
+            [$primary, $secondary, $accent],
+            $defaultColors['header']
+        );
 
         return [
             'header' => $tableColor,
@@ -1331,13 +1359,15 @@ class ProposalAssemblyService
     /**
      * Select a readable color for table backgrounds
      * Checks contrast ratio and color brightness
-     * 
+     *
      * @param array $candidateColors
      * @param string $fallback
      * @return string
      */
-    private function selectReadableTableColor(array $candidateColors, string $fallback): string
-    {
+    private function selectReadableTableColor(
+        array $candidateColors,
+        string $fallback
+    ): string {
         foreach ($candidateColors as $color) {
             if (!$color || !$this->isValidHexColor($color)) {
                 continue;
@@ -1360,36 +1390,40 @@ class ProposalAssemblyService
 
     /**
      * Check if a color is suitable for table background with white text
-     * 
+     *
      * @param string $hexColor
      * @return bool
      */
     private function isGoodTableBackgroundColor(string $hexColor): bool
     {
         $rgb = $this->hexToRgb($hexColor);
-        if (!$rgb) return false;
+        if (!$rgb) {
+            return false;
+        }
 
         // Calculate relative luminance
         $luminance = $this->getRelativeLuminance($rgb);
-        
+
         // White text (luminance = 1) on colored background
         // WCAG AA requires contrast ratio of at least 4.5:1 for normal text
         // For table headers, we want at least 3:1 for good readability
         $contrastRatio = (1 + 0.05) / ($luminance + 0.05);
-        
+
         return $contrastRatio >= 3.0;
     }
 
     /**
      * Convert hex color to RGB array
-     * 
+     *
      * @param string $hex
      * @return array|null
      */
     private function hexToRgb(string $hex): ?array
     {
         $hex = ltrim($hex, '#');
-        if (strlen($hex) !== 6) return null;
+        if (strlen($hex) !== 6) {
+            return null;
+        }
 
         return [
             'r' => hexdec(substr($hex, 0, 2)),
@@ -1400,15 +1434,17 @@ class ProposalAssemblyService
 
     /**
      * Calculate relative luminance of an RGB color
-     * 
+     *
      * @param array $rgb
      * @return float
      */
     private function getRelativeLuminance(array $rgb): float
     {
-        $convert = function($value) {
+        $convert = function ($value) {
             $value = $value / 255;
-            return $value <= 0.03928 ? $value / 12.92 : pow(($value + 0.055) / 1.055, 2.4);
+            return $value <= 0.03928
+                ? $value / 12.92
+                : pow(($value + 0.055) / 1.055, 2.4);
         };
 
         $r = $convert($rgb['r']);
@@ -1420,7 +1456,7 @@ class ProposalAssemblyService
 
     /**
      * Darken a hex color by a percentage
-     * 
+     *
      * @param string $hex
      * @param float $percent (0.0 to 1.0)
      * @return string
@@ -1428,7 +1464,9 @@ class ProposalAssemblyService
     private function darkenColor(string $hex, float $percent): string
     {
         $rgb = $this->hexToRgb($hex);
-        if (!$rgb) return $hex;
+        if (!$rgb) {
+            return $hex;
+        }
 
         $rgb['r'] = max(0, $rgb['r'] * (1 - $percent));
         $rgb['g'] = max(0, $rgb['g'] * (1 - $percent));
@@ -1439,7 +1477,7 @@ class ProposalAssemblyService
 
     /**
      * Validate hex color format
-     * 
+     *
      * @param string $hex
      * @return bool
      */
@@ -1500,6 +1538,23 @@ class ProposalAssemblyService
                     margin: 0;
                 }
                 
+                .omnia-cover-page {
+                    margin: 0 !important;
+                    padding: 0 !important;
+                }
+                
+                .acceptance-section, 
+                .pricing-section, 
+                .terms-conditions-section, 
+                .change-log-section, 
+                .overview-section, 
+                .payment-terms-section, 
+                .agreement-signature-section, 
+                .content-section, 
+                .terms-section {
+                    margin: 40px 50px;
+                }
+                
                 body {
                     font-family: ' .
             ($fonts['body'] ?? $cssConstants['font_family']) .
@@ -1550,7 +1605,7 @@ class ProposalAssemblyService
                 h2 {
                     font-size: 20px;
                     color: ' .
-            ($colors['primary'] ?? '#000000') .
+            ($colors['secondary'] ?? '#64748b') .
             ';
                     font-weight: bold;
                     margin-bottom: 14px;
@@ -1560,7 +1615,7 @@ class ProposalAssemblyService
                 h3 {
                     font-size: 18px;
                     color: ' .
-            ($colors['primary'] ?? '#000000') .
+            ($colors['accent'] ?? '#10b981') .
             ';
                     font-weight: bold;
                     margin-bottom: 12px;

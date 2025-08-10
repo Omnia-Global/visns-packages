@@ -1280,6 +1280,23 @@ $options = [
 ];
 ```
 
+### Recent Enhancements (2025)
+
+#### ProposalAssemblyService Improvements
+
+- **Dynamic Section Titles**: Sections now use configurable titles from templates instead of hardcoded values
+- **Professional Page Margins**: Consistent 40px/50px margins for all sections except cover page
+- **Enhanced Table of Contents**: Dynamic title support with robust string handling for PDF compatibility
+- **Branding Color Integration**: Automatic application of branding profile colors (H1=primary, H2=secondary, H3=accent)
+- **PDF Layout Optimization**: Fixed text wrapping, cover page styling, and proper content flow
+
+#### Technical Improvements
+
+- **String Handling**: Robust handling of section titles with proper trimming and fallback logic
+- **PDF Generation**: Enhanced margin system with cover page preservation
+- **Content Assembly**: Improved variable replacement and template processing
+- **Error Prevention**: Safeguards against blank page generation during PDF creation
+
 ### Styling Optimizations
 
 The proposal system includes optimized CSS for PDF rendering:
@@ -1289,9 +1306,31 @@ The proposal system includes optimized CSS for PDF rendering:
 ```css
 /* Optimized font sizes for better space utilization */
 h1 { font-size: 24px; color: #2563eb; }
-h2 { font-size: 20px; color: #2563eb; }
-h3 { font-size: 18px; color: #2563eb; }
+h2 { font-size: 20px; color: #64748b; /* Secondary color */ }
+h3 { font-size: 18px; color: #10b981; /* Accent color */ }
 p, li { font-size: 14px; line-height: 1.5; }
+
+/* Professional margin system */
+@page {
+    margin: 0; /* Cover page has no margins */
+}
+
+.acceptance-section, 
+.pricing-section, 
+.terms-conditions-section, 
+.change-log-section, 
+.overview-section, 
+.payment-terms-section, 
+.agreement-signature-section, 
+.content-section, 
+.terms-section {
+    margin: 40px 50px; /* Professional spacing for all sections except cover */
+}
+
+.omnia-cover-page {
+    margin: 0 !important;
+    padding: 0 !important; /* Preserve cover page full-page design */
+}
 
 /* Header-specific styling */
 .proposal-header {
