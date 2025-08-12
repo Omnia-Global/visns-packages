@@ -1882,9 +1882,23 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 count($value) === 2
             ) {
                 $query->whereNotBetween($columnRef, $value);
-            } elseif (strtolower($operator) === 'null') {
+            } elseif (in_array(strtolower(trim($operator)), [
+                'null', 
+                'is null', 
+                'isnull', 
+                '= null',
+                'equals null'
+            ])) {
                 $query->whereNull($columnRef);
-            } elseif (strtolower($operator) === 'not null') {
+            } elseif (in_array(strtolower(trim($operator)), [
+                'not null', 
+                'is not null', 
+                'isnot null',
+                'isnotnull',
+                '!= null',
+                'not equals null',
+                '<> null'
+            ])) {
                 $query->whereNotNull($columnRef);
             } else {
                 $query->where($columnRef, $operator, $value);
@@ -2019,6 +2033,40 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                             'like',
                             "%$value%"
                         );
+                    } elseif (strtolower($operator) === 'in' && is_array($value)) {
+                        $distinctCountQuery->whereIn($columnRef, $value);
+                    } elseif (strtolower($operator) === 'not in' && is_array($value)) {
+                        $distinctCountQuery->whereNotIn($columnRef, $value);
+                    } elseif (
+                        strtolower($operator) === 'between' &&
+                        is_array($value) &&
+                        count($value) === 2
+                    ) {
+                        $distinctCountQuery->whereBetween($columnRef, $value);
+                    } elseif (
+                        strtolower($operator) === 'not between' &&
+                        is_array($value) &&
+                        count($value) === 2
+                    ) {
+                        $distinctCountQuery->whereNotBetween($columnRef, $value);
+                    } elseif (in_array(strtolower(trim($operator)), [
+                        'null', 
+                        'is null', 
+                        'isnull', 
+                        '= null',
+                        'equals null'
+                    ])) {
+                        $distinctCountQuery->whereNull($columnRef);
+                    } elseif (in_array(strtolower(trim($operator)), [
+                        'not null', 
+                        'is not null', 
+                        'isnot null',
+                        'isnotnull',
+                        '!= null',
+                        'not equals null',
+                        '<> null'
+                    ])) {
+                        $distinctCountQuery->whereNotNull($columnRef);
                     } else {
                         $distinctCountQuery->where(
                             $columnRef,
