@@ -1341,6 +1341,13 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             // Validate request
             $validated = $request->validate([
                 'query' => 'required|array',
+                'query.unique' => 'nullable|array',
+                'query.unique.enabled' => 'nullable|boolean',
+                'query.unique.field' => 'nullable|string',
+                'query.unique.distinct' => 'nullable|boolean',
+                'query.unique.distinctField' => 'nullable|string',
+                'query.excludedRows' => 'nullable|array',
+                'query.excludedRows.*' => 'integer|string',
                 'report_id' => 'nullable|integer',
                 'limit' => 'nullable|integer|min:1|max:1000',
                 'offset' => 'nullable|integer|min:0',
@@ -1433,6 +1440,8 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         $filters = $queryConfig['filters'] ?? [];
         $sorting = $queryConfig['sorting'] ?? [];
         $groupBy = $queryConfig['groupBy'] ?? [];
+        $unique = $queryConfig['unique'] ?? ['enabled' => false];
+        $excludedRows = $queryConfig['excludedRows'] ?? [];
 
         // Validate main table
         if (!$mainTable) {
@@ -1823,10 +1832,31 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             Log::warning(
                 'No columns specified, selecting all columns from main table'
             );
-            $query->select("$mainTable.*");
+            
+            // Apply DISTINCT if unique field is enabled
+            if ($unique['enabled'] && ($unique['distinct'] ?? false)) {
+                $query->select("$mainTable.*")->distinct();
+                Log::info('Applied DISTINCT to query (all columns)', [
+                    'mainTable' => $mainTable,
+                    'uniqueField' => $unique['field'] ?? 'unknown'
+                ]);
+            } else {
+                $query->select("$mainTable.*");
+            }
         } else {
             // Select the specified columns directly on the existing query
-            $query->select($selectColumns);
+            // Apply DISTINCT if unique field is enabled
+            if ($unique['enabled'] && ($unique['distinct'] ?? false) && !empty($unique['field'])) {
+                $query->select($selectColumns)->distinct();
+                Log::info('Applied DISTINCT to query', [
+                    'uniqueField' => $unique['field'],
+                    'distinctField' => $unique['distinctField'] ?? 'N/A',
+                    'columnsCount' => count($selectColumns),
+                    'sqlQuery' => $query->toSql()
+                ]);
+            } else {
+                $query->select($selectColumns);
+            }
 
             // Log the query after selecting columns
         }
@@ -1916,6 +1946,17 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             }
 
             $query->orderBy("$tableName.$columnName", $direction);
+        }
+
+        // Apply row exclusions if specified
+        if (!empty($excludedRows) && is_array($excludedRows)) {
+            // Assume exclusions are based on the main table's primary key 'id'
+            $query->whereNotIn("$mainTable.id", $excludedRows);
+            Log::info('Applied row exclusions to query', [
+                'excludedRowsCount' => count($excludedRows),
+                'excludedRows' => $excludedRows,
+                'mainTable' => $mainTable
+            ]);
         }
 
         // Get the total count before applying limit and offset
