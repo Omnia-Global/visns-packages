@@ -1338,21 +1338,40 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
     public function executeQuery(Request $request)
     {
         try {
-            // Validate request
-            $validated = $request->validate([
-                'query' => 'required|array',
-                'query.unique' => 'nullable|array',
-                'query.unique.enabled' => 'nullable|boolean',
-                'query.unique.field' => 'nullable|string',
-                'query.unique.distinct' => 'nullable|boolean',
-                'query.unique.distinctField' => 'nullable|string',
-                'query.excludedRows' => 'nullable|array',
-                'query.excludedRows.*' => 'integer|string',
-                'report_id' => 'nullable|integer',
-                'limit' => 'nullable|integer|min:1|max:1000',
-                'offset' => 'nullable|integer|min:0',
-                'parameters' => 'nullable|array',
+            // Process the request
+            
+            // Log raw request to debug filter issues
+            Log::info('🔍 [DEBUG] Raw request data:', [
+                'all_data' => $request->all(),
+                'query_keys' => array_keys($request->input('query', [])),
+                'has_filters' => isset($request->input('query', [])['filters']),
+                'filter_count' => count($request->input('query.filters', [])),
+                'raw_filters' => $request->input('query.filters', []),
             ]);
+
+            // Get all request data without strict validation to preserve filters
+            $validated = [
+                'query' => $request->input('query'),
+                'report_id' => $request->input('report_id'),
+                'limit' => $request->input('limit'),
+                'offset' => $request->input('offset'),
+                'parameters' => $request->input('parameters', []),
+            ];
+            
+            // Log what we extracted to debug filter preservation
+            Log::info('🔍 [DEBUG] Extracted data:', [
+                'query_keys' => array_keys($validated['query'] ?? []),
+                'has_filters_in_validated' => isset($validated['query']['filters']),
+                'filter_count_validated' => count($validated['query']['filters'] ?? []),
+                'validated_filters' => $validated['query']['filters'] ?? [],
+            ]);
+            
+            // Basic validation
+            if (empty($validated['query']) || !is_array($validated['query'])) {
+                throw new \Exception('Query parameter is required and must be an array');
+            }
+
+            // Data validated successfully
 
             // Set default limit if not provided
             $limit = $validated['limit'] ?? 100;
@@ -1361,7 +1380,15 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
             // Get the query configuration
             $queryConfig = $validated['query'];
-
+            
+            // Log the final queryConfig before buildAndExecuteQuery
+            Log::info('🔍 [DEBUG] Final queryConfig before buildAndExecuteQuery:', [
+                'queryConfig_keys' => array_keys($queryConfig),
+                'has_filters_final' => isset($queryConfig['filters']),
+                'filter_count_final' => count($queryConfig['filters'] ?? []),
+                'final_filters' => $queryConfig['filters'] ?? [],
+                'unique_config' => $queryConfig['unique'] ?? 'not set',
+            ]);
 
             // If report_id is provided, load the report configuration
             if (isset($validated['report_id'])) {
@@ -1432,6 +1459,8 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         array $parameters = []
     ) {
         // Log the query configuration for debugging
+
+        // Log the query configuration for debugging (removed verbose debugging)
 
         // Extract configuration
         $mainTable = $queryConfig['mainTable'] ?? null;
@@ -1833,29 +1862,70 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 'No columns specified, selecting all columns from main table'
             );
             
-            // Apply DISTINCT if unique field is enabled
-            if ($unique['enabled'] && ($unique['distinct'] ?? false)) {
-                $query->select("$mainTable.*")->distinct();
-                Log::info('Applied DISTINCT to query (all columns)', [
+            // Apply unique field logic if enabled (for all columns case)
+            if ($unique['enabled'] && ($unique['distinct'] ?? false) && !empty($unique['field'])) {
+                // For MySQL compatibility with ONLY_FULL_GROUP_BY, use a subquery approach
+                $uniqueField = $unique['field'];
+                $uniqueColumn = str_replace($mainTable . '.', '', $uniqueField);
+                
+                // Get IDs of records that are the first occurrence of each unique value
+                $subquery = DB::table($mainTable)
+                    ->select(DB::raw("MIN(id) as first_id"))
+                    ->whereNotNull($uniqueColumn)
+                    ->groupBy($uniqueColumn);
+                
+                // Select all columns but only for the first occurrence IDs
+                $query->select("$mainTable.*")
+                      ->whereIn("$mainTable.id", function($query) use ($mainTable, $uniqueColumn) {
+                          $query->select(DB::raw("MIN(id)"))
+                                ->from($mainTable)
+                                ->whereNotNull($uniqueColumn)
+                                ->groupBy($uniqueColumn);
+                      });
+                
+                Log::info('Applied subquery deduplication for unique field (all columns)', [
                     'mainTable' => $mainTable,
-                    'uniqueField' => $unique['field'] ?? 'unknown'
+                    'uniqueField' => $uniqueField,
+                    'sqlQuery' => $query->toSql()
                 ]);
             } else {
                 $query->select("$mainTable.*");
             }
         } else {
             // Select the specified columns directly on the existing query
-            // Apply DISTINCT if unique field is enabled
+            // Apply GROUP BY if unique field is enabled
+            Log::info('🔍 [DEBUG] Code Path 2: Specific columns selected', [
+                'columnsCount' => count($selectColumns),
+                'uniqueEnabled' => $unique['enabled'] ?? false,
+                'uniqueField' => $unique['field'] ?? 'N/A',
+                'uniqueDistinct' => $unique['distinct'] ?? false
+            ]);
+            
             if ($unique['enabled'] && ($unique['distinct'] ?? false) && !empty($unique['field'])) {
-                $query->select($selectColumns)->distinct();
-                Log::info('Applied DISTINCT to query', [
-                    'uniqueField' => $unique['field'],
+                // Use a subquery approach to handle ONLY_FULL_GROUP_BY mode  
+                $uniqueField = $unique['field'];
+                $uniqueColumn = str_replace($mainTable . '.', '', $uniqueField);
+                
+                // Select specified columns but only for the first occurrence IDs
+                $query->select($selectColumns)
+                      ->whereIn("$mainTable.id", function($query) use ($mainTable, $uniqueColumn) {
+                          $query->select(DB::raw("MIN(id)"))
+                                ->from($mainTable)
+                                ->whereNotNull($uniqueColumn)
+                                ->groupBy($uniqueColumn);
+                      });
+                
+                Log::info('✅ Applied subquery deduplication for unique field (Path 2)', [
+                    'uniqueField' => $uniqueField,
                     'distinctField' => $unique['distinctField'] ?? 'N/A',
                     'columnsCount' => count($selectColumns),
                     'sqlQuery' => $query->toSql()
                 ]);
             } else {
                 $query->select($selectColumns);
+                Log::info('❌ No unique field applied (Path 2)', [
+                    'reason' => !$unique['enabled'] ? 'disabled' : (empty($unique['field']) ? 'no field' : 'no distinct flag')
+                ]);
             }
 
             // Log the query after selecting columns
@@ -1930,6 +2000,12 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 '<> null'
             ])) {
                 $query->whereNotNull($columnRef);
+                Log::info('Applied IS NOT NULL filter', [
+                    'column' => $columnRef,
+                    'operator' => $operator,
+                    'originalOperator' => $operator,
+                    'normalizedOperator' => strtolower(trim($operator))
+                ]);
             } else {
                 $query->where($columnRef, $operator, $value);
             }
