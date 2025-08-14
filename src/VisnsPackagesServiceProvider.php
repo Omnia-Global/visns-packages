@@ -21,8 +21,10 @@ use Visnsstudio\VisnsPackages\Controllers\ReportBuilderController;
 use Visnsstudio\VisnsPackages\Controllers\PDFController;
 use Visnsstudio\VisnsPackages\Controllers\ProposalTemplateController;
 use Visnsstudio\VisnsPackages\Controllers\BrandingProfileController;
+use Visnsstudio\VisnsPackages\Controllers\OAuthController;
 use Visnsstudio\VisnsPackages\Middleware\AcceptJson;
 use Visnsstudio\VisnsPackages\Services\FilePathResolver;
+use Visnsstudio\VisnsPackages\Services\OAuthManager;
 
 class VisnsPackagesServiceProvider extends ServiceProvider
 {
@@ -66,10 +68,23 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             return new FilePathResolver();
         });
 
+        // Register OAuth Manager as singleton
+        $this->app->singleton(OAuthManager::class, function ($app) {
+            $manager = new OAuthManager();
+            $this->registerOAuthProviders($manager);
+            return $manager;
+        });
+
         // Merge config
         $this->mergeConfigFrom(
             __DIR__ . '/../config/visns-packages.php',
             'visns-packages'
+        );
+
+        // Merge OAuth providers config
+        $this->mergeConfigFrom(
+            __DIR__ . '/../config/oauth-providers.php',
+            'oauth-providers'
         );
     }
 
@@ -106,6 +121,16 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                 ),
             ],
             'visns-packages-config'
+        );
+
+        // Publish OAuth providers config
+        $this->publishes(
+            [
+                __DIR__ . '/../config/oauth-providers.php' => config_path(
+                    'oauth-providers.php'
+                ),
+            ],
+            'oauth-providers-config'
         );
 
         // Register middleware
@@ -351,6 +376,33 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                                 '/generate-proposal-html',
                                 'generateProposalHTML'
                             );
+                        });
+
+                    // OAuth Integration routes (non-conflicting with Socialite)
+                    Route::prefix('integrations/oauth')
+                        ->controller(OAuthController::class)
+                        ->group(function () {
+                            // Public OAuth routes
+                            Route::get('{provider}/authorize', 'redirectToProvider')
+                                ->name('oauth.authorize');
+                            Route::get('{provider}/callback', 'callback')
+                                ->name('oauth.callback');
+                            
+                            // Protected OAuth API routes (use web auth instead of sanctum)
+                            Route::middleware('auth')->group(function () {
+                                Route::get('providers', 'providers')
+                                    ->name('oauth.providers');
+                                Route::get('{provider}/status', 'status')
+                                    ->name('oauth.status');
+                                Route::post('{provider}/test', 'test')
+                                    ->name('oauth.test');
+                                Route::post('{provider}/preview', 'preview')
+                                    ->name('oauth.preview');
+                                Route::post('{provider}/disconnect', 'disconnect')
+                                    ->name('oauth.disconnect');
+                                Route::post('{provider}/sync', 'sync')
+                                    ->name('oauth.sync');
+                            });
                         });
 
                     Route::controller(AuthController::class)->group(
@@ -618,5 +670,38 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             class_exists(\Laravel\Scout\Searchable::class) &&
             config('scout.driver') === 'meilisearch' &&
             !config('visns-packages.search.force_disable_meilisearch', false);
+    }
+
+    /**
+     * Register OAuth providers with the OAuth manager
+     *
+     * @param OAuthManager $manager
+     * @return void
+     */
+    protected function registerOAuthProviders(OAuthManager $manager): void
+    {
+        $providers = config('oauth-providers', []);
+
+        foreach ($providers as $name => $config) {
+            if (!isset($config['provider_class']) || !($config['enabled'] ?? false)) {
+                continue;
+            }
+
+            $providerClass = $config['provider_class'];
+            
+            if (!class_exists($providerClass)) {
+                continue;
+            }
+
+            try {
+                $providerInstance = new $providerClass($config);
+                $manager->registerProvider($name, $providerInstance);
+            } catch (\Exception $e) {
+                // Log error but don't break the application
+                if (app()->bound('log')) {
+                    app('log')->warning("Failed to register OAuth provider {$name}: " . $e->getMessage());
+                }
+            }
+        }
     }
 }

@@ -80,6 +80,33 @@ class RoleController extends \App\Http\Controllers\Controller
 
         $role->save();
 
+        if ($request->has('permissions')) {
+            $permissions = $request->input('permissions');
+            
+            // Handle new format: array of permission objects
+            if (is_array($permissions) && !empty($permissions) && isset($permissions[0]['id'])) {
+                // Get permission IDs from the array
+                $permissionIds = array_column($permissions, 'id');
+                
+                // Sync permissions: remove all current permissions and add the new ones
+                $role->permissions()->detach();
+                $role->permissions()->attach($permissionIds);
+            } 
+            // Handle old format: permission-{id}: boolean
+            else {
+                foreach ($permissions as $a => $b) {
+                    $permission = Permission::find(
+                        str_replace('permission-', '', $a)
+                    );
+                    if ($b === true) {
+                        $role->givePermissionTo($permission);
+                    } else {
+                        $role->revokePermissionTo($permission);
+                    }
+                }
+            }
+        }
+
         return response()->json([
             'error' => $error,
         ]);
