@@ -1872,7 +1872,7 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
 
         foreach ($manyToManyRelations as $relationship) {
-            if ($request->filled($relationship)) {
+            if ($request->has($relationship)) {
                 $input = $request->input($relationship);
 
                 // Initialize $ids as an empty array to handle the case where $input is not an array of objects or IDs
@@ -1896,30 +1896,30 @@ class DynamicController extends \App\Http\Controllers\Controller
                     } else {
                         $ids = [$input];
                     }
-
-                    // Now we need to sync the relationships, but also check for sort_order
-                    $syncData = [];
-                    $sortOrder = 1; // Start sort_order at 1
-
-                    // Check if the pivot table has a 'sort_order' field
-                    $pivotTable = $resource->$relationship()->getTable(); // Get the pivot table name
-                    $hasSortOrder = Schema::hasColumn(
-                        $pivotTable,
-                        'sort_order'
-                    ); // Check if 'sort_order' column exists
-
-                    foreach ($ids as $id) {
-                        // Only add 'sort_order' if the field exists
-                        if ($hasSortOrder) {
-                            $syncData[$id] = ['sort_order' => $sortOrder++];
-                        } else {
-                            $syncData[$id] = []; // Sync without 'sort_order' if it doesn't exist
-                        }
-                    }
-
-                    // Sync the relationships with or without pivot data (depending on the existence of sort_order)
-                    $resource->$relationship()->sync($syncData);
                 }
+
+                // Now we need to sync the relationships, but also check for sort_order
+                $syncData = [];
+                $sortOrder = 1; // Start sort_order at 1
+
+                // Check if the pivot table has a 'sort_order' field
+                $pivotTable = $resource->$relationship()->getTable(); // Get the pivot table name
+                $hasSortOrder = Schema::hasColumn(
+                    $pivotTable,
+                    'sort_order'
+                ); // Check if 'sort_order' column exists
+
+                foreach ($ids as $id) {
+                    // Only add 'sort_order' if the field exists
+                    if ($hasSortOrder) {
+                        $syncData[$id] = ['sort_order' => $sortOrder++];
+                    } else {
+                        $syncData[$id] = []; // Sync without 'sort_order' if it doesn't exist
+                    }
+                }
+
+                // Always sync the relationships (even with empty array to clear all relationships)
+                $resource->$relationship()->sync($syncData);
             }
         }
 
@@ -2190,7 +2190,7 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
 
         foreach ($manyToManyRelations as $relationship) {
-            if ($request->filled($relationship)) {
+            if ($request->has($relationship)) {
                 $input = $request->input($relationship);
 
                 // Initialize $ids as an empty array to handle the case where $input is not an array of objects or IDs
@@ -2214,10 +2214,10 @@ class DynamicController extends \App\Http\Controllers\Controller
                     } else {
                         $ids = [$input];
                     }
-
-                    // Use sync method to update the many-to-many relationship
-                    $resource->$relationship()->sync($ids);
                 }
+
+                // Always sync the relationship (even with empty array to clear all relationships)
+                $resource->$relationship()->sync($ids);
             }
         }
 
@@ -2422,7 +2422,10 @@ class DynamicController extends \App\Http\Controllers\Controller
             $resource->syncRoles([$request->input('role')]);
         }
 
-        // Check if the model has defined loadable relations
+        // Refresh the model to clear any cached relationships and reload fresh data from database
+        $resource->refresh();
+
+        // Check if the model has defined loadable relations and load them with fresh data
         if (method_exists($this->model, 'loadableRelations')) {
             $resource->load($this->model->loadableRelations());
         }
