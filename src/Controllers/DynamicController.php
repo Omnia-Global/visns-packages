@@ -677,12 +677,30 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     public function show($id)
     {
-        $resource = $this->model::findOrFail($id);
+        // Force a fresh query from the database instead of using cached model
+        $resource = $this->model::where($this->model::make()->getKeyName(), $id)->first();
+        
+        if (!$resource) {
+            abort(404);
+        }
 
+
+        // Clear any existing relationship caches on this model instance
+        $resource->unsetRelation('tags');
+        $resource->unsetRelation('contact_types');
+        $resource->unsetRelation('clients');
+        $resource->unsetRelation('contacts_industries');
+        
         // Check if the model has defined loadable relations
         if (method_exists($this->model, 'loadableRelations')) {
-            $resource->load($this->model->loadableRelations());
+            // Force fresh loading of relationships with no caching
+            $relations = $this->model->loadableRelations();
+            foreach ($relations as $relation) {
+                $resource->unsetRelation($relation);
+            }
+            $resource->load($relations);
         }
+
 
         return response()->json($resource);
     }
@@ -1887,9 +1905,21 @@ class DynamicController extends \App\Http\Controllers\Controller
                         is_array($input[0])
                     ) {
                         $ids = array_map(function ($item) {
-                            // Assuming each item has either 'id' or 'value' key
-                            return $item['id'] ?? $item['value'];
+                            // Handle different data structures more robustly
+                            if (isset($item['id'])) {
+                                return $item['id'];
+                            } elseif (isset($item['value'])) {
+                                return $item['value'];
+                            } else {
+                                // If neither exists, assume the item itself is the ID
+                                return is_array($item) ? null : $item;
+                            }
                         }, $input);
+                        
+                        // Filter out any null values
+                        $ids = array_filter($ids, function($id) {
+                            return $id !== null;
+                        });
                     } elseif (is_array($input)) {
                         // Assuming direct array of IDs
                         $ids = $input;
@@ -2205,9 +2235,21 @@ class DynamicController extends \App\Http\Controllers\Controller
                         is_array($input[0])
                     ) {
                         $ids = array_map(function ($item) {
-                            // Assuming each item has either 'id' or 'value' key
-                            return $item['id'] ?? $item['value'];
+                            // Handle different data structures more robustly
+                            if (isset($item['id'])) {
+                                return $item['id'];
+                            } elseif (isset($item['value'])) {
+                                return $item['value'];
+                            } else {
+                                // If neither exists, assume the item itself is the ID
+                                return is_array($item) ? null : $item;
+                            }
                         }, $input);
+                        
+                        // Filter out any null values
+                        $ids = array_filter($ids, function($id) {
+                            return $id !== null;
+                        });
                     } elseif (is_array($input)) {
                         // Assuming direct array of IDs
                         $ids = $input;
