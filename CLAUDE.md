@@ -500,6 +500,17 @@ Configure proposal generation features:
 # Table data with filtering
 GET /ajax/{model}/table?where[0][id]=name&where[0][value]=John&where[0][operator]=contains
 
+# Table data with selective column loading (prevents memory allocation errors)
+POST /ajax/{model}/table
+{
+  "columns": ["id", "name", "email", "created_at"]
+}
+# Or as comma-separated string
+POST /ajax/{model}/table
+{
+  "columns": "id,name,email,created_at"
+}
+
 # Dropdown data
 POST /ajax/{model}/dropdown
 
@@ -512,6 +523,48 @@ DELETE /ajax/{model}/destroy/{id}
 # Model merging
 POST /ajax/{model}/merge
 ```
+
+### Selective Column Loading Feature
+
+The DynamicController now supports selective column loading to prevent memory allocation errors when dealing with tables containing large JSON/TEXT columns.
+
+**Benefits:**
+- **Memory Efficiency**: Prevents "Out of sort memory" errors by avoiding large columns
+- **Performance**: Faster queries by loading only needed data
+- **Backward Compatible**: Existing code continues to work unchanged
+- **Flexible**: Works with both `table()` and `list()` methods
+
+**Usage Examples:**
+
+```javascript
+// Frontend usage - avoid loading large JSON columns
+fetch('/ajax/visitRequests/table', {
+  method: 'POST',
+  headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({
+    columns: ['id', 'user_id', 'event_date', 'tour_status_id', 'status', 'created_at'],
+    take: 50
+  })
+})
+
+// For tables with many large columns, be selective
+fetch('/ajax/proposals/table', {
+  method: 'POST',
+  headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({
+    columns: 'id,title,status,created_at,updated_at', // Exclude 'content', 'metadata' etc.
+    take: 100
+  })
+})
+```
+
+**Use Cases:**
+1. **Large JSON columns**: Skip columns like `event_detail`, `metadata`, `configuration`, etc.
+2. **Memory-constrained queries**: When dealing with many records
+3. **Performance optimization**: Load only fields needed by the frontend
+4. **Mobile optimization**: Reduce payload size for mobile clients
+
+The feature automatically handles column name validation and supports both array and string input formats.
 
 ### Report Builder API
 

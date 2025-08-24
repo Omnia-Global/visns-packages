@@ -707,12 +707,14 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     public function table(Request $request)
     {
-        $query = $this->initializeQuery();
+        $query = $this->initializeQuery($request);
 
         $this->applyRelationships($query);
         $this->applyCustomOrderAndSearch($query, $request);
         $this->applyFilters($query, $request);
-        return $this->paginateAndRespond($query, $request->input('take', 10));
+        // Skip excluded fields if specific columns were requested
+        $skipExcludeFields = $request->has('columns') && !empty($request->input('columns'));
+        return $this->paginateAndRespond($query, $request->input('take', 10), $skipExcludeFields);
     }
 
     public function list(Request $request)
@@ -725,7 +727,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                 'url' => $request->url()
             ]);
 
-            $query = $this->initializeQuery();
+            $query = $this->initializeQuery($request);
             \Log::info('DynamicController::list() - Query initialized', [
                 'model' => $this->model,
                 'query_sql' => $query->toSql()
@@ -755,7 +757,9 @@ class DynamicController extends \App\Http\Controllers\Controller
 
             // Check if pagination is requested via 'take' parameter
             if ($request->has('take')) {
-                $result = $this->paginateAndRespond($query, $request->input('take'));
+                // Skip excluded fields if specific columns were requested
+                $skipExcludeFields = $request->has('columns') && !empty($request->input('columns'));
+                $result = $this->paginateAndRespond($query, $request->input('take'), $skipExcludeFields);
                 \Log::info('DynamicController::list() - Query executed with pagination', [
                     'model' => $this->model,
                     'result_type' => get_class($result),
@@ -764,7 +768,9 @@ class DynamicController extends \App\Http\Controllers\Controller
                 ]);
             } else {
                 // Backward compatibility: return all records when no 'take' parameter
-                $result = $this->respondWithAll($query);
+                // Skip excluded fields if specific columns were requested
+                $skipExcludeFields = $request->has('columns') && !empty($request->input('columns'));
+                $result = $this->respondWithAll($query, $skipExcludeFields);
                 \Log::info('DynamicController::list() - Query executed without pagination (all records)', [
                     'model' => $this->model,
                     'result_type' => get_class($result),
@@ -789,9 +795,33 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
     }
 
-    protected function initializeQuery()
+    protected function initializeQuery($request = null)
     {
-        return $this->model::query();
+        $query = $this->model::query();
+        
+        // Support selective column loading to prevent memory allocation errors
+        // Particularly useful for tables with large JSON/TEXT columns
+        if ($request && $request->has('columns')) {
+            $columns = $request->input('columns');
+            
+            // Handle different input formats
+            if (is_string($columns)) {
+                // Comma-separated string: "id,name,email"
+                $columns = explode(',', $columns);
+            }
+            
+            if (is_array($columns) && !empty($columns)) {
+                // Clean and validate column names
+                $columns = array_map('trim', $columns);
+                $columns = array_filter($columns); // Remove empty values
+                
+                if (!empty($columns)) {
+                    $query->select($columns);
+                }
+            }
+        }
+        
+        return $query;
     }
 
     protected function applyRelationships($query)
@@ -1428,7 +1458,7 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
     }
 
-    protected function paginateAndRespond($query, $perPage)
+    protected function paginateAndRespond($query, $perPage, $skipExcludeFields = false)
     {
         // Perform pagination
         $paginator = $query->paginate($perPage);
@@ -1436,8 +1466,8 @@ class DynamicController extends \App\Http\Controllers\Controller
         // Get the data from the paginator
         $data = $paginator->getCollection();
 
-        // Check if the model has excludedFields method
-        if (method_exists($this->model, 'excludedFields')) {
+        // Check if the model has excludedFields method and we should apply exclusions
+        if (!$skipExcludeFields && method_exists($this->model, 'excludedFields')) {
             $excludedFields = $this->model->excludedFields();
 
             // Loop through the data and remove the excluded fields
@@ -1464,7 +1494,7 @@ class DynamicController extends \App\Http\Controllers\Controller
         return response()->json($response, 200);
     }
 
-    protected function respondWithAll($query)
+    protected function respondWithAll($query, $skipExcludeFields = false)
     {
         try {
             \Log::info('DynamicController::respondWithAll() started', [
@@ -1480,8 +1510,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                 'memory_usage' => memory_get_usage(true)
             ]);
 
-            // Check if the model has excludedFields method
-            if (method_exists($this->model, 'excludedFields')) {
+            // Check if the model has excludedFields method and we should apply exclusions
+            if (!$skipExcludeFields && method_exists($this->model, 'excludedFields')) {
                 $excludedFields = $this->model->excludedFields();
                 \Log::info('DynamicController::respondWithAll() - Applying excluded fields', [
                     'model' => $this->model,
