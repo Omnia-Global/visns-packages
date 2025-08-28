@@ -39,7 +39,7 @@ class AuthController extends \App\Http\Controllers\Controller
             ]);
 
             if (env('APP_ENV') == 'production') {
-                $to = $request->only('email');
+                $to = $request->email;
             } else {
                 $to = env('MAIL_TO_DEV');
             }
