@@ -1626,27 +1626,40 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 $prevTargetTable = $prevJoin['targetTable'] ?? null;
 
                 // If the previous join's target table is already joined, it might be our source
+                // BUT only if the main table doesn't have the source column
                 if (in_array($prevTargetTable, $joinedTables)) {
-                    // Check if the column names make sense for a relationship
+                    // First check if the main table has the source column - if so, prefer main table
+                    $mainTableHasSourceColumn = false;
                     if (
-                        $sourceColumn === 'id' &&
-                        preg_match('/_id$/', $targetColumn)
+                        isset($tableColumns[$mainTable]) &&
+                        in_array($sourceColumn, $tableColumns[$mainTable])
                     ) {
-                        // This looks like a foreign key relationship from prev target to current target
-                        $sourceTable = $prevTargetTable;
-                    } elseif (
-                        preg_match('/_id$/', $sourceColumn) &&
-                        $targetColumn === 'id'
-                    ) {
-                        // This looks like a foreign key relationship from current target to prev target
-                        $sourceTable = $prevTargetTable;
+                        $mainTableHasSourceColumn = true;
                     }
-                    // If the previous target table has the source column, it's likely our source
-                    elseif (
-                        isset($tableColumns[$prevTargetTable]) &&
-                        in_array($sourceColumn, $tableColumns[$prevTargetTable])
-                    ) {
-                        $sourceTable = $prevTargetTable;
+                    
+                    // Only use previous table as source if main table doesn't have the column
+                    if (!$mainTableHasSourceColumn) {
+                        // Check if the column names make sense for a relationship
+                        if (
+                            $sourceColumn === 'id' &&
+                            preg_match('/_id$/', $targetColumn)
+                        ) {
+                            // This looks like a foreign key relationship from prev target to current target
+                            $sourceTable = $prevTargetTable;
+                        } elseif (
+                            preg_match('/_id$/', $sourceColumn) &&
+                            $targetColumn === 'id'
+                        ) {
+                            // This looks like a foreign key relationship from current target to prev target
+                            $sourceTable = $prevTargetTable;
+                        }
+                        // If the previous target table has the source column, it's likely our source
+                        elseif (
+                            isset($tableColumns[$prevTargetTable]) &&
+                            in_array($sourceColumn, $tableColumns[$prevTargetTable])
+                        ) {
+                            $sourceTable = $prevTargetTable;
+                        }
                     }
                     // If the target table has a column that references the previous target
                     elseif (isset($tableColumns[$targetTable])) {
