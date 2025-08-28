@@ -530,6 +530,8 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     ];
                 } elseif ($relationship['type'] === 'many_to_many') {
                     // Many-to-many relationship through a pivot table
+                    // Automatically include both the pivot table join AND the end table join
+                    
                     // First join from main table to pivot table
                     $suggestedJoins[] = [
                         'sourceTable' => $relationship['source_table'],
@@ -537,17 +539,18 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                         'targetTable' => $relationship['pivot_table'],
                         'targetColumn' => $relationship['pivot_source_column'],
                         'joinType' => $relationship['join_type'],
-                        'description' => "Join from {$relationship['source_table']} to pivot table {$relationship['pivot_table']}",
+                        'description' => "Connect to {$relationship['target_table']} (including relationship details)",
                         'confidence' => $relationship['confidence'],
-                        'isFirstPartOfManyToMany' => true,
+                        'isPivotRelationship' => true,
+                        'endTable' => $relationship['target_table'],
+                        'autoIncludeEndTable' => true,
                         'secondJoin' => [
                             'sourceTable' => $relationship['pivot_table'],
-                            'sourceColumn' =>
-                                $relationship['pivot_target_column'],
+                            'sourceColumn' => $relationship['pivot_target_column'],
                             'targetTable' => $relationship['target_table'],
                             'targetColumn' => $relationship['target_column'],
                             'joinType' => $relationship['join_type'],
-                            'description' => "Join from pivot table {$relationship['pivot_table']} to {$relationship['target_table']}",
+                            'description' => "Auto-included: {$relationship['target_table']} details",
                             'confidence' => $relationship['confidence'],
                         ],
                     ];
@@ -704,61 +707,52 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 }
 
                 // Look for pivot tables (many-to-many relationships)
-                // Format: table1_table2 or table2_table1
+                // Format: table1_table2 or table2_table1, also handle mixed singular/plural forms
                 $pivotPattern1 = $tableName . '_' . $otherTable;
                 $pivotPattern2 = $otherTable . '_' . $tableName;
+                
+                // More robust singularization for common patterns
+                $otherTableSingular = $otherTable;
+                if (str_ends_with($otherTable, 'ies')) {
+                    $otherTableSingular = substr($otherTable, 0, -3) . 'y';
+                } elseif (str_ends_with($otherTable, 's') && !str_ends_with($otherTable, 'ss')) {
+                    $otherTableSingular = substr($otherTable, 0, -1);
+                }
+                
+                // Also check for singular forms: lead_facility, client_agreement, etc.
+                $pivotPattern3 = $singularTableName . '_' . $otherTableSingular;
+                $pivotPattern4 = $otherTableSingular . '_' . $singularTableName;
 
-                if (in_array($pivotPattern1, $allTables)) {
-                    // This is likely a pivot table
-                    $pivotTable = $pivotPattern1;
-                    $pivotColumns = Schema::getColumnListing($pivotTable);
+                $possiblePivotTables = [$pivotPattern1, $pivotPattern2, $pivotPattern3, $pivotPattern4];
 
-                    $fk1 = $singularTableName . '_id';
-                    $fk2 = rtrim($otherTable, 's') . '_id';
+                foreach ($possiblePivotTables as $pivotPattern) {
+                    if (in_array($pivotPattern, $allTables)) {
+                        // This is likely a pivot table
+                        $pivotTable = $pivotPattern;
+                        $pivotColumns = Schema::getColumnListing($pivotTable);
 
-                    if (
-                        in_array($fk1, $pivotColumns) &&
-                        in_array($fk2, $pivotColumns)
-                    ) {
-                        $relationships[] = [
-                            'source_table' => $tableName,
-                            'source_column' => 'id',
-                            'pivot_table' => $pivotTable,
-                            'pivot_source_column' => $fk1,
-                            'pivot_target_column' => $fk2,
-                            'target_table' => $otherTable,
-                            'target_column' => 'id',
-                            'type' => 'many_to_many',
-                            'join_type' => 'LEFT JOIN',
-                            'description' => "$tableName has many $otherTable through $pivotTable",
-                            'confidence' => 'medium',
-                        ];
-                    }
-                } elseif (in_array($pivotPattern2, $allTables)) {
-                    // This is likely a pivot table
-                    $pivotTable = $pivotPattern2;
-                    $pivotColumns = Schema::getColumnListing($pivotTable);
+                        $fk1 = $singularTableName . '_id';
+                        $fk2 = $otherTableSingular . '_id';
 
-                    $fk1 = $singularTableName . '_id';
-                    $fk2 = rtrim($otherTable, 's') . '_id';
-
-                    if (
-                        in_array($fk1, $pivotColumns) &&
-                        in_array($fk2, $pivotColumns)
-                    ) {
-                        $relationships[] = [
-                            'source_table' => $tableName,
-                            'source_column' => 'id',
-                            'pivot_table' => $pivotTable,
-                            'pivot_source_column' => $fk1,
-                            'pivot_target_column' => $fk2,
-                            'target_table' => $otherTable,
-                            'target_column' => 'id',
-                            'type' => 'many_to_many',
-                            'join_type' => 'LEFT JOIN',
-                            'description' => "$tableName has many $otherTable through $pivotTable",
-                            'confidence' => 'medium',
-                        ];
+                        if (
+                            in_array($fk1, $pivotColumns) &&
+                            in_array($fk2, $pivotColumns)
+                        ) {
+                            $relationships[] = [
+                                'source_table' => $tableName,
+                                'source_column' => 'id',
+                                'pivot_table' => $pivotTable,
+                                'pivot_source_column' => $fk1,
+                                'pivot_target_column' => $fk2,
+                                'target_table' => $otherTable,
+                                'target_column' => 'id',
+                                'type' => 'many_to_many',
+                                'join_type' => 'LEFT JOIN',
+                                'description' => "$tableName has many $otherTable through $pivotTable",
+                                'confidence' => 'medium',
+                            ];
+                            break; // Found one, no need to check other patterns
+                        }
                     }
                 }
             }
