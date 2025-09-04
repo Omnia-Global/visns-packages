@@ -678,7 +678,7 @@ class DynamicController extends \App\Http\Controllers\Controller
     public function show($id)
     {
         // Force a fresh query from the database instead of using cached model
-        $resource = $this->model::where($this->model::make()->getKeyName(), $id)->first();
+        $resource = $this->model::where((new $this->model)->getKeyName(), $id)->first();
         
         if (!$resource) {
             abort(404);
