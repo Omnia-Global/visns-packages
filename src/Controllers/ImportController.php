@@ -24,11 +24,36 @@ class ImportController extends \App\Http\Controllers\Controller
             ]);
 
             $file = $request->file('file');
+
+            // Debug logging
+            Log::info('File upload attempt', [
+                'has_file' => $file !== null,
+                'original_name' => $file ? $file->getClientOriginalName() : null,
+                'mime_type' => $file ? $file->getMimeType() : null,
+                'size' => $file ? $file->getSize() : null,
+                'temp_path' => $file ? $file->getRealPath() : null,
+            ]);
+
             $extension = $file->getClientOriginalExtension();
-            
-            // Store file temporarily
-            $tempPath = $file->storeAs('temp/imports', uniqid() . '.' . $extension);
-            $fullPath = storage_path('app/' . $tempPath);
+
+            // Ensure directory exists
+            $importDir = storage_path('app/temp/imports');
+            if (!is_dir($importDir)) {
+                mkdir($importDir, 0775, true);
+            }
+
+            // RoadRunner compatibility: manually move the file instead of using storeAs
+            $filename = uniqid() . '.' . $extension;
+            $fullPath = $importDir . '/' . $filename;
+
+            // Move uploaded file
+            $file->move($importDir, $filename);
+
+            Log::info('File stored', [
+                'filename' => $filename,
+                'full_path' => $fullPath,
+                'file_exists' => file_exists($fullPath)
+            ]);
 
             $data = $this->parseFileContent($fullPath, $extension);
             
@@ -57,19 +82,28 @@ class ImportController extends \App\Http\Controllers\Controller
         try {
             $request->validate([
                 'file' => 'required|file',
-                'mapping' => 'required|array',
-                'model_config' => 'required|array'
+                'mapping' => 'required',
+                'model_config' => 'required'
             ]);
 
             $file = $request->file('file');
-            $mapping = $request->input('mapping');
-            $modelConfig = $request->input('model_config');
+            $mapping = json_decode($request->input('mapping'), true);
+            $modelConfig = json_decode($request->input('model_config'), true);
             
             // Parse file again
             $extension = $file->getClientOriginalExtension();
-            $tempPath = $file->storeAs('temp/imports', uniqid() . '.' . $extension);
-            $fullPath = storage_path('app/' . $tempPath);
-            
+
+            // Ensure directory exists
+            $importDir = storage_path('app/temp/imports');
+            if (!is_dir($importDir)) {
+                mkdir($importDir, 0775, true);
+            }
+
+            // RoadRunner compatibility: manually move the file instead of using storeAs
+            $filename = uniqid() . '.' . $extension;
+            $fullPath = $importDir . '/' . $filename;
+            $file->move($importDir, $filename);
+
             $fileData = $this->parseFileContent($fullPath, $extension);
             unlink($fullPath);
 
@@ -100,25 +134,34 @@ class ImportController extends \App\Http\Controllers\Controller
         try {
             $request->validate([
                 'file' => 'required|file',
-                'mapping' => 'required|array',
-                'model_config' => 'required|array',
+                'mapping' => 'required',
+                'model_config' => 'required',
                 'target_model' => 'required|string',
                 'parent_id' => 'nullable|integer',
                 'relation_key' => 'nullable|string'
             ]);
 
             $file = $request->file('file');
-            $mapping = $request->input('mapping');
-            $modelConfig = $request->input('model_config');
+            $mapping = json_decode($request->input('mapping'), true);
+            $modelConfig = json_decode($request->input('model_config'), true);
             $targetModel = $request->input('target_model');
             $parentId = $request->input('parent_id');
             $relationKey = $request->input('relation_key');
 
             // Parse file
             $extension = $file->getClientOriginalExtension();
-            $tempPath = $file->storeAs('temp/imports', uniqid() . '.' . $extension);
-            $fullPath = storage_path('app/' . $tempPath);
-            
+
+            // Ensure directory exists
+            $importDir = storage_path('app/temp/imports');
+            if (!is_dir($importDir)) {
+                mkdir($importDir, 0775, true);
+            }
+
+            // RoadRunner compatibility: manually move the file instead of using storeAs
+            $filename = uniqid() . '.' . $extension;
+            $fullPath = $importDir . '/' . $filename;
+            $file->move($importDir, $filename);
+
             $fileData = $this->parseFileContent($fullPath, $extension);
             unlink($fullPath);
 
@@ -157,7 +200,7 @@ class ImportController extends \App\Http\Controllers\Controller
     /**
      * Parse file content based on extension
      */
-    private function parseFileContent($filePath, $extension)
+    protected function parseFileContent($filePath, $extension)
     {
         if ($extension === 'csv') {
             return $this->parseCsvFile($filePath);
@@ -176,8 +219,8 @@ class ImportController extends \App\Http\Controllers\Controller
         
         if (($handle = fopen($filePath, "r")) !== FALSE) {
             $rowIndex = 0;
-            
-            while (($row = fgetcsv($handle)) !== FALSE) {
+
+            while (($row = fgetcsv($handle, 0, ',', '"', '\\')) !== FALSE) {
                 if ($rowIndex === 0) {
                     $headers = array_map('trim', $row);
                 } else {
@@ -300,7 +343,7 @@ class ImportController extends \App\Http\Controllers\Controller
     /**
      * Sanitize and format values based on field type
      */
-    private function sanitizeValue($value, $fieldName)
+    protected function sanitizeValue($value, $fieldName)
     {
         $value = trim($value);
         
@@ -329,7 +372,7 @@ class ImportController extends \App\Http\Controllers\Controller
     /**
      * Validate a mapped row against model config
      */
-    private function validateMappedRow($row, $modelConfig)
+    protected function validateMappedRow($row, $modelConfig)
     {
         $rules = [];
         $errors = [];
