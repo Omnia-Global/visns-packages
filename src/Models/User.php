@@ -142,8 +142,37 @@ class User extends Authenticatable implements Auditable
                             ? env('VISNS_COMPONENT_TINY_MCE_API_KEY')
                             : null,
                 ],
+                'rows_per_page' => $this->getRowsPerPageFromAttributes($attributes),
             ]
         );
+    }
+
+    /**
+     * Get rows per page from attributes.
+     * Helper method for the settings attribute.
+     *
+     * @param array $attributes
+     * @return int
+     */
+    protected function getRowsPerPageFromAttributes(array $attributes): int
+    {
+        // Check direct column first
+        if (isset($attributes['rows_per_page']) && $attributes['rows_per_page'] !== null) {
+            return (int) $attributes['rows_per_page'];
+        }
+
+        // Fall back to dashboard_settings if available
+        if (isset($attributes['dashboard_settings'])) {
+            $settings = is_string($attributes['dashboard_settings'])
+                ? json_decode($attributes['dashboard_settings'], true)
+                : $attributes['dashboard_settings'];
+
+            if (isset($settings['rows_per_page'])) {
+                return (int) $settings['rows_per_page'];
+            }
+        }
+
+        return 25; // Default value
     }
 
 
