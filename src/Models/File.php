@@ -27,7 +27,17 @@ class File extends Model implements Auditable
         'file_size',
         'file_title',
         'file_description',
+        'category_type',
+        'subcategory',
         'sort_order',
+        'is_public',
+    ];
+
+    protected $casts = [
+        'file_size' => 'integer',
+        'sort_order' => 'integer',
+        'is_public' => 'boolean',
+        'category_type' => 'string',
     ];
 
     protected $appends = ['file_url', 'file_full_path', 'file_exists'];
