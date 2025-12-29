@@ -123,6 +123,24 @@ class File extends Model implements Auditable
         return $this->morphTo();
     }
 
+    /**
+     * Get mileage logs associated with this file (polymorphic relationship)
+     * This enables eager loading to avoid N+1 queries when loading images with mileage data
+     */
+    public function mileageLogs()
+    {
+        // Dynamically resolve the mileage log model class
+        $mileageLogClass = 'App\\Models\\VehicleMileageLog';
+
+        if (class_exists($mileageLogClass)) {
+            return $this->morphMany($mileageLogClass, 'mileageable');
+        }
+
+        // Return an empty relationship if the model doesn't exist
+        return $this->morphMany(\Illuminate\Database\Eloquent\Model::class, 'mileageable')
+            ->whereRaw('1 = 0');
+    }
+
 
     protected function fileExists(): Attribute
     {
