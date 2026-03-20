@@ -15,6 +15,14 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
     protected $folder;
     protected $original;
 
+    /**
+     * Fields added by S3/Vapor file uploads that should not be stored as data fields.
+     */
+    private static $fileMetadataFields = [
+        'uuid', 'bucket', 'filename', 'filesize',
+        'extension', 'file_relationship', 'fileable_field',
+    ];
+
     public function __construct(Request $request)
     {
         // Get the current path from the request
@@ -130,7 +138,7 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
             return response()->json(["error" => "Data not found"], 404);
         }
 
-        return response()->json($data, 200);
+        return response()->json($this->resolveFileUrlsForItem($data), 200);
     }
 
     public function jsonTable(Request $request)
@@ -159,7 +167,7 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
             $item = $this->model->find($id);
 
             if ($item && !is_null($item->{$dataKey})) {
-                $data = $item->{$dataKey};
+                $data = $this->resolveFileUrls($item->{$dataKey});
             }
         }
 
@@ -174,7 +182,12 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
 
     public function jsonStore(Request $request)
     {
-        $validator = Validator::make($request->all(), [
+        $jsonKey = $this->resolveJsonKey($request);
+
+        $validator = Validator::make([
+            'dataId' => $request->input('dataId'),
+            'key' => $jsonKey,
+        ], [
             "dataId" => "required|exists:{$this->model->getTable()},id",
             "key" => "required|string",
         ]);
@@ -186,13 +199,18 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
         $item = $this->model->find($request->input("dataId"));
 
         // Fetch the data field dynamically based on the provided key
-        $data = $item->{$request->input("key")} ?? [];
+        $data = $item->{$jsonKey} ?? [];
 
         // Create a new data object
         $dataObj = $this->createOrUpdateDataObj($request, $data);
 
+        // Handle file upload if present
+        if ($request->has('uuid') && $request->has('file_relationship')) {
+            $this->processFileUpload($request, $dataObj);
+        }
+
         // Append the new data object to the existing data
-        $item->{$request->input("key")} = array_merge($data, [$dataObj]);
+        $item->{$jsonKey} = array_merge($data, [$dataObj]);
 
         // Save the updated item
         $item->save();
@@ -202,7 +220,13 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
 
     public function jsonUpdate(Request $request)
     {
-        $validator = Validator::make($request->all(), [
+        $jsonKey = $this->resolveJsonKey($request);
+
+        $validator = Validator::make([
+            'dataId' => $request->input('dataId'),
+            'key' => $jsonKey,
+            'id' => $request->input('id'),
+        ], [
             "dataId" => "required|exists:{$this->model->getTable()},id",
             "key" => "required|string",
             "id" => "required|integer", // Required for updating the specific entry
@@ -215,7 +239,7 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
         $item = $this->model->find($request->input("dataId"));
 
         // Fetch the data field dynamically based on the provided key
-        $data = $item->{$request->input("key")} ?? [];
+        $data = $item->{$jsonKey} ?? [];
 
         // Find the index of the existing item to update using 'id'
         $index = collect($data)->search(function ($dataItem) use ($request) {
@@ -229,11 +253,61 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
         // Update the data object at the found index
         $data[$index] = $this->createOrUpdateDataObj($request, $data, $index);
 
+        // Handle file upload if present
+        if ($request->has('uuid') && $request->has('file_relationship')) {
+            $this->processFileUpload($request, $data[$index]);
+        }
+
         // Save the updated data array back to the model's key
-        $item->{$request->input("key")} = $data;
+        $item->{$jsonKey} = $data;
         $item->save();
 
         return response()->json(["error" => ""], 200);
+    }
+
+    /**
+     * Resolve the JSON column key from the request.
+     * When a file upload is present, the S3 'key' field overwrites the form's
+     * hidden 'key' field. Fall back to '_jsonKey' in that case.
+     */
+    private function resolveJsonKey(Request $request)
+    {
+        if ($request->filled('_jsonKey')) {
+            return $request->input('_jsonKey');
+        }
+
+        return $request->input('key');
+    }
+
+    /**
+     * Process a file upload from S3/Vapor and store the reference
+     * in the data object under the file_relationship field name.
+     */
+    private function processFileUpload(Request $request, &$dataObj)
+    {
+        $fileRelationship = $request->input('file_relationship');
+        $s3Key = $request->input('key');
+
+        if (!$fileRelationship || !is_string($s3Key) || !str_starts_with($s3Key, 'tmp/')) {
+            return;
+        }
+
+        $folder = Str::snake(class_basename($this->model));
+        $uuid = $request->input('uuid');
+        $filename = $request->input('filename');
+        $permanentPath = "{$folder}/{$uuid}/{$filename}";
+        // Copy from S3 temp to permanent storage
+        if (Storage::exists($s3Key)) {
+            Storage::copy($s3Key, $permanentPath);
+        }
+
+        // Store file reference in the data object under the relationship field
+        $dataObj[$fileRelationship] = [
+            'file_path' => $permanentPath,
+            'file_name' => $filename,
+            'file_extension' => $request->input('extension'),
+            'file_size' => $request->input('filesize'),
+        ];
     }
 
     private function createOrUpdateDataObj(
@@ -251,8 +325,14 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
             $dataObj = &$existingData[$index];
         }
 
+        // Exclude internal fields and file upload metadata from the data object
+        $excludeFields = array_merge(
+            ["dataId", "key", "id", "_jsonKey"],
+            self::$fileMetadataFields
+        );
+
         // Add/update fields dynamically based on request data
-        $fields = $request->except(["dataId", "key", "id"]);
+        $fields = $request->except($excludeFields);
         foreach ($fields as $field => $value) {
             $dataObj[$field] = $value;
         }
@@ -281,6 +361,33 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
 
         // Append the file info to the files array in dataObj
         $dataObj["files"][] = $fileInfo;
+    }
+
+    /**
+     * Generate temporary URLs for file references in an array of data items.
+     */
+    private function resolveFileUrls($data)
+    {
+        return array_map(function ($item) {
+            return $this->resolveFileUrlsForItem($item);
+        }, $data);
+    }
+
+    /**
+     * Generate temporary URLs for any nested file reference in a single data item.
+     * Looks for objects with 'file_path' and adds a 'file_url' with a presigned URL.
+     */
+    private function resolveFileUrlsForItem($item)
+    {
+        foreach ($item as $key => $value) {
+            if (is_array($value) && isset($value['file_path']) && Storage::exists($value['file_path'])) {
+                $item[$key]['file_url'] = Storage::temporaryUrl(
+                    $value['file_path'],
+                    now()->addMinutes(60)
+                );
+            }
+        }
+        return $item;
     }
 
     public function jsonDelete(Request $request)
