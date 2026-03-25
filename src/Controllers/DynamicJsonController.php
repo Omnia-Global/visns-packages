@@ -21,6 +21,7 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
     private static $fileMetadataFields = [
         'uuid', 'bucket', 'filename', 'filesize',
         'extension', 'file_relationship', 'fileable_field',
+        'uploadedFiles', 'existingFiles', '_method',
     ];
 
     public function __construct(Request $request)
@@ -204,10 +205,8 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
         // Create a new data object
         $dataObj = $this->createOrUpdateDataObj($request, $data);
 
-        // Handle file upload if present
-        if ($request->has('uuid') && $request->has('file_relationship')) {
-            $this->processFileUpload($request, $dataObj);
-        }
+        // Handle file uploads
+        $this->processAllFileUploads($request, $dataObj);
 
         // Append the new data object to the existing data
         $item->{$jsonKey} = array_merge($data, [$dataObj]);
@@ -253,10 +252,8 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
         // Update the data object at the found index
         $data[$index] = $this->createOrUpdateDataObj($request, $data, $index);
 
-        // Handle file upload if present
-        if ($request->has('uuid') && $request->has('file_relationship')) {
-            $this->processFileUpload($request, $data[$index]);
-        }
+        // Handle file uploads
+        $this->processAllFileUploads($request, $data[$index]);
 
         // Save the updated data array back to the model's key
         $item->{$jsonKey} = $data;
@@ -280,34 +277,86 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
     }
 
     /**
-     * Process a file upload from S3/Vapor and store the reference
-     * in the data object under the file_relationship field name.
+     * Process all file uploads (single and multi-file) from S3/Vapor.
+     * Handles both `uploadedFiles` array and single uuid/key uploads.
+     * Supports `existingFiles` to preserve/remove files from frontend.
      */
-    private function processFileUpload(Request $request, &$dataObj)
+    private function processAllFileUploads(Request $request, &$dataObj)
     {
-        $fileRelationship = $request->input('file_relationship');
-        $s3Key = $request->input('key');
-
-        if (!$fileRelationship || !is_string($s3Key) || !str_starts_with($s3Key, 'tmp/')) {
-            return;
-        }
-
+        $fileRelationship = $request->input('file_relationship') ?? 'files';
         $folder = Str::snake(class_basename($this->model));
-        $uuid = $request->input('uuid');
-        $filename = $request->input('filename');
-        $permanentPath = "{$folder}/{$uuid}/{$filename}";
-        // Copy from S3 temp to permanent storage
-        if (Storage::exists($s3Key)) {
-            Storage::copy($s3Key, $permanentPath);
+
+        // Determine base files: use existingFiles from frontend (handles deletion),
+        // otherwise preserve existing files in the data object
+        if ($request->has('existingFiles') && is_array($request->input('existingFiles'))) {
+            $baseFiles = array_values(array_filter($request->input('existingFiles'), function ($f) {
+                return is_array($f) && !empty($f) && isset($f['file_name']);
+            }));
+            $dataObj[$fileRelationship] = $baseFiles;
+        } else {
+            // Clean up existing files array (remove empty/invalid entries like [[]])
+            if (isset($dataObj[$fileRelationship]) && is_array($dataObj[$fileRelationship])) {
+                $dataObj[$fileRelationship] = array_values(array_filter($dataObj[$fileRelationship], function ($f) {
+                    return is_array($f) && !empty($f) && isset($f['file_name']);
+                }));
+            }
         }
 
-        // Store file reference in the data object under the relationship field
-        $dataObj[$fileRelationship] = [
-            'file_path' => $permanentPath,
-            'file_name' => $filename,
-            'file_extension' => $request->input('extension'),
-            'file_size' => $request->input('filesize'),
-        ];
+        // Ensure files field is an array
+        if (!isset($dataObj[$fileRelationship]) || !is_array($dataObj[$fileRelationship])) {
+            $dataObj[$fileRelationship] = [];
+        }
+
+        // Handle multi-file uploads (uploadedFiles array from Vapor)
+        if ($request->filled('uploadedFiles') && is_array($request->input('uploadedFiles'))) {
+            foreach ($request->input('uploadedFiles') as $file) {
+                $uuid = $file['uuid'] ?? uniqid();
+                $filename = $file['filename'] ?? 'unknown';
+                $s3Key = $file['key'] ?? '';
+                $permanentPath = "{$folder}/{$uuid}/{$filename}";
+
+                try {
+                    if ($s3Key && Storage::exists($s3Key)) {
+                        Storage::copy($s3Key, $permanentPath);
+                    }
+                } catch (\Exception $e) {
+                    \Log::warning("DynamicJsonController file copy failed: {$e->getMessage()}");
+                    continue;
+                }
+
+                $dataObj[$fileRelationship][] = [
+                    'file_path' => $permanentPath,
+                    'file_name' => $filename,
+                    'file_extension' => $file['extension'] ?? '',
+                    'file_size' => $file['filesize'] ?? 0,
+                ];
+            }
+        }
+        // Handle single file upload (uuid/key at request level)
+        elseif ($request->has('uuid') && $request->has('file_relationship')) {
+            $s3Key = $request->input('key');
+            if (is_string($s3Key) && str_starts_with($s3Key, 'tmp/')) {
+                $uuid = $request->input('uuid');
+                $filename = $request->input('filename');
+                $permanentPath = "{$folder}/{$uuid}/{$filename}";
+
+                try {
+                    if (Storage::exists($s3Key)) {
+                        Storage::copy($s3Key, $permanentPath);
+                    }
+                } catch (\Exception $e) {
+                    \Log::warning("DynamicJsonController file copy failed: {$e->getMessage()}");
+                    return;
+                }
+
+                $dataObj[$fileRelationship][] = [
+                    'file_path' => $permanentPath,
+                    'file_name' => $filename,
+                    'file_extension' => $request->input('extension'),
+                    'file_size' => $request->input('filesize'),
+                ];
+            }
+        }
     }
 
     private function createOrUpdateDataObj(
@@ -376,15 +425,30 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
     /**
      * Generate temporary URLs for any nested file reference in a single data item.
      * Looks for objects with 'file_path' and adds a 'file_url' with a presigned URL.
+     * Handles both single file objects and arrays of file objects.
      */
     private function resolveFileUrlsForItem($item)
     {
         foreach ($item as $key => $value) {
-            if (is_array($value) && isset($value['file_path']) && Storage::exists($value['file_path'])) {
-                $item[$key]['file_url'] = Storage::temporaryUrl(
-                    $value['file_path'],
-                    now()->addMinutes(60)
-                );
+            if (is_array($value)) {
+                // Single file object: {file_path: '...', file_name: '...'}
+                if (isset($value['file_path']) && Storage::exists($value['file_path'])) {
+                    $item[$key]['file_url'] = Storage::temporaryUrl(
+                        $value['file_path'],
+                        now()->addMinutes(60)
+                    );
+                }
+                // Array of file objects: [{file_path: '...', ...}, ...]
+                elseif (isset($value[0]) && is_array($value[0]) && isset($value[0]['file_path'])) {
+                    foreach ($value as $fileIdx => $fileObj) {
+                        if (isset($fileObj['file_path']) && Storage::exists($fileObj['file_path'])) {
+                            $item[$key][$fileIdx]['file_url'] = Storage::temporaryUrl(
+                                $fileObj['file_path'],
+                                now()->addMinutes(60)
+                            );
+                        }
+                    }
+                }
             }
         }
         return $item;
