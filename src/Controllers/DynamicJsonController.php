@@ -424,13 +424,27 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
 
     /**
      * Generate temporary URLs for any nested file reference in a single data item.
-     * Looks for objects with 'file_path' and adds a 'file_url' with a presigned URL.
+     * Looks for objects with 'file_path' (or legacy 'key') and adds a 'file_url' with a presigned URL.
+     * Also handles base64 data URIs (passes through as file_url for image display).
      * Handles both single file objects and arrays of file objects.
      */
     private function resolveFileUrlsForItem($item)
     {
         foreach ($item as $key => $value) {
-            if (is_array($value)) {
+            // Handle base64 data URIs (legacy: photo stored as base64 string)
+            if (is_string($value) && str_starts_with($value, 'data:image')) {
+                $item[$key] = ['file_url' => $value];
+            }
+            elseif (is_array($value)) {
+                // Normalize legacy 'key' field to 'file_path'
+                if (!isset($value['file_path']) && isset($value['key'])) {
+                    $value['file_path'] = $value['key'];
+                    if (isset($value['originalFilename'])) $value['file_name'] = $value['originalFilename'];
+                    if (isset($value['extension'])) $value['file_extension'] = $value['extension'];
+                    if (isset($value['size'])) $value['file_size'] = $value['size'];
+                    $item[$key] = $value;
+                }
+
                 // Single file object: {file_path: '...', file_name: '...'}
                 if (isset($value['file_path']) && Storage::exists($value['file_path'])) {
                     $item[$key]['file_url'] = Storage::temporaryUrl(
@@ -439,8 +453,16 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
                     );
                 }
                 // Array of file objects: [{file_path: '...', ...}, ...]
-                elseif (isset($value[0]) && is_array($value[0]) && isset($value[0]['file_path'])) {
+                elseif (isset($value[0]) && is_array($value[0])) {
                     foreach ($value as $fileIdx => $fileObj) {
+                        // Normalize legacy 'key' field
+                        if (!isset($fileObj['file_path']) && isset($fileObj['key'])) {
+                            $fileObj['file_path'] = $fileObj['key'];
+                            if (isset($fileObj['originalFilename'])) $fileObj['file_name'] = $fileObj['originalFilename'];
+                            if (isset($fileObj['extension'])) $fileObj['file_extension'] = $fileObj['extension'];
+                            if (isset($fileObj['size'])) $fileObj['file_size'] = $fileObj['size'];
+                            $item[$key][$fileIdx] = $fileObj;
+                        }
                         if (isset($fileObj['file_path']) && Storage::exists($fileObj['file_path'])) {
                             $item[$key][$fileIdx]['file_url'] = Storage::temporaryUrl(
                                 $fileObj['file_path'],

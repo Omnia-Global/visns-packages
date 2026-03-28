@@ -238,6 +238,10 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                                 'downloadContent'
                             );
                             Route::post('sort_update', 'sort_update');
+                            Route::post(
+                                'downloadByPath',
+                                'downloadByPath'
+                            );
                         });
 
                     // Permission routes
