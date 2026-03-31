@@ -77,9 +77,9 @@ class File extends Model implements Auditable
                     return env('CLOUDFRONT_URL') . $this->file_path;
                 }
 
-                // Final fallback: Try to generate URL with original path
+                // Final fallback: Try to generate URL with original path using default disk
                 try {
-                    return Storage::disk('s3')->temporaryUrl($this->file_path, now()->addMinutes(60));
+                    return Storage::temporaryUrl($this->file_path, now()->addMinutes(60));
                 } catch (\Exception $e) {
                     \Log::warning("File model: Could not generate fallback URL", [
                         'file_id' => $this->id,

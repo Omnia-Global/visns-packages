@@ -193,24 +193,26 @@ class FilePathResolver
 
     protected function checkPathExistsS3Only(string $path): ?array
     {
+        $diskName = config('filesystems.default', 's3');
+
         try {
-            if ($this->diskExists('s3') && Storage::disk('s3')->exists($path)) {
+            if ($this->diskExists($diskName) && Storage::disk($diskName)->exists($path)) {
                 $result = [
-                    'disk' => 's3',
+                    'disk' => $diskName,
                     'path' => $path
                 ];
-                
+
                 // Generate URL if possible
                 try {
-                    $result['url'] = Storage::disk('s3')->temporaryUrl($path, now()->addMinutes(60));
+                    $result['url'] = Storage::disk($diskName)->temporaryUrl($path, now()->addMinutes(60));
                 } catch (\Exception $e) {
                     // Ignore URL generation errors
                 }
-                
+
                 return $result;
             }
         } catch (\Exception $e) {
-            // Ignore S3 errors and continue
+            // Ignore storage errors and continue
         }
 
         return null;
@@ -218,8 +220,10 @@ class FilePathResolver
 
     protected function getStorageDisks(): array
     {
+        $default = config('filesystems.default', 's3');
+
         return [
-            's3' => ['priority' => 1],          // Primary S3 storage
+            $default => ['priority' => 1],     // Primary storage (S3-compatible)
             'public' => ['priority' => 2],      // Public storage
             'local' => ['priority' => 3],       // Local storage
         ];
