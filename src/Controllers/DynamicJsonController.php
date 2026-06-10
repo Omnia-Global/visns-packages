@@ -286,25 +286,78 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
         $fileRelationship = $request->input('file_relationship') ?? 'files';
         $folder = Str::snake(class_basename($this->model));
 
-        // Determine base files: use existingFiles from frontend (handles deletion),
-        // otherwise preserve existing files in the data object
-        if ($request->has('existingFiles') && is_array($request->input('existingFiles'))) {
-            $baseFiles = array_values(array_filter($request->input('existingFiles'), function ($f) {
-                return is_array($f) && !empty($f) && isset($f['file_name']);
-            }));
-            $dataObj[$fileRelationship] = $baseFiles;
-        } else {
-            // Clean up existing files array (remove empty/invalid entries like [[]])
-            if (isset($dataObj[$fileRelationship]) && is_array($dataObj[$fileRelationship])) {
-                $dataObj[$fileRelationship] = array_values(array_filter($dataObj[$fileRelationship], function ($f) {
-                    return is_array($f) && !empty($f) && isset($f['file_name']);
-                }));
+        // Field-scoped uploads: a form field whose value is a Vapor upload
+        // descriptor ({_vaporUpload: true, key: 'tmp/...', ...}). Copy the
+        // tmp file to permanent storage and store a single file object on
+        // the field — the shape edit prefill, image columns and PDF
+        // rendering consume. Supports multiple file fields in one save
+        // (e.g. a bio's photo + document).
+        $descriptorFields = [];
+        foreach ($dataObj as $field => $value) {
+            if (!is_array($value) || !($value['_vaporUpload'] ?? false)) {
+                continue;
+            }
+
+            $descriptorFields[] = $field;
+            $s3Key = $value['key'] ?? '';
+            $uuid = $value['uuid'] ?? uniqid();
+            $filename = $value['filename'] ?? 'unknown';
+            $permanentPath = "{$folder}/{$uuid}/{$filename}";
+
+            try {
+                if (
+                    is_string($s3Key) &&
+                    str_starts_with($s3Key, 'tmp/') &&
+                    Storage::exists($s3Key)
+                ) {
+                    Storage::copy($s3Key, $permanentPath);
+                    $dataObj[$field] = [
+                        'file_path' => $permanentPath,
+                        'file_name' => $filename,
+                        'file_extension' => $value['extension'] ?? '',
+                        'file_size' => $value['filesize'] ?? 0,
+                    ];
+                } else {
+                    // Never persist a raw descriptor
+                    unset($dataObj[$field]);
+                }
+            } catch (\Exception $e) {
+                \Log::warning("DynamicJsonController file copy failed: {$e->getMessage()}");
+                unset($dataObj[$field]);
             }
         }
 
-        // Ensure files field is an array
-        if (!isset($dataObj[$fileRelationship]) || !is_array($dataObj[$fileRelationship])) {
-            $dataObj[$fileRelationship] = [];
+        // The array-based machinery below (existingFiles, cleanup, append)
+        // only applies to multi-file relationships. Skip it entirely when a
+        // field-scoped descriptor already stored a single file object on
+        // this field — the cleanup would otherwise strip that object.
+        $relationshipHandledByDescriptor = in_array(
+            $fileRelationship,
+            $descriptorFields,
+            true
+        );
+
+        if (!$relationshipHandledByDescriptor) {
+            // Determine base files: use existingFiles from frontend (handles deletion),
+            // otherwise preserve existing files in the data object
+            if ($request->has('existingFiles') && is_array($request->input('existingFiles'))) {
+                $baseFiles = array_values(array_filter($request->input('existingFiles'), function ($f) {
+                    return is_array($f) && !empty($f) && isset($f['file_name']);
+                }));
+                $dataObj[$fileRelationship] = $baseFiles;
+            } else {
+                // Clean up existing files array (remove empty/invalid entries like [[]])
+                if (isset($dataObj[$fileRelationship]) && is_array($dataObj[$fileRelationship])) {
+                    $dataObj[$fileRelationship] = array_values(array_filter($dataObj[$fileRelationship], function ($f) {
+                        return is_array($f) && !empty($f) && isset($f['file_name']);
+                    }));
+                }
+            }
+
+            // Ensure files field is an array
+            if (!isset($dataObj[$fileRelationship]) || !is_array($dataObj[$fileRelationship])) {
+                $dataObj[$fileRelationship] = [];
+            }
         }
 
         // Handle multi-file uploads (uploadedFiles array from Vapor)
@@ -332,8 +385,14 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
                 ];
             }
         }
-        // Handle single file upload (uuid/key at request level)
-        elseif ($request->has('uuid') && $request->has('file_relationship')) {
+        // Handle single file upload (uuid/key at request level) — legacy
+        // path; skipped when a field-scoped descriptor already stored the
+        // file against its own field above.
+        elseif (
+            $request->has('uuid') &&
+            $request->has('file_relationship') &&
+            !$relationshipHandledByDescriptor
+        ) {
             $s3Key = $request->input('key');
             if (is_string($s3Key) && str_starts_with($s3Key, 'tmp/')) {
                 $uuid = $request->input('uuid');
