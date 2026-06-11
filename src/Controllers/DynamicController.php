@@ -99,11 +99,30 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
     }
 
-    public function sort_list()
+    public function sort_list(Request $request)
     {
         $data = [];
 
-        foreach ($this->model::orderBy('sort_order')->get() as $item) {
+        $query = $this->model::orderBy('sort_order');
+
+        // Optional simple equality filters, e.g. {where: [{id: 'is_active',
+        // value: 1}]} so reorder screens can list only active rows. Unknown
+        // columns are ignored; no filter input keeps the original behaviour.
+        foreach ((array) $request->input('where', []) as $condition) {
+            if (
+                is_array($condition) &&
+                isset($condition['id']) &&
+                array_key_exists('value', $condition) &&
+                \Illuminate\Support\Facades\Schema::hasColumn(
+                    $this->model->getTable(),
+                    $condition['id']
+                )
+            ) {
+                $query->where($condition['id'], $condition['value']);
+            }
+        }
+
+        foreach ($query->get() as $item) {
             $label = '';
 
             if (isset($item->name)) {
