@@ -3278,11 +3278,34 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
     /**
      * Generate PDF using DomPDF (original method, optimized)
      */
+    /**
+     * Branding logo for PDF exports: <img> with a base64 data URI so DomPDF
+     * needs no remote/file access at render time. Empty string when the
+     * pdf_logo config is unset, missing, or an unsupported type.
+     */
+    private function pdfLogoHtml()
+    {
+        $path = config('visns-packages.report_export.pdf_logo');
+        if (!$path || !is_file($path)) {
+            return '';
+        }
+        $mimes = ['svg' => 'image/svg+xml', 'png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'gif' => 'image/gif'];
+        $mime = $mimes[strtolower(pathinfo($path, PATHINFO_EXTENSION))] ?? null;
+        if (!$mime) {
+            return '';
+        }
+        $height = (int) config('visns-packages.report_export.pdf_logo_height', 36);
+        return '<div style="margin-bottom: 8px;"><img src="data:' . $mime . ';base64,' .
+            base64_encode(file_get_contents($path)) .
+            '" style="height: ' . $height . 'px;" alt=""></div>';
+    }
+
     private function generatePdfWithDompdf($dataArray, $headers, $filename, $originalMemoryLimit)
     {
         // Check if we should use simplified styling
         $simplifiedStylingThreshold = config('visns-packages.report_export.simplified_styling_threshold', 1000);
         $useSimplifiedStyling = count($dataArray) > $simplifiedStylingThreshold;
+        $logoHtml = $this->pdfLogoHtml();
 
 
             // Create HTML content with conditional styling
@@ -3304,8 +3327,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                         th { background-color: #ccc; font-weight: bold; }
                     </style>
                 </head>
-                <body>
-                    <h1>' .
+                <body>' .
+                    $logoHtml .
+                    '<h1>' .
                     htmlspecialchars(str_replace('.pdf', '', $filename)) .
                     '</h1>
                     <table>
@@ -3346,8 +3370,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                         }
                     </style>
                 </head>
-                <body>
-                    <h1>' .
+                <body>' .
+                    $logoHtml .
+                    '<h1>' .
                     htmlspecialchars(str_replace('.pdf', '', $filename)) .
                     '</h1>
                     <table>
@@ -3505,6 +3530,18 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
             // Add a page
             $pdf->AddPage();
+
+            // Branding logo (same source as the DomPDF engine's pdfLogoHtml).
+            $logoPath = config('visns-packages.report_export.pdf_logo');
+            if ($logoPath && is_file($logoPath)) {
+                $logoMm = max(6, (int) config('visns-packages.report_export.pdf_logo_height', 36) / 3);
+                if (strtolower(pathinfo($logoPath, PATHINFO_EXTENSION)) === 'svg') {
+                    $pdf->ImageSVG($logoPath, 10, 10, 0, $logoMm);
+                } else {
+                    $pdf->Image($logoPath, 10, 10, 0, $logoMm);
+                }
+                $pdf->SetY(10 + $logoMm + 4);
+            }
 
             // Title
             $pdf->SetFont('helvetica', 'B', 12);
