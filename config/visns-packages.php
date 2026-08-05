@@ -358,6 +358,19 @@ return [
 
         /*
         |--------------------------------------------------------------------------
+        | PDF Branding Logo
+        |--------------------------------------------------------------------------
+        |
+        | Absolute path to an image (svg/png/jpg/gif) rendered at the top of PDF
+        | report exports. SVG renders vector-crisp in the DomPDF engine; the
+        | TCPDF engine rasterises via ImageSVG. Null disables the logo.
+        |
+        */
+        'pdf_logo' => env('VISNS_PDF_LOGO'),
+        'pdf_logo_height' => env('VISNS_PDF_LOGO_HEIGHT', 36), // px (DomPDF) / relative mm basis (TCPDF)
+
+        /*
+        |--------------------------------------------------------------------------
         | Simplified Styling Threshold
         |--------------------------------------------------------------------------
         |
