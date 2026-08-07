@@ -984,6 +984,12 @@ class DynamicController extends \App\Http\Controllers\Controller
             return;
         }
 
+        // Named model scope: { "scope": "atJiggingOpen" }
+        if (isset($condition['scope'])) {
+            $this->applyScopeCondition($query, $condition['scope']);
+            return;
+        }
+
         // EXISTING: All current logic preserved exactly
         $value = $condition['value'] ?? null;
         $casts = $this->model->getCasts();
@@ -1048,6 +1054,12 @@ class DynamicController extends \App\Http\Controllers\Controller
             $this->applyGroupConditions($query, $condition);
             return;
         }
+
+        // Named model scope: { "scope": "atJiggingOpen" }
+        if (isset($condition['scope'])) {
+            $this->applyScopeCondition($query, $condition['scope']);
+            return;
+        }
         
         // Handle whereDoesntHave case
         if (isset($condition['whereDoesntHave'])) {
@@ -1071,6 +1083,32 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
 
         $this->applyConditionBasedOnOperator($query, $condition, $value);
+    }
+
+    /**
+     * Apply a named Eloquent scope declared by a view config, for filters
+     * that cannot be expressed as plain where conditions. Only scopes that
+     * actually exist on the model are applied, so a stale config can never
+     * turn into a call to an arbitrary method.
+     */
+    protected function applyScopeCondition($query, $scope)
+    {
+        if (!is_string($scope) || $scope === '') {
+            return;
+        }
+
+        $scope = lcfirst(str_replace(' ', '', ucwords(str_replace(['-', '_'], ' ', $scope))));
+
+        if (!method_exists($query->getModel(), 'scope' . ucfirst($scope))) {
+            \Log::warning('DynamicController::applyScopeCondition() - Unknown scope ignored', [
+                'model' => $this->model,
+                'scope' => $scope
+            ]);
+
+            return;
+        }
+
+        $query->{$scope}();
     }
 
     protected function castValue($value, $type)
