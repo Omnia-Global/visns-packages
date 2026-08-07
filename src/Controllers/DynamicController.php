@@ -1090,25 +1090,35 @@ class DynamicController extends \App\Http\Controllers\Controller
      * that cannot be expressed as plain where conditions. Only scopes that
      * actually exist on the model are applied, so a stale config can never
      * turn into a call to an arbitrary method.
+     *
+     * A scope that cannot be resolved fails CLOSED — see the note below.
      */
     protected function applyScopeCondition($query, $scope)
     {
-        if (!is_string($scope) || $scope === '') {
+        $name = is_string($scope)
+            ? lcfirst(str_replace(' ', '', ucwords(str_replace(['-', '_'], ' ', $scope))))
+            : '';
+
+        if ($name === '' || !method_exists($query->getModel(), 'scope' . ucfirst($name))) {
+            // Fail CLOSED. Dropping the condition would WIDEN the result set,
+            // and a grid quietly serving rows it was meant to filter out looks
+            // normal while being wrong — that is how a broken manufacturing
+            // stage list went unnoticed for days. An empty grid is obviously
+            // broken, so it gets reported rather than trusted.
+            \Log::error(
+                'DynamicController::applyScopeCondition() - Unresolved scope, refusing to widen the result set',
+                [
+                    'model' => $this->model,
+                    'scope' => is_string($scope) ? $scope : gettype($scope),
+                ]
+            );
+
+            $query->whereRaw('1 = 0');
+
             return;
         }
 
-        $scope = lcfirst(str_replace(' ', '', ucwords(str_replace(['-', '_'], ' ', $scope))));
-
-        if (!method_exists($query->getModel(), 'scope' . ucfirst($scope))) {
-            \Log::warning('DynamicController::applyScopeCondition() - Unknown scope ignored', [
-                'model' => $this->model,
-                'scope' => $scope
-            ]);
-
-            return;
-        }
-
-        $query->{$scope}();
+        $query->{$name}();
     }
 
     protected function castValue($value, $type)
