@@ -7,6 +7,32 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * A saved report.
+ *
+ * `detail` is opaque JSON and holds one of two schemas:
+ *
+ * v1 (no `schema_version`) - the table-and-join builder:
+ *   {"mainTable": "clients", "columns": [...], "joins": [...],
+ *    "filters": [...], "sorting": [...], "groupBy": [...]}
+ *
+ * v2 (`schema_version: 2`) - the semantic model, where every path is an
+ * entity/field id resolved through the report semantics registry rather than
+ * a table or column name:
+ *   {"schema_version": 2, "entity": "clients",
+ *    "fields": [{"field": "firstname"}, {"agg": "sum", "field": "fee_amount",
+ *                "label": "Total fees"}],
+ *    "filters": {"op": "and", "items": [...]},
+ *    "parameters": [...], "groupBy": [...], "sort": [...]}
+ *
+ * Saving and loading are schema agnostic - the column is written and read
+ * verbatim. Only execution and export branch, on `schema_version >= 2` (or
+ * the presence of `entity`). Helpers below such as getSelectedTables() only
+ * make sense for v1 and return an empty list for a v2 definition.
+ *
+ * @see \Visnsstudio\VisnsPackages\Services\ReportSemantics\QueryCompiler
+ * @see docs/report-semantics.md
+ */
 class ReportBuilder extends Model
 {
     use HasFactory, SoftDeletes;
@@ -66,11 +92,37 @@ class ReportBuilder extends Model
     /**
      * Get the selected tables from the report configuration.
      *
-     * @return array
+     * The builder stores the main table under `mainTable` and every further
+     * table as the `targetTable` of a join - there is no `tables` key, which
+     * is why this used to always come back empty.
+     *
+     * @return array List of table names: the main table first, then each
+     *               joined table, in join order and without duplicates.
      */
     public function getSelectedTables(): array
     {
-        return $this->detail['tables'] ?? [];
+        $detail = $this->detail ?? [];
+        $tables = [];
+
+        $mainTable = $detail['mainTable'] ?? null;
+        if (is_string($mainTable) && $mainTable !== '') {
+            $tables[] = $mainTable;
+        }
+
+        $joins = $detail['joins'] ?? [];
+        if (is_array($joins)) {
+            foreach ($joins as $join) {
+                $targetTable = is_array($join)
+                    ? $join['targetTable'] ?? null
+                    : null;
+
+                if (is_string($targetTable) && $targetTable !== '') {
+                    $tables[] = $targetTable;
+                }
+            }
+        }
+
+        return array_values(array_unique($tables));
     }
 
     /**

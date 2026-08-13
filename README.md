@@ -2290,6 +2290,26 @@ return [
     // The middleware to apply to the package routes
     'routes_middleware' => ['web'],
 
+    // The middleware to apply to the report builder routes
+    // (ajax/reportBuilder/*). These endpoints expose the database schema and
+    // execute SELECT queries built from the request payload, so they are
+    // registered separately from the routes above and must always require
+    // authentication. Every authenticated user may use the report builder -
+    // there is no extra permission on top. Apps on a non-default guard should
+    // override this, e.g. ['web', 'auth:admin'].
+    'report_builder_middleware' => ['web', 'auth'],
+
+    // The semantic model behind report definition v2: the business-language
+    // entities/fields/relations the report wizard offers, mapped onto tables
+    // and columns. The registry is the allowlist - a column that is not
+    // published here cannot be reported on. Empty by default; see
+    // docs/report-semantics.md for the full schema and the endpoint contract.
+    'report_semantics' => [
+        'connection' => null,
+        'registrar' => null,
+        'entities' => [],
+    ],
+
     // The prefix to apply to all package routes (leave empty for no prefix)
     'routes_prefix' => '',
 

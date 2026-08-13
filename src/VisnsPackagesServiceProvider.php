@@ -18,6 +18,10 @@ use Visnsstudio\VisnsPackages\Controllers\PermissionController;
 use Visnsstudio\VisnsPackages\Controllers\RoleController;
 use Visnsstudio\VisnsPackages\Controllers\SocialiteController;
 use Visnsstudio\VisnsPackages\Controllers\ReportBuilderController;
+use Visnsstudio\VisnsPackages\Controllers\SemanticModelController;
+use Visnsstudio\VisnsPackages\Services\ReportSemantics\QueryCompiler;
+use Visnsstudio\VisnsPackages\Services\ReportSemantics\SchemaInspector;
+use Visnsstudio\VisnsPackages\Services\ReportSemantics\SemanticModel;
 use Visnsstudio\VisnsPackages\Controllers\PDFController;
 use Visnsstudio\VisnsPackages\Controllers\ProposalTemplateController;
 use Visnsstudio\VisnsPackages\Controllers\BrandingProfileController;
@@ -73,6 +77,27 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             $manager = new OAuthManager();
             $this->registerOAuthProviders($manager);
             return $manager;
+        });
+
+        // Report semantics (report definition v2).
+        //
+        // Bound, not singletons: the registry is derived from config, and a
+        // test - or an application that swaps the model at runtime - would
+        // otherwise be stuck with the first build for the life of the
+        // process. Building it is cheap (array normalisation, no I/O).
+        $this->app->bind(SemanticModel::class, function ($app) {
+            return SemanticModel::fromConfig();
+        });
+
+        $this->app->bind(SchemaInspector::class, function ($app) {
+            return new SchemaInspector();
+        });
+
+        $this->app->bind(QueryCompiler::class, function ($app) {
+            return new QueryCompiler(
+                $app->make(SemanticModel::class),
+                $app->make(SchemaInspector::class)
+            );
         });
 
         // Merge config
@@ -158,9 +183,15 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             count($_SERVER['argv']) > 1 &&
             in_array($_SERVER['argv'][1], ['route:list', 'route:cache']);
 
+        // A test suite also runs in the console, and skipping registration
+        // there left every package endpoint answering 405 to a feature test -
+        // so a consuming application could not test its own report builder,
+        // authentication or file routes at all.
+        $runningTests = $this->app->runningUnitTests();
+
         if (
             config('visns-packages.register_routes', true) &&
-            (!$runningInConsole || $runningRouteList)
+            (!$runningInConsole || $runningRouteList || $runningTests)
         ) {
             // Get middleware from config
             $middleware = config('visns-packages.routes_middleware', ['web']);
@@ -284,70 +315,6 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                         }
                     );
 
-                    // Report Builder routes
-                    Route::prefix('ajax')
-                        ->controller(ReportBuilderController::class)
-                        ->group(function () {
-                            Route::post(
-                                '/reportBuilder/getTables',
-                                'getTables'
-                            );
-                            Route::post(
-                                '/reportBuilder/getTableColumns',
-                                'getTableColumns'
-                            );
-                            Route::post(
-                                '/reportBuilder/getAllTablesAndColumns',
-                                'getAllTablesAndColumns'
-                            );
-                            Route::post(
-                                '/reportBuilder/getTableRelationships',
-                                'getTableRelationships'
-                            );
-                            Route::post(
-                                '/reportBuilder/getSuggestedJoins',
-                                'getSuggestedJoins'
-                            );
-                            Route::post(
-                                '/reportBuilder/getColumnTypeInfo',
-                                'getColumnTypeInfo'
-                            );
-
-                            // Report management endpoints
-                            Route::get('/reportBuilder/reports', 'getReports');
-                            Route::get(
-                                '/reportBuilder/reports/{id}',
-                                'getReport'
-                            );
-                            Route::post('/reportBuilder/reports', 'saveReport');
-                            Route::put(
-                                '/reportBuilder/reports/{id}',
-                                'updateReport'
-                            );
-                            Route::delete(
-                                '/reportBuilder/reports/{id}',
-                                'deleteReport'
-                            );
-
-                            // Execute report query
-                            Route::post(
-                                '/reportBuilder/execute',
-                                'executeQuery'
-                            );
-
-                            // Export report
-                            Route::post(
-                                '/reportBuilder/export',
-                                'exportReport'
-                            );
-
-                            // Get JSON field keys
-                            Route::post(
-                                '/reportBuilder/getJsonFieldKeys',
-                                'getJsonFieldKeys'
-                            );
-                        });
-
                     // PDF Generation routes
                     Route::prefix('ajax/pdf')
                         ->controller(PDFController::class)
@@ -420,6 +387,98 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                             Route::post('/logout', 'logout_api');
                         }
                     );
+                });
+
+            // Report Builder routes
+            //
+            // Registered in their own group: these endpoints expose the
+            // database schema and execute SELECT queries built from the
+            // request payload, so they always require authentication and
+            // never inherit the (potentially unauthenticated)
+            // `routes_middleware` stack used by the routes above.
+            $reportBuilderMiddleware = config(
+                'visns-packages.report_builder_middleware',
+                ['web', 'auth']
+            );
+
+            Route::middleware($reportBuilderMiddleware)
+                ->prefix($prefix)
+                ->group(function () {
+                    Route::prefix('ajax')
+                        ->controller(ReportBuilderController::class)
+                        ->group(function () {
+                            Route::post(
+                                '/reportBuilder/getTables',
+                                'getTables'
+                            );
+                            Route::post(
+                                '/reportBuilder/getTableColumns',
+                                'getTableColumns'
+                            );
+                            Route::post(
+                                '/reportBuilder/getAllTablesAndColumns',
+                                'getAllTablesAndColumns'
+                            );
+                            Route::post(
+                                '/reportBuilder/getTableRelationships',
+                                'getTableRelationships'
+                            );
+                            Route::post(
+                                '/reportBuilder/getSuggestedJoins',
+                                'getSuggestedJoins'
+                            );
+                            Route::post(
+                                '/reportBuilder/getColumnTypeInfo',
+                                'getColumnTypeInfo'
+                            );
+
+                            // Report management endpoints
+                            Route::get('/reportBuilder/reports', 'getReports');
+                            Route::get(
+                                '/reportBuilder/reports/{id}',
+                                'getReport'
+                            );
+                            Route::post('/reportBuilder/reports', 'saveReport');
+                            Route::put(
+                                '/reportBuilder/reports/{id}',
+                                'updateReport'
+                            );
+                            Route::delete(
+                                '/reportBuilder/reports/{id}',
+                                'deleteReport'
+                            );
+
+                            // Execute report query
+                            Route::post(
+                                '/reportBuilder/execute',
+                                'executeQuery'
+                            );
+
+                            // Export report
+                            Route::post(
+                                '/reportBuilder/export',
+                                'exportReport'
+                            );
+
+                            // Get JSON field keys
+                            Route::post(
+                                '/reportBuilder/getJsonFieldKeys',
+                                'getJsonFieldKeys'
+                            );
+                        });
+
+                    // Semantic model (report definition v2). Registered in
+                    // the same group as the rest of the builder: it
+                    // describes the reportable shape of the database and is
+                    // never public.
+                    Route::prefix('ajax')
+                        ->controller(SemanticModelController::class)
+                        ->group(function () {
+                            Route::post(
+                                '/reportBuilder/semanticModel',
+                                'semanticModel'
+                            );
+                        });
                 });
 
             // Register API routes

@@ -25,6 +25,209 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Report Builder Routes Middleware
+    |--------------------------------------------------------------------------
+    |
+    | The middleware applied to the report builder routes (ajax/reportBuilder/*).
+    |
+    | These endpoints expose the database schema and can execute arbitrary
+    | SELECT queries built from the request payload, so they are registered
+    | with their own middleware stack and MUST require authentication. The
+    | report builder itself is open to every authenticated user - no extra
+    | permission is required - so 'auth' is the only guard applied on top of
+    | the standard 'web' stack.
+    |
+    | Applications using a non-default guard should override this, e.g.
+    | ['web', 'auth:admin'].
+    |
+    */
+    'report_builder_middleware' => ['web', 'auth'],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Report Semantics (report definition v2)
+    |--------------------------------------------------------------------------
+    |
+    | The semantic model: the business-language schema the report wizard is
+    | built on. It maps user-facing entity / field / relation ids onto tables,
+    | columns and joins, and it is the ONLY way the compiler can reach the
+    | database - a column that is not published here cannot be selected,
+    | filtered or sorted on, no matter what the request payload says.
+    |
+    | Nothing in here is guessed from the schema. Publishing a field is a
+    | deliberate act, which is what makes this safe to expose to every
+    | authenticated user.
+    |
+    | Table and column names never leave the server: the /semanticModel
+    | endpoint returns labels, types and ids only.
+    |
+    | Full documentation, including the definition v2 payload and every
+    | behavioural decision, lives in docs/report-semantics.md.
+    |
+    | ---------------------------------------------------------------------
+    | ENTITY
+    | ---------------------------------------------------------------------
+    | 'clients' => [                    // entity id - opaque handle, [A-Za-z_][A-Za-z0-9_]*
+    |     'label'        => 'Client',   // singular, shown in the wizard. Default: humanised id
+    |     'plural'       => 'Clients',  // Default: the label
+    |     'description'  => '...',      // one line of help text. Optional
+    |     'table'        => 'clients',  // Default: the entity id
+    |     'primary_key'  => 'id',       // Default: 'id'
+    |     'soft_deletes' => null,       // null = look for a deleted_at column (cached);
+    |                                   // true/false = authoritative, skips introspection
+    |     'hidden'       => false,      // true = usable as a relation target but not offered
+    |                                   // as a reporting root
+    |     'fields'       => [...],
+    |     'relations'    => [...],
+    | ]
+    |
+    | ---------------------------------------------------------------------
+    | FIELD
+    | ---------------------------------------------------------------------
+    | Types: text | number | money | percent | date | datetime | boolean | enum
+    |
+    | 'fee_amount' => [
+    |     'label'          => 'Fee amount',
+    |     'column'         => 'fee_amount',  // Default: the field id
+    |     'type'           => 'money',
+    |     'summable'       => true,          // may be summed/averaged. Default: true for
+    |                                        // number/money/percent, false otherwise
+    |     'description'    => '...',         // optional help text
+    |     'null_sentinels' => ['1970-01-01'],// values that MEAN null: filtered as empty
+    |                                        // and returned as null
+    |     'values'         => [1 => 'Active'],// enum only: stored value => label
+    |     'hidden'         => false,         // resolvable but not advertised to the wizard
+    |     'json'           => [              // instead of 'column': a value inside a JSON
+    |         'column' => 'home_address',    // document column
+    |         'path'   => '$.suburb',        // $.a, $.a.b, $.a[0].b - validated at load
+    |     ],
+    | ]
+    |
+    | ---------------------------------------------------------------------
+    | RELATION
+    | ---------------------------------------------------------------------
+    | Types: belongs_to (fk here) | has_one | has_many (fk on the other table)
+    |
+    | 'adviser' => [
+    |     'label'        => 'Their adviser',
+    |     'entity'       => 'users',      // must be another published entity
+    |     'type'         => 'belongs_to', // Default: belongs_to
+    |     'foreign_key'  => 'user_id',    // required
+    |     'owner_key'    => 'id',         // belongs_to: key on the target. Default: 'id'
+    |     'local_key'    => 'id',         // has_one/has_many: key here. Default: 'id'
+    |     'zero_is_null' => true,         // a 0 foreign key means "none" - do not join to
+    |                                     // whatever row happens to have id 0
+    |     'hidden'       => false,
+    | ]
+    |
+    | Relations become LEFT JOINs aliased per relation PATH, so the same
+    | entity can be reached twice by different routes (adviser.name and
+    | referrer.name both hit `users` without colliding), and chained hops
+    | (adviser.team.name) work as long as each hop is declared.
+    |
+    | ---------------------------------------------------------------------
+    | REGISTRAR
+    | ---------------------------------------------------------------------
+    | 'registrar' => \App\Reporting\ReportSemantics::class
+    |
+    | Optional. A class the container can build, exposing entities(): array
+    | (or invokable) and returning the same structure. Merged over the config
+    | entities one entity at a time, so the config array stays the primary
+    | path and code is there for the parts that need to be computed.
+    |
+    */
+    'report_semantics' => [
+        // Connection the compiled report runs on. null = application default.
+        'connection' => env('VISNS_REPORT_SEMANTICS_CONNECTION'),
+
+        // Optional class returning the same entities array - see above.
+        'registrar' => null,
+
+        // Nothing is published by default: an application opts in field by
+        // field. An empty registry makes /semanticModel answer with
+        // {"entities": {}}, which the wizard renders as "not configured".
+        'entities' => [
+            /*
+            'clients' => [
+                'label' => 'Client',
+                'plural' => 'Clients',
+                'description' => 'People the practice advises',
+                'table' => 'clients',
+
+                'fields' => [
+                    'firstname' => [
+                        'label' => 'First name',
+                        'column' => 'firstname',
+                        'type' => 'text',
+                    ],
+                    'surname' => [
+                        'label' => 'Surname',
+                        'column' => 'surname',
+                        'type' => 'text',
+                    ],
+                    'fee_amount' => [
+                        'label' => 'Fee amount',
+                        'column' => 'fee_amount',
+                        'type' => 'money',
+                        'summable' => true,
+                    ],
+                    // A value living inside a JSON document column.
+                    'home_suburb' => [
+                        'label' => 'Home suburb',
+                        'json' => ['column' => 'home_address', 'path' => '$.suburb'],
+                        'type' => 'text',
+                    ],
+                    // 1970-01-01 is this table's "never set" marker: it is
+                    // filtered as empty and comes back as null.
+                    'fds_due_date' => [
+                        'label' => 'FDS due date',
+                        'column' => 'fds_due_date',
+                        'type' => 'date',
+                        'null_sentinels' => ['1970-01-01'],
+                    ],
+                    'status' => [
+                        'label' => 'Status',
+                        'column' => 'status_id',
+                        'type' => 'enum',
+                        'values' => [1 => 'Active', 0 => 'Inactive'],
+                    ],
+                ],
+
+                'relations' => [
+                    'adviser' => [
+                        'label' => 'Their adviser',
+                        'entity' => 'users',
+                        'type' => 'belongs_to',
+                        'foreign_key' => 'user_id',
+                        'owner_key' => 'id',
+                        'zero_is_null' => true,
+                    ],
+                    'notes' => [
+                        'label' => 'Their notes',
+                        'entity' => 'client_notes',
+                        'type' => 'has_many',
+                        'foreign_key' => 'client_id',
+                        'local_key' => 'id',
+                    ],
+                ],
+            ],
+
+            'users' => [
+                'label' => 'Adviser',
+                'plural' => 'Advisers',
+                'table' => 'users',
+                'fields' => [
+                    'name' => ['label' => 'Name', 'column' => 'name', 'type' => 'text'],
+                    'email' => ['label' => 'Email', 'column' => 'email', 'type' => 'text'],
+                ],
+                'relations' => [],
+            ],
+            */
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Routes Prefix
     |--------------------------------------------------------------------------
     |
@@ -333,6 +536,18 @@ return [
         |
         */
         'pdf_max_rows' => env('VISNS_PDF_MAX_ROWS', 2000),
+
+        /*
+        |--------------------------------------------------------------------------
+        | Export Row Ceiling
+        |--------------------------------------------------------------------------
+        |
+        | Hard limit on the number of rows an export may pull, whatever the
+        | format. This is the ceiling the v1 builder has always used; the
+        | semantic (definition v2) export path reads it from here.
+        |
+        */
+        'max_rows' => env('VISNS_REPORT_EXPORT_MAX_ROWS', 100000),
 
         /*
         |--------------------------------------------------------------------------

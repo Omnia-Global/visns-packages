@@ -7,7 +7,12 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Visnsstudio\VisnsPackages\Models\ReportBuilder;
+use Visnsstudio\VisnsPackages\Services\ReportSemantics\QueryCompiler;
+use Visnsstudio\VisnsPackages\Services\ReportSemantics\SemanticException;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -1088,14 +1093,15 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
     public function getReports(Request $request)
     {
         try {
-            // Get user ID from authenticated user or request
-            $userId = Auth::id() ?? $request->input('user_id');
+            // Identity always comes from the authenticated session - never
+            // from the request payload, which the caller controls.
+            $userId = $this->currentUserId();
 
             // Query to get reports
             $query = ReportBuilder::query();
 
             // Filter by user if user ID is provided
-            if ($userId) {
+            if ($userId !== null) {
                 $query->where(function ($q) use ($userId) {
                     $q->where('user_id', $userId)->orWhere('is_public', true);
                 });
@@ -1112,14 +1118,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 'data' => $reports,
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching reports: ' . $e->getMessage());
-            return response()->json(
-                [
-                    'success' => false,
-                    'message' => 'Error fetching reports',
-                    'error' => $e->getMessage(),
-                ],
-                500
+            return $this->errorResponse(
+                $e,
+                'Error fetching reports',
+                'getReports'
             );
         }
     }
@@ -1137,8 +1139,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             $report = ReportBuilder::findOrFail($id);
 
             // Check if user has access to this report
-            $userId = Auth::id() ?? $request->input('user_id');
-            if (!$report->is_public && $report->user_id !== $userId) {
+            if (!$this->canViewReport($report)) {
                 return response()->json(
                     [
                         'success' => false,
@@ -1154,14 +1155,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 'data' => $report,
             ]);
         } catch (\Exception $e) {
-            Log::error('Error fetching report: ' . $e->getMessage());
-            return response()->json(
-                [
-                    'success' => false,
-                    'message' => 'Error fetching report',
-                    'error' => $e->getMessage(),
-                ],
-                500
+            return $this->errorResponse(
+                $e,
+                'Error fetching report',
+                'getReport'
             );
         }
     }
@@ -1182,8 +1179,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 'is_public' => 'boolean',
             ]);
 
-            // Get user ID from authenticated user or request
-            $userId = Auth::id() ?? $request->input('user_id');
+            // Ownership is taken from the authenticated session only - a
+            // caller must not be able to create reports owned by someone else.
+            $userId = $this->currentUserId();
 
             // Create new report
             $report = new ReportBuilder();
@@ -1198,15 +1196,13 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 'message' => 'Report saved successfully',
                 'data' => $report,
             ]);
+        } catch (ValidationException $e) {
+            throw $e;
         } catch (\Exception $e) {
-            Log::error('Error saving report: ' . $e->getMessage());
-            return response()->json(
-                [
-                    'success' => false,
-                    'message' => 'Error saving report',
-                    'error' => $e->getMessage(),
-                ],
-                500
+            return $this->errorResponse(
+                $e,
+                'Error saving report',
+                'saveReport'
             );
         }
     }
@@ -1225,8 +1221,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             $report = ReportBuilder::findOrFail($id);
 
             // Check if user has permission to update this report
-            $userId = Auth::id() ?? $request->input('user_id');
-            if ($report->user_id !== $userId) {
+            if (!$this->ownsReport($report)) {
                 return response()->json(
                     [
                         'success' => false,
@@ -1264,15 +1259,13 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 'message' => 'Report updated successfully',
                 'data' => $report,
             ]);
+        } catch (ValidationException $e) {
+            throw $e;
         } catch (\Exception $e) {
-            Log::error('Error updating report: ' . $e->getMessage());
-            return response()->json(
-                [
-                    'success' => false,
-                    'message' => 'Error updating report',
-                    'error' => $e->getMessage(),
-                ],
-                500
+            return $this->errorResponse(
+                $e,
+                'Error updating report',
+                'updateReport'
             );
         }
     }
@@ -1291,8 +1284,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             $report = ReportBuilder::findOrFail($id);
 
             // Check if user has permission to delete this report
-            $userId = Auth::id() ?? $request->input('user_id');
-            if ($report->user_id !== $userId) {
+            if (!$this->ownsReport($report)) {
                 return response()->json(
                     [
                         'success' => false,
@@ -1311,14 +1303,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 'message' => 'Report deleted successfully',
             ]);
         } catch (\Exception $e) {
-            Log::error('Error deleting report: ' . $e->getMessage());
-            return response()->json(
-                [
-                    'success' => false,
-                    'message' => 'Error deleting report',
-                    'error' => $e->getMessage(),
-                ],
-                500
+            return $this->errorResponse(
+                $e,
+                'Error deleting report',
+                'deleteReport'
             );
         }
     }
@@ -1332,16 +1320,14 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
     public function executeQuery(Request $request)
     {
         try {
-            // Process the request
-            
-            // Log raw request to debug filter issues
-            Log::info('🔍 [DEBUG] Raw request data:', [
-                'all_data' => $request->all(),
-                'query_keys' => array_keys($request->input('query', [])),
-                'has_filters' => isset($request->input('query', [])['filters']),
-                'filter_count' => count($request->input('query.filters', [])),
-                'raw_filters' => $request->input('query.filters', []),
-            ]);
+            // Report definition v2 (the semantic model). Anything that is not
+            // a v2 payload falls straight through to the v1 path below,
+            // unchanged.
+            $definition = $this->semanticDefinitionFrom($request);
+
+            if ($definition !== null) {
+                return $this->executeSemanticReport($request, $definition);
+            }
 
             // Get all request data without strict validation to preserve filters
             $validated = [
@@ -1351,15 +1337,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 'offset' => $request->input('offset'),
                 'parameters' => $request->input('parameters', []),
             ];
-            
-            // Log what we extracted to debug filter preservation
-            Log::info('🔍 [DEBUG] Extracted data:', [
-                'query_keys' => array_keys($validated['query'] ?? []),
-                'has_filters_in_validated' => isset($validated['query']['filters']),
-                'filter_count_validated' => count($validated['query']['filters'] ?? []),
-                'validated_filters' => $validated['query']['filters'] ?? [],
-            ]);
-            
+
             // Basic validation
             if (empty($validated['query']) || !is_array($validated['query'])) {
                 throw new \Exception('Query parameter is required and must be an array');
@@ -1374,14 +1352,21 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
             // Get the query configuration
             $queryConfig = $validated['query'];
-            
-            // Log the final queryConfig before buildAndExecuteQuery
-            Log::info('🔍 [DEBUG] Final queryConfig before buildAndExecuteQuery:', [
-                'queryConfig_keys' => array_keys($queryConfig),
-                'has_filters_final' => isset($queryConfig['filters']),
-                'filter_count_final' => count($queryConfig['filters'] ?? []),
-                'final_filters' => $queryConfig['filters'] ?? [],
-                'unique_config' => $queryConfig['unique'] ?? 'not set',
+
+            // Structural metadata only - filter values are user data and must
+            // never be written to the log. Every count is guarded because the
+            // payload is caller-supplied and may not have the expected shape.
+            $countOf = static function ($value) {
+                return is_array($value) ? count($value) : 0;
+            };
+
+            Log::debug('Report builder: executing query', [
+                'mainTable' => is_string($queryConfig['mainTable'] ?? null)
+                    ? $queryConfig['mainTable']
+                    : null,
+                'column_count' => $countOf($queryConfig['columns'] ?? null),
+                'join_count' => $countOf($queryConfig['joins'] ?? null),
+                'filter_count' => $countOf($queryConfig['filters'] ?? null),
             ]);
 
             // If report_id is provided, load the report configuration
@@ -1389,8 +1374,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 $report = ReportBuilder::findOrFail($validated['report_id']);
 
                 // Check if user has access to this report
-                $userId = Auth::id() ?? $request->input('user_id');
-                if (!$report->is_public && $report->user_id !== $userId) {
+                if (!$this->canViewReport($report)) {
                     return response()->json(
                         [
                             'success' => false,
@@ -1415,25 +1399,440 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 $parameters
             );
 
-            // Log the result for debugging
-
-            return response()->json([
+            $response = [
                 'success' => true,
                 'data' => $result['data'],
                 'total' => $result['total'],
-                'sql' => $result['sql'], // Include the generated SQL for debugging
-            ]);
+            ];
+
+            // The generated SQL exposes the schema and the filter values, so
+            // it is only ever handed back while debugging.
+            if (config('app.debug')) {
+                $response['sql'] = $result['sql'];
+            }
+
+            return response()->json($response);
+        } catch (SemanticException $e) {
+            // The definition itself is wrong: the caller can fix it, so the
+            // detail goes back rather than into a correlation id.
+            return $this->semanticErrorResponse($e);
         } catch (\Exception $e) {
-            Log::error('Error executing report query: ' . $e->getMessage());
-            Log::error('Stack trace: ' . $e->getTraceAsString());
+            return $this->errorResponse(
+                $e,
+                'Error executing report query',
+                'execute'
+            );
+        }
+    }
+
+    /**
+     * Extract a report definition v2 payload from the request, if there is one.
+     *
+     * Detection is by `schema_version >= 2` (or the presence of `entity`) -
+     * see {@see QueryCompiler::isSemanticDefinition()}. Three places are
+     * checked, in order:
+     *
+     *  1. `definition` - what the v2 wizard sends;
+     *  2. `query` - tolerated so an older client that reuses the v1 key with
+     *     a v2 body still works;
+     *  3. the saved report named by `report_id`, when no inline definition
+     *     was sent.
+     *
+     * Returns null for every v1 payload, which is what keeps the legacy path
+     * byte-for-byte unchanged.
+     *
+     * @param Request $request
+     * @return array|null
+     *
+     * @throws SemanticException 403 when the named report is not readable.
+     */
+    private function semanticDefinitionFrom(Request $request)
+    {
+        foreach (['definition', 'query'] as $key) {
+            $candidate = $request->input($key);
+
+            if (QueryCompiler::isSemanticDefinition($candidate)) {
+                return $candidate;
+            }
+        }
+
+        $reportId = $request->input('report_id');
+
+        if (empty($reportId)) {
+            return null;
+        }
+
+        $report = ReportBuilder::find($reportId);
+
+        if (
+            !$report ||
+            !QueryCompiler::isSemanticDefinition($report->detail)
+        ) {
+            return null;
+        }
+
+        if (!$this->canViewReport($report)) {
+            throw new SemanticException(
+                'You do not have permission to execute this report',
+                [],
+                403
+            );
+        }
+
+        return $report->detail;
+    }
+
+    /**
+     * Run a report definition v2 through the semantic compiler.
+     *
+     * @param Request $request
+     * @param array $definition
+     * @return \Illuminate\Http\JsonResponse
+     */
+    private function executeSemanticReport(Request $request, array $definition)
+    {
+        $parameters = $request->input('parameters', []);
+
+        if (!is_array($parameters)) {
+            $parameters = [];
+        }
+
+        $result = $this->semanticCompiler()->execute(
+            $definition,
+            $parameters,
+            $request->input('limit'),
+            (int) $request->input('offset', 0)
+        );
+
+        Log::debug('Report builder: executing semantic report', [
+            'entity' => is_string($definition['entity'] ?? null)
+                ? $definition['entity']
+                : null,
+            'field_count' => is_array($definition['fields'] ?? null)
+                ? count($definition['fields'])
+                : 0,
+            'row_count' => count($result['data']),
+        ]);
+
+        $response = [
+            'success' => true,
+            'data' => $result['data'],
+            'total' => $result['total'],
+            // Additive: the row keys in order, so a client does not have to
+            // infer the column order from the first row.
+            'columns' => $result['columns'],
+        ];
+
+        if (config('app.debug')) {
+            $response['sql'] = $result['sql'];
+        }
+
+        return response()->json($response);
+    }
+
+    /**
+     * Export a report definition v2, reusing the v1 file generation.
+     *
+     * @param Request $request
+     * @param array $definition
+     * @return \Illuminate\Http\Response|\Illuminate\Http\JsonResponse
+     */
+    private function exportSemanticReport(Request $request, array $definition)
+    {
+        $format = $request->input('format', 'pdf');
+        $parameters = $request->input('parameters', []);
+
+        if (!is_array($parameters)) {
+            $parameters = [];
+        }
+
+        $reportName = 'report';
+        $reportId = $request->input('report_id');
+
+        if (!empty($reportId)) {
+            $report = ReportBuilder::find($reportId);
+
+            // Only borrow the label from a report the caller may read.
+            if ($report && $this->canViewReport($report)) {
+                $reportName = $report->label;
+            }
+        }
+
+        // The export ceiling is the v1 one - the semantic path is not
+        // allowed to pull more rows than the legacy builder could.
+        $exportLimit = (int) config(
+            'visns-packages.report_export.max_rows',
+            100000
+        );
+
+        $result = $this->semanticCompiler()->execute(
+            $definition,
+            $parameters,
+            $exportLimit,
+            0,
+            $exportLimit
+        );
+
+        if (empty($result['data'])) {
             return response()->json(
                 [
                     'success' => false,
-                    'message' => 'Error executing report query',
-                    'error' => $e->getMessage(),
+                    'message' =>
+                        'No data to export. The query returned no results.',
                 ],
-                500
+                404
             );
+        }
+
+        $rowCount = count($result['data']);
+        $pdfMaxRows = config('visns-packages.report_export.pdf_max_rows', 2000);
+        $autoSwitchToCsv = config(
+            'visns-packages.report_export.auto_switch_to_csv',
+            false
+        );
+
+        if ($format === 'pdf' && $pdfMaxRows && $rowCount > $pdfMaxRows) {
+            if ($autoSwitchToCsv) {
+                $format = 'csv';
+            } else {
+                return response()->json(
+                    [
+                        'success' => false,
+                        'message' => "Dataset too large for PDF export. The dataset contains {$rowCount} rows, but PDF export is limited to {$pdfMaxRows} rows to prevent memory issues. Please use Excel or CSV format for large datasets, or reduce your query results.",
+                        'error_code' => 'PDF_ROW_LIMIT_EXCEEDED',
+                        'details' => [
+                            'row_count' => $rowCount,
+                            'pdf_max_rows' => $pdfMaxRows,
+                            'suggested_formats' => ['xlsx', 'csv'],
+                        ],
+                    ],
+                    413
+                );
+            }
+        }
+
+        $filename = date('Ymd') . "_{$reportName}.{$format}";
+
+        // The rows are already keyed by the report's own column names, and
+        // generateExportFile() takes its headers from those keys, so the v2
+        // labels carry through to the file with no extra mapping.
+        return $this->generateExportFile($result['data'], $filename, $format);
+    }
+
+    /**
+     * The semantic compiler, resolved from the container so an application
+     * can swap the model or the connection.
+     *
+     * @return QueryCompiler
+     */
+    private function semanticCompiler(): QueryCompiler
+    {
+        return app(QueryCompiler::class);
+    }
+
+    /**
+     * Render a rejected definition.
+     *
+     * Unlike {@see errorResponse()} the detail is safe to return: it
+     * describes the caller's own definition (an unknown field id, a bad
+     * operator, a missing parameter) and never the schema behind it.
+     *
+     * @param SemanticException $e
+     * @return \Illuminate\Http\JsonResponse
+     */
+    private function semanticErrorResponse(SemanticException $e)
+    {
+        return response()->json(
+            [
+                'success' => false,
+                'message' => $e->getMessage(),
+                'errors' => $e->errors(),
+            ],
+            $e->status()
+        );
+    }
+
+    /**
+     * Build a JSON error response that never leaks internals in production.
+     *
+     * The full exception (message, class, file/line and trace) is written to
+     * the log against a correlation id which is the only detail returned to
+     * the client, so a support request can be tied back to the log entry.
+     * When `app.debug` is on the exception message is included as well.
+     *
+     * @param \Throwable $e
+     * @param string $message Generic, client-safe message
+     * @param string $context Short label used to group the log entries
+     * @param int $status
+     * @return \Illuminate\Http\JsonResponse
+     */
+    private function errorResponse(
+        \Throwable $e,
+        string $message,
+        string $context = 'report-builder',
+        int $status = 500
+    ) {
+        $correlationId = (string) Str::uuid();
+
+        Log::error("Report builder [{$context}] failure: " . $e->getMessage(), [
+            'correlation_id' => $correlationId,
+            'exception' => get_class($e),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+            'trace' => $e->getTraceAsString(),
+        ]);
+
+        $payload = [
+            'success' => false,
+            'message' => $message,
+            'correlation_id' => $correlationId,
+        ];
+
+        if (config('app.debug')) {
+            $payload['error'] = $e->getMessage();
+        }
+
+        return response()->json($payload, $status);
+    }
+
+    /**
+     * The id of the authenticated user, or null when there is none.
+     *
+     * Identity is never read from the request payload - a caller supplying
+     * `user_id` must not be able to act as another user.
+     *
+     * @return int|string|null
+     */
+    private function currentUserId()
+    {
+        $id = Auth::id();
+
+        if ($id === null || $id === '') {
+            return null;
+        }
+
+        return is_numeric($id) ? (int) $id : $id;
+    }
+
+    /**
+     * Whether the authenticated user owns the given report.
+     *
+     * Both sides are normalised before comparison: the column is an integer
+     * while a request/session value may arrive as a numeric string, and a
+     * strict comparison of the two would always fail.
+     *
+     * @param \Visnsstudio\VisnsPackages\Models\ReportBuilder $report
+     * @return bool
+     */
+    private function ownsReport($report): bool
+    {
+        $userId = $this->currentUserId();
+        $ownerId = $report->user_id ?? null;
+
+        if ($userId === null || $ownerId === null || $ownerId === '') {
+            return false;
+        }
+
+        if (is_numeric($userId) && is_numeric($ownerId)) {
+            return (int) $ownerId === (int) $userId;
+        }
+
+        return (string) $ownerId === (string) $userId;
+    }
+
+    /**
+     * Whether the authenticated user may read the given report.
+     *
+     * Public reports are readable by any authenticated user; everything else
+     * is readable only by its owner.
+     *
+     * @param \Visnsstudio\VisnsPackages\Models\ReportBuilder $report
+     * @return bool
+     */
+    private function canViewReport($report): bool
+    {
+        return (bool) $report->is_public || $this->ownsReport($report);
+    }
+
+    /**
+     * Get a table's column listing, cached for 10 minutes.
+     *
+     * The report builder walks the whole schema on every execution; the
+     * listing only changes on migration, so it is worth caching.
+     *
+     * @param string $table
+     * @return array
+     */
+    private function getCachedColumnListing(string $table): array
+    {
+        return Cache::remember(
+            'visns:report-builder:columns:' . $table,
+            600,
+            function () use ($table) {
+                return Schema::getColumnListing($table);
+            }
+        );
+    }
+
+    /**
+     * Whether a table is soft-deletable (i.e. has a `deleted_at` column).
+     *
+     * @param string $table
+     * @param array $cache Per-request lookup cache, passed by reference.
+     *                     Deliberately not a static property: this runs under
+     *                     Octane, where a static would leak between requests.
+     * @return bool
+     */
+    private function tableHasDeletedAt(string $table, array &$cache): bool
+    {
+        if (array_key_exists($table, $cache)) {
+            return $cache[$table];
+        }
+
+        try {
+            $cache[$table] = in_array(
+                'deleted_at',
+                $this->getCachedColumnListing($table),
+                true
+            );
+        } catch (\Exception $e) {
+            // An unreadable table is treated as not soft-deletable rather
+            // than failing the whole report.
+            Log::warning(
+                "Error checking deleted_at on table {$table}: " .
+                    $e->getMessage()
+            );
+            $cache[$table] = false;
+        }
+
+        return $cache[$table];
+    }
+
+    /**
+     * Exclude soft-deleted rows for every table involved in the query.
+     *
+     * The report query is built with the query builder, so Eloquent's
+     * SoftDeletes global scope never applies. Without this, trashed records
+     * appear in every report.
+     *
+     * @param \Illuminate\Database\Query\Builder $query
+     * @param array $tables Main table plus any joined tables
+     * @param array $cache Per-request `deleted_at` lookup cache
+     * @return void
+     */
+    private function applySoftDeleteConstraints(
+        $query,
+        array $tables,
+        array &$cache
+    ): void {
+        foreach (array_unique($tables) as $table) {
+            if (!is_string($table) || $table === '') {
+                continue;
+            }
+
+            if ($this->tableHasDeletedAt($table, $cache)) {
+                $query->whereNull("{$table}.deleted_at");
+            }
         }
     }
 
@@ -1486,17 +1885,20 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         // First pass: Analyze the joins to identify potential pivot tables and chain joins
         $tableRelationships = [];
         $tableColumns = [];
+        $allTables = [];
 
         // Get all tables and their columns to help with relationship detection
         try {
             // Get all tables from the database
             $allTables = $this->getAllDatabaseTables();
 
-            // For each table, get its columns
+            // For each table, get its columns. The listing is cached because
+            // this walks every table in the schema on every execution.
             foreach ($allTables as $table) {
                 try {
-                    $columns = Schema::getColumnListing($table);
-                    $tableColumns[$table] = $columns;
+                    $tableColumns[$table] = $this->getCachedColumnListing(
+                        $table
+                    );
                 } catch (\Exception $e) {
                     // Skip tables that cause errors
                     Log::warning(
@@ -1809,11 +2211,29 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             }
         }
 
+        // The query is built with the query builder rather than Eloquent, so
+        // the SoftDeletes global scope never runs and trashed rows would show
+        // up in every report. Exclude them explicitly for the main table and
+        // for each joined table that is soft-deletable.
+        //
+        // Per-request cache: a local array, never a static property - this
+        // runs under Octane where a static would outlive the request.
+        $softDeleteCache = [];
+        $this->applySoftDeleteConstraints(
+            $query,
+            $joinedTables,
+            $softDeleteCache
+        );
+        $mainTableSoftDeletes = $this->tableHasDeletedAt(
+            $mainTable,
+            $softDeleteCache
+        );
+
         // Add columns
         $selectColumns = [];
-        
+
         // Log all columns for debugging
-        
+
         foreach ($requestColumns as $column) {
             $tableName = $column['table'] ?? $mainTable;
             $columnName = $column['column'] ?? null;
@@ -1830,28 +2250,35 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 // Handle calculated fields
                 $formula = $column['formula'] ?? null;
                 if ($formula) {
-                    $displayName = $column['displayName'] ?? $columnName;
-                    
-                    // Basic security validation for SQL injection prevention
+                    // Both halves are interpolated into raw SQL, so both are
+                    // validated: the formula against a strict allowlist and
+                    // the alias against the identifier charset.
                     $safeFormula = $this->validateCalculatedFieldFormula($formula);
-                    if ($safeFormula) {
+                    $displayName = $this->sanitizeAlias(
+                        $column['displayName'] ?? $columnName
+                    );
+
+                    if ($safeFormula && $displayName !== null) {
                         // Use the formula directly as SQL expression with alias
                         $selectColumns[] = DB::raw("({$safeFormula}) as `{$displayName}`");
                     } else {
-                        Log::warning("Calculated field formula failed validation", [
-                            'formula' => $formula,
-                            'column' => $column
+                        Log::warning('Calculated field failed validation', [
+                            'reason' => $safeFormula
+                                ? 'invalid display name'
+                                : 'invalid formula',
                         ]);
                     }
                 } else {
-                    Log::warning("Calculated field missing formula", ['column' => $column]);
+                    Log::warning('Calculated field missing formula');
                 }
             } else {
                 // Handle regular table columns
-                if ($alias) {
+                $safeAlias = $alias ? $this->sanitizeAlias($alias) : null;
+
+                if ($safeAlias !== null) {
                     // Use DB::raw to create a properly formatted column with alias
                     $selectColumns[] = DB::raw(
-                        "$tableName.$columnName as `$alias`"
+                        "$tableName.$columnName as `$safeAlias`"
                     );
                 } else {
                     // Use a simple string for the column
@@ -1875,25 +2302,25 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 $uniqueField = $unique['field'];
                 $uniqueColumn = str_replace($mainTable . '.', '', $uniqueField);
                 
-                // Get IDs of records that are the first occurrence of each unique value
-                $subquery = DB::table($mainTable)
-                    ->select(DB::raw("MIN(id) as first_id"))
-                    ->whereNotNull($uniqueColumn)
-                    ->groupBy($uniqueColumn);
-                
-                // Select all columns but only for the first occurrence IDs
+                // Select all columns but only for the first occurrence IDs.
+                // The subquery must skip trashed rows too, otherwise MIN(id)
+                // can land on a deleted row and drop the whole group.
                 $query->select("$mainTable.*")
-                      ->whereIn("$mainTable.id", function($query) use ($mainTable, $uniqueColumn) {
+                      ->whereIn("$mainTable.id", function($query) use ($mainTable, $uniqueColumn, $mainTableSoftDeletes) {
                           $query->select(DB::raw("MIN(id)"))
                                 ->from($mainTable)
-                                ->whereNotNull($uniqueColumn)
-                                ->groupBy($uniqueColumn);
+                                ->whereNotNull($uniqueColumn);
+
+                          if ($mainTableSoftDeletes) {
+                              $query->whereNull("{$mainTable}.deleted_at");
+                          }
+
+                          $query->groupBy($uniqueColumn);
                       });
-                
-                Log::info('Applied subquery deduplication for unique field (all columns)', [
+
+                Log::debug('Applied subquery deduplication for unique field (all columns)', [
                     'mainTable' => $mainTable,
                     'uniqueField' => $uniqueField,
-                    'sqlQuery' => $query->toSql()
                 ]);
             } else {
                 $query->select("$mainTable.*");
@@ -1901,38 +2328,39 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         } else {
             // Select the specified columns directly on the existing query
             // Apply GROUP BY if unique field is enabled
-            Log::info('🔍 [DEBUG] Code Path 2: Specific columns selected', [
+            Log::debug('Report builder: specific columns selected', [
                 'columnsCount' => count($selectColumns),
                 'uniqueEnabled' => $unique['enabled'] ?? false,
-                'uniqueField' => $unique['field'] ?? 'N/A',
                 'uniqueDistinct' => $unique['distinct'] ?? false
             ]);
-            
+
             if ($unique['enabled'] && ($unique['distinct'] ?? false) && !empty($unique['field'])) {
-                // Use a subquery approach to handle ONLY_FULL_GROUP_BY mode  
+                // Use a subquery approach to handle ONLY_FULL_GROUP_BY mode
                 $uniqueField = $unique['field'];
                 $uniqueColumn = str_replace($mainTable . '.', '', $uniqueField);
-                
-                // Select specified columns but only for the first occurrence IDs
+
+                // Select specified columns but only for the first occurrence
+                // IDs. Trashed rows are skipped inside the subquery as well,
+                // otherwise MIN(id) can land on a deleted row and drop the
+                // whole group.
                 $query->select($selectColumns)
-                      ->whereIn("$mainTable.id", function($query) use ($mainTable, $uniqueColumn) {
+                      ->whereIn("$mainTable.id", function($query) use ($mainTable, $uniqueColumn, $mainTableSoftDeletes) {
                           $query->select(DB::raw("MIN(id)"))
                                 ->from($mainTable)
-                                ->whereNotNull($uniqueColumn)
-                                ->groupBy($uniqueColumn);
+                                ->whereNotNull($uniqueColumn);
+
+                          if ($mainTableSoftDeletes) {
+                              $query->whereNull("{$mainTable}.deleted_at");
+                          }
+
+                          $query->groupBy($uniqueColumn);
                       });
-                
-                Log::info('✅ Applied subquery deduplication for unique field (Path 2)', [
-                    'uniqueField' => $uniqueField,
-                    'distinctField' => $unique['distinctField'] ?? 'N/A',
+
+                Log::debug('Applied subquery deduplication for unique field', [
                     'columnsCount' => count($selectColumns),
-                    'sqlQuery' => $query->toSql()
                 ]);
             } else {
                 $query->select($selectColumns);
-                Log::info('❌ No unique field applied (Path 2)', [
-                    'reason' => !$unique['enabled'] ? 'disabled' : (empty($unique['field']) ? 'no field' : 'no distinct flag')
-                ]);
             }
 
             // Log the query after selecting columns
@@ -2007,11 +2435,8 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 '<> null'
             ])) {
                 $query->whereNotNull($columnRef);
-                Log::info('Applied IS NOT NULL filter', [
+                Log::debug('Applied IS NOT NULL filter', [
                     'column' => $columnRef,
-                    'operator' => $operator,
-                    'originalOperator' => $operator,
-                    'normalizedOperator' => strtolower(trim($operator))
                 ]);
             } else {
                 $query->where($columnRef, $operator, $value);
@@ -2035,9 +2460,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         if (!empty($excludedRows) && is_array($excludedRows)) {
             // Assume exclusions are based on the main table's primary key 'id'
             $query->whereNotIn("$mainTable.id", $excludedRows);
-            Log::info('Applied row exclusions to query', [
+            // Counts only - the excluded ids identify individual records.
+            Log::debug('Applied row exclusions to query', [
                 'excludedRowsCount' => count($excludedRows),
-                'excludedRows' => $excludedRows,
                 'mainTable' => $mainTable
             ]);
         }
@@ -2113,6 +2538,15 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                             break;
                     }
                 }
+
+                // This count query is rebuilt from scratch rather than cloned,
+                // so it needs the same soft-delete constraints or the total
+                // would not match the rows actually returned.
+                $this->applySoftDeleteConstraints(
+                    $distinctCountQuery,
+                    $joinedTables,
+                    $softDeleteCache
+                );
 
                 // Add the same where clauses as the original query
                 // Since we can't directly copy the where clauses, we'll use the same filter logic
@@ -2288,6 +2722,14 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
     public function exportReport(Request $request)
     {
         try {
+            // Report definition v2 (the semantic model) takes the new path;
+            // every v1 payload falls through unchanged.
+            $definition = $this->semanticDefinitionFrom($request);
+
+            if ($definition !== null) {
+                return $this->exportSemanticReport($request, $definition);
+            }
+
             // Log the raw request data for debugging
 
             // Get the query parameter
@@ -2322,7 +2764,8 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             $reportName = 'report';
             if (!empty($reportId)) {
                 $report = ReportBuilder::find($reportId);
-                if ($report) {
+                // Only borrow the label from a report the caller may read.
+                if ($report && $this->canViewReport($report)) {
                     $reportName = $report->label;
                 }
             }
@@ -2400,6 +2843,8 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 $filename,
                 $format
             );
+        } catch (SemanticException $e) {
+            return $this->semanticErrorResponse($e);
         } catch (\Exception $e) {
             Log::error('Error exporting report: ' . $e->getMessage());
             Log::error('Stack trace: ' . $e->getTraceAsString());
@@ -2431,13 +2876,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 );
             }
 
-            return response()->json(
-                [
-                    'success' => false,
-                    'message' => 'Error exporting report',
-                    'error' => $e->getMessage(),
-                ],
-                500
+            return $this->errorResponse(
+                $e,
+                'Error exporting report',
+                'exportReport'
             );
         }
     }
@@ -4255,73 +4697,243 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
     }
 
     /**
-     * Validate calculated field formula for security
-     * 
-     * @param string $formula
+     * Functions a calculated field is allowed to call.
+     *
+     * Anything not on this list is rejected - the list is an allowlist, not a
+     * set of extra bans, so adding a function here is a deliberate decision.
+     *
+     * @var string[]
+     */
+    private const ALLOWED_FORMULA_FUNCTIONS = [
+        'sum',
+        'count',
+        'avg',
+        'min',
+        'max',
+        'round',
+        'coalesce',
+        'datediff',
+        'now',
+    ];
+
+    /**
+     * Words that must never appear as a bare identifier in a formula.
+     *
+     * They tokenise like a column name but turn the expression into something
+     * other than arithmetic - a boolean, or the start of a clause - so they
+     * are rejected even though the character-level checks let them through.
+     *
+     * @var string[]
+     */
+    private const RESERVED_FORMULA_WORDS = [
+        'and',
+        'or',
+        'not',
+        'xor',
+        'is',
+        'null',
+        'true',
+        'false',
+        'like',
+        'rlike',
+        'regexp',
+        'in',
+        'between',
+        'case',
+        'when',
+        'then',
+        'else',
+        'end',
+        'as',
+        'distinct',
+        'order',
+        'group',
+        'by',
+        'asc',
+        'desc',
+        'div',
+        'mod',
+        'binary',
+        'collate',
+        'interval',
+    ];
+
+    /**
+     * Maximum accepted formula length.
+     */
+    private const MAX_FORMULA_LENGTH = 1000;
+
+    /**
+     * Validate a calculated field formula before it is interpolated into SQL.
+     *
+     * The formula is aggregate/arithmetic over plain `table.column`
+     * identifiers and nothing else. Validation is an allowlist: the string is
+     * tokenised and every token must be a permitted function call, an
+     * identifier, a number or one of `+ - * / ( ) ,`. Anything that does not
+     * tokenise cleanly - a quote, a semicolon, a comment marker, a subquery -
+     * is rejected, so payloads such as `(SELECT password FROM users LIMIT 1)`
+     * cannot get through.
+     *
+     * @param mixed $formula
      * @return string|false Returns safe formula or false if validation fails
      */
     private function validateCalculatedFieldFormula($formula)
     {
-        // Basic security checks to prevent SQL injection
-        $formula = trim($formula);
-        
-        // Reject if empty
-        if (empty($formula)) {
+        if (!is_string($formula)) {
             return false;
         }
 
-        // Convert to lowercase for checks (but preserve original case for return)
-        $lowerFormula = strtolower($formula);
+        $formula = trim($formula);
 
-        // Blacklist dangerous SQL keywords/patterns
-        $dangerousPatterns = [
-            'drop ', 'delete ', 'truncate ', 'alter ', 'create ', 'insert ',
-            'update ', 'grant ', 'revoke ', 'exec ', 'execute ', 'sp_',
-            'xp_', '--', '/*', '*/', 'union ', 'script', '<script',
-            'javascript:', 'vbscript:', 'onload=', 'onerror=', 'eval(',
-            'information_schema', 'mysql.', 'performance_schema', 'sys.'
-        ];
-
-        foreach ($dangerousPatterns as $pattern) {
-            if (strpos($lowerFormula, $pattern) !== false) {
-                Log::warning("Calculated field formula contains dangerous pattern", [
-                    'formula' => $formula,
-                    'pattern' => $pattern
-                ]);
-                return false;
-            }
+        if ($formula === '') {
+            return false;
         }
 
-        // Allow only safe SQL functions and operators
-        $allowedPatterns = [
-            // Math functions
-            'round', 'floor', 'ceil', 'abs', 'sqrt', 'pow',
-            // Date functions  
-            'datediff', 'date_add', 'date_sub', 'now', 'curdate', 'year', 'month', 'day',
-            // String functions
-            'concat', 'substring', 'length', 'upper', 'lower', 'trim',
-            // Aggregate functions
-            'count', 'sum', 'avg', 'min', 'max',
-            // Conditional functions
-            'case', 'when', 'then', 'else', 'end', 'if', 'ifnull', 'coalesce',
-            // Operators and literals
-            '+', '-', '*', '/', '(', ')', ',', '.', '=', '>', '<', '>=', '<=', '!=', '<>',
-            'and', 'or', 'not', 'is', 'null', 'like', 'in', 'between',
-            // Common column patterns (table.column)
-            // Numbers and quotes for literals
-        ];
-
-        // Additional validation could be added here for more sophisticated checking
-        // For now, we'll rely on the blacklist approach and let MySQL validate syntax
-
-        // Ensure formula doesn't exceed reasonable length
-        if (strlen($formula) > 1000) {
-            Log::warning("Calculated field formula too long", [
-                'formula_length' => strlen($formula)
+        if (strlen($formula) > self::MAX_FORMULA_LENGTH) {
+            Log::warning('Calculated field formula too long', [
+                'formula_length' => strlen($formula),
             ]);
             return false;
         }
 
+        // Fast rejections for characters/sequences that can never appear in a
+        // valid formula but are the building blocks of an injection: any kind
+        // of quote, statement separators and comment introducers.
+        if (preg_match('/[\'"`;\\\\@$]/', $formula)) {
+            $this->logFormulaRejection('contains a quote or separator');
+            return false;
+        }
+
+        if (
+            strpos($formula, '--') !== false ||
+            strpos($formula, '/*') !== false ||
+            strpos($formula, '*/') !== false ||
+            strpos($formula, '#') !== false
+        ) {
+            $this->logFormulaRejection('contains a comment token');
+            return false;
+        }
+
+        // Structural SQL keywords have no place in an arithmetic expression.
+        if (
+            preg_match(
+                '/\b(select|union|from|where|insert|update|delete|drop|alter|create|truncate|grant|revoke|exec|execute|into|join|having|limit|offset|sleep|benchmark|information_schema)\b/i',
+                $formula
+            )
+        ) {
+            $this->logFormulaRejection('contains a SQL keyword');
+            return false;
+        }
+
+        // Tokenise. `A` anchors each match to the current offset, so the whole
+        // string has to be consumed by allowed tokens - there is no way to
+        // hide an unrecognised fragment between two valid ones.
+        $tokenPattern =
+            '/\G(?:' .
+            '(?P<space>\s+)' .
+            '|(?P<func>[A-Za-z_][A-Za-z0-9_]*)(?=\s*\()' .
+            '|(?P<ident>[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)?)' .
+            '|(?P<number>\d+(?:\.\d+)?)' .
+            '|(?P<op>[-+*\/(),])' .
+            ')/';
+
+        $offset = 0;
+        $length = strlen($formula);
+
+        while ($offset < $length) {
+            if (
+                !preg_match(
+                    $tokenPattern,
+                    $formula,
+                    $matches,
+                    0,
+                    $offset
+                ) ||
+                $matches[0] === ''
+            ) {
+                $this->logFormulaRejection('contains an unsupported token');
+                return false;
+            }
+
+            if (isset($matches['func']) && $matches['func'] !== '') {
+                if (
+                    !in_array(
+                        strtolower($matches['func']),
+                        self::ALLOWED_FORMULA_FUNCTIONS,
+                        true
+                    )
+                ) {
+                    $this->logFormulaRejection('calls a disallowed function');
+                    return false;
+                }
+            } elseif (isset($matches['ident']) && $matches['ident'] !== '') {
+                // A bare identifier is a column reference; reserved words are
+                // not columns and would change the shape of the expression.
+                foreach (explode('.', strtolower($matches['ident'])) as $part) {
+                    if (
+                        in_array($part, self::RESERVED_FORMULA_WORDS, true)
+                    ) {
+                        $this->logFormulaRejection(
+                            'contains a reserved word'
+                        );
+                        return false;
+                    }
+                }
+            }
+
+            $offset += strlen($matches[0]);
+        }
+
         return $formula;
+    }
+
+    /**
+     * Log a rejected formula.
+     *
+     * The formula itself is not logged: it is caller-supplied content and can
+     * carry whatever the caller typed.
+     *
+     * @param string $reason
+     * @return void
+     */
+    private function logFormulaRejection(string $reason): void
+    {
+        Log::warning('Calculated field formula rejected: ' . $reason);
+    }
+
+    /**
+     * Validate an alias / display name for interpolation into raw SQL.
+     *
+     * Aliases are wrapped in backticks in the generated SQL, so a backtick (or
+     * anything else outside the identifier charset) would let the caller break
+     * out of the identifier and append SQL of their own. A value that does not
+     * already match is coerced rather than dropped, so an existing saved report
+     * keeps rendering its column instead of silently losing it.
+     *
+     * @param mixed $alias
+     * @return string|null Safe alias, or null when nothing usable remains
+     */
+    private function sanitizeAlias($alias): ?string
+    {
+        if (!is_string($alias) && !is_numeric($alias)) {
+            return null;
+        }
+
+        $alias = trim((string) $alias);
+
+        if ($alias === '') {
+            return null;
+        }
+
+        if (!preg_match('/^[A-Za-z0-9_ ]{1,64}$/', $alias)) {
+            Log::warning(
+                'Report builder alias contains unsupported characters; coercing'
+            );
+
+            $alias = preg_replace('/[^A-Za-z0-9_ ]+/', '_', $alias);
+            $alias = trim(substr($alias, 0, 64));
+        }
+
+        return $alias === '' ? null : $alias;
     }
 }
