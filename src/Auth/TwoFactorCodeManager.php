@@ -47,16 +47,22 @@ class TwoFactorCodeManager
     /**
      * Should this login be challenged?
      *
-     * The production guard is deliberate and unconditional: both flows this
-     * replaces (the package's TOTP check and the CRM's SMS check) only ever
-     * demanded a second factor in production, because outside production there
-     * is no SMS gateway and no shared authenticator, and a developer locked out
-     * of staging cannot self-serve. Anything else here would break every
-     * existing local and staging login on upgrade.
+     * The production-only default is deliberate: both flows this replaces
+     * (the package's TOTP check and the CRM's SMS check) only ever demanded a
+     * second factor in production, because outside production there is no SMS
+     * gateway and no shared authenticator, and a developer locked out of
+     * staging cannot self-serve. `auth.two_factor.environments` widens the
+     * gate deliberately (e.g. to review the challenge on a dev box with a
+     * real sender wired) without changing any existing deployment's default.
      */
     public function shouldChallenge(object $user, Request $request): bool
     {
-        if (! app()->environment('production')) {
+        $environments = (array) ModuleConfig::get(
+            'auth.two_factor.environments',
+            ['production']
+        );
+
+        if (! app()->environment(...$environments)) {
             return false;
         }
 

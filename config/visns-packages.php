@@ -558,6 +558,9 @@ return [
         'two_factor' => [
             'driver' => 'totp',
             'trigger' => 'always',
+            // Environments in which a second factor is ever demanded. The
+            // production-only default matches every flow this module replaced.
+            'environments' => ['production'],
             'ip_column' => 'last_logged_ip_address',
             'code_column' => 'two_factor_token',
             'code_sent_at_column' => 'two_factor_token_sent_at',
