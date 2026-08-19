@@ -312,6 +312,92 @@ class OtpModuleTest extends TestCase
         ])->assertStatus(401);
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | Consume on success
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_by_default_a_spent_code_still_works_inside_its_window(): void
+    {
+        $contact = $this->contact();
+        $code = $this->requestCode();
+
+        $this->postJson('/api/auth/login-otp', [
+            'contact' => 'jo@example.test',
+            'otp_code' => $code,
+        ])->assertOk();
+
+        // The replay window the ported controller has always had. Documented
+        // rather than endorsed - see consume_on_success.
+        $this->assertNotNull($contact->fresh()->otp_code);
+
+        $this->postJson('/api/auth/login-otp', [
+            'contact' => 'jo@example.test',
+            'otp_code' => $code,
+        ])->assertOk();
+    }
+
+    public function test_consume_on_success_closes_the_replay_window(): void
+    {
+        config()->set('visns-packages.otp.consume_on_success', true);
+
+        $contact = $this->contact();
+        $code = $this->requestCode();
+
+        $this->postJson('/api/auth/login-otp', [
+            'contact' => 'jo@example.test',
+            'otp_code' => $code,
+        ])->assertOk();
+
+        $contact->refresh();
+
+        $this->assertNull($contact->otp_code);
+        $this->assertNull($contact->otp_sent_at);
+
+        // One code, one login: anyone who saw the code on a lock screen cannot
+        // walk in behind the user.
+        $this->postJson('/api/auth/login-otp', [
+            'contact' => 'jo@example.test',
+            'otp_code' => $code,
+        ])->assertStatus(401);
+    }
+
+    public function test_consume_on_success_still_clears_the_throttling_state(): void
+    {
+        config()->set('visns-packages.otp.consume_on_success', true);
+
+        $contact = $this->contact();
+        $code = $this->requestCode();
+
+        // Two near misses, then the real thing.
+        foreach (['000000', '111111'] as $wrong) {
+            $this->postJson('/api/auth/login-otp', [
+                'contact' => 'jo@example.test',
+                'otp_code' => $wrong,
+            ])->assertStatus(401);
+        }
+
+        $this->postJson('/api/auth/login-otp', [
+            'contact' => 'jo@example.test',
+            'otp_code' => $code,
+        ])->assertOk();
+
+        $contact->refresh();
+
+        // Otherwise the next code would start life two attempts from its
+        // ceiling.
+        $this->assertSame(0, (int) $contact->otp_attempts);
+        $this->assertNull($contact->otp_locked_until);
+    }
+
+    public function test_consume_on_success_defaults_off(): void
+    {
+        $shipped = require __DIR__ . '/../../../config/visns-packages.php';
+
+        $this->assertFalse($shipped['otp']['consume_on_success']);
+    }
+
     public function test_the_attempt_ceiling_locks_out_a_brute_force(): void
     {
         $contact = $this->contact();

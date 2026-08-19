@@ -170,9 +170,45 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
             ]
         );
 
-        event(new CallQueueRinging($call));
+        $ringing = $this->eventClass('ringing', CallQueueRinging::class);
+
+        event(new $ringing($call));
 
         return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Which class to dispatch for one of the three call-queue events.
+     *
+     * Configurable because Laravel's Event::fake() keys listeners by EXACT
+     * class name - a subclass or a class_alias of the package event is a
+     * different key entirely - so an application whose listeners and tests are
+     * written against its own App\Events\CallQueue* classes can only be reached
+     * by dispatching those classes themselves.
+     *
+     * A name that does not resolve falls back to the package's own event rather
+     * than throwing: a typo in config should cost the pop its custom listener,
+     * not stop the webhook recording calls at all.
+     *
+     * @param  class-string  $default
+     * @return class-string
+     */
+    private function eventClass(string $key, string $default): string
+    {
+        $configured = ModuleConfig::get('call_queue.events.' . $key);
+
+        if (is_string($configured) && $configured !== '' && class_exists($configured)) {
+            return $configured;
+        }
+
+        if (is_string($configured) && $configured !== '') {
+            Log::warning('zoom.webhook configured event class does not exist', [
+                'event' => $key,
+                'class' => $configured,
+            ]);
+        }
+
+        return $default;
     }
 
     /**
@@ -231,11 +267,11 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
 
         $call->delete();
 
-        event(
-            $kind === 'answered'
-                ? new CallQueueAnswered($callId)
-                : new CallQueueEnded($callId)
-        );
+        $class = $kind === 'answered'
+            ? $this->eventClass('answered', CallQueueAnswered::class)
+            : $this->eventClass('ended', CallQueueEnded::class);
+
+        event(new $class($callId));
 
         return response()->json(['status' => 'ok']);
     }

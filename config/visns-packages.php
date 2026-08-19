@@ -409,6 +409,43 @@ return [
         'reset_subject' => null,
 
         /*
+        | Password reset extension points.
+        |
+        | 'reset_user_resolver' - invokable ($email, $request): ?User, used by
+        | BOTH forgot() (which account is this address for?) and reset() (which
+        | account does this token's stored address belong to?). Null keeps the
+        | built-in lookup: a straight match on the `email` column. An
+        | application whose accounts can be reached by more than one address -
+        | the Throughlife CRM resolves a client's contact email to the login
+        | account behind it - supplies its own.
+        |
+        | 'reset_key_by_resolved_email' - which address the password_resets row
+        | is keyed on. False (the default, and what this package has always
+        | done) stores the address the user TYPED; true stores the resolved
+        | account's own email. The two differ exactly when the resolver looked
+        | past the typed address - and when they differ, `false` writes a row
+        | that reset() can never match an account back to. Any application
+        | setting a resolver almost certainly wants this true.
+        |
+        | 'reset_url_builder' - invokable ($user, $token, $request): string,
+        | returning the whole link. Null reproduces the historical build:
+        | front_end_url when the request carries frontend=true, app_url
+        | otherwise, plus '/verify/{token}'. Applications needing another shape
+        | (a query-string token, a portal host, a per-user path) build it
+        | themselves.
+        |
+        | 'after_reset_hooks' - invokables ($user, $plainPassword) run once the
+        | new password is saved, for mirroring it onto a second record (the CRM
+        | keeps a copy on the client's contact row). They are handed the
+        | PLAINTEXT password, because a mirror generally has to hash it itself -
+        | so a hook must never log, transmit or persist it unhashed.
+        */
+        'reset_user_resolver' => null,
+        'reset_key_by_resolved_email' => false,
+        'reset_url_builder' => null,
+        'after_reset_hooks' => [],
+
+        /*
         | Shape of the JSON body returned by logout_api(). The historical shape
         | is kept as the default; an application wanting the CRM's `{"error":""}`
         | sets it here.
@@ -618,6 +655,20 @@ return [
         // a staging login is possible without a live SMS gateway.
         'expose_code_outside_production' => true,
 
+        /*
+        | Clear the stored code the moment it is spent.
+        |
+        | False (the default) is what the controller this was ported from does:
+        | a used code keeps working until it expires, so anyone who saw it -
+        | over the shoulder, in an SMS preview on a lock screen, in a mail
+        | client's notification - can log in again inside that window.
+        |
+        | True closes the window: one code, one login. It is the right setting
+        | for any new adopter; it defaults to false only so that adopting this
+        | module cannot silently change how an existing deployment behaves.
+        */
+        'consume_on_success' => false,
+
         // Null = inherit auth.minimal_user.
         'minimal_user' => null,
 
@@ -740,6 +791,34 @@ return [
         'tables' => [
             'live_calls' => 'zoom_live_queue_calls',
             'settings' => 'zoom_call_queue_settings',
+        ],
+
+        /*
+        | The event classes the webhook dispatches.
+        |
+        | Configurable because Laravel's Event::fake() keys listeners by EXACT
+        | class name: a subclass, a container alias or a class_alias() of the
+        | package event is a different key, so an application whose listeners
+        | and tests are written against its own App\Events\CallQueue* classes
+        | cannot be reached by dispatching the package's. Naming them here lets
+        | the module drive an application's existing event classes verbatim.
+        |
+        | REQUIRED CONSTRUCTOR CONTRACT - a configured class is constructed with
+        | exactly the same arguments as the package class it replaces:
+        |
+        |   ringing            __construct(ZoomLiveQueueCall $call)
+        |   answered / ended   __construct(string $callId)
+        |
+        | The model passed to `ringing` is
+        | Visnsstudio\VisnsPackages\Models\ZoomLiveQueueCall, NOT the
+        | application's own model of the same name. A replacement class must
+        | therefore widen or drop that parameter's type hint, or PHP will refuse
+        | the call - see the README.
+        */
+        'events' => [
+            'ringing' => \Visnsstudio\VisnsPackages\Events\CallQueueRinging::class,
+            'answered' => \Visnsstudio\VisnsPackages\Events\CallQueueAnswered::class,
+            'ended' => \Visnsstudio\VisnsPackages\Events\CallQueueEnded::class,
         ],
 
         /*

@@ -41,20 +41,25 @@ class AuthController extends \App\Http\Controllers\Controller
 
         $request->validate(['email' => 'required|email']);
 
-        // Historically the package model; now the configured one. For the
-        // shipped default (visns-packages.user_model = App\Models\User) that is
-        // the same users table, so the count is unchanged - but an application
-        // pointing user_model somewhere else now gets its own accounts here
-        // instead of the package's.
-        $checkUser = ModuleConfig::userQuery('auth')
-            ->where('email', $request->input('email'))
-            ->count();
+        // Which account is this address for? The built-in resolver matches the
+        // `email` column, which is all this endpoint has ever done; an
+        // application whose accounts are reachable by more than one address
+        // configures its own.
+        $user = $this->resolveResetUser((string) $request->input('email'), $request);
 
-        if ($checkUser > 0) {
+        if ($user) {
             $token = Str::random(60);
 
             DB::table('password_resets')->insert([
-                'email' => $request->email,
+                // The typed address by default, which is what this package has
+                // always stored. An application with a resolver wants the
+                // RESOLVED account's address instead: the two differ precisely
+                // when the resolver looked past what was typed, and a row keyed
+                // on the typed address is then one reset() can never match an
+                // account back to.
+                'email' => ModuleConfig::get('auth.reset_key_by_resolved_email', false)
+                    ? $user->email
+                    : $request->email,
                 'token' => $token,
                 'created_at' => Carbon::now(),
             ]);
@@ -68,14 +73,7 @@ class AuthController extends \App\Http\Controllers\Controller
                 $to = ModuleConfig::get('auth.mail_to_dev');
             }
 
-            if (
-                $request->has('frontend') &&
-                $request->input('frontend') == 'true'
-            ) {
-                $url = ModuleConfig::get('auth.front_end_url') . '/verify/' . $token;
-            } else {
-                $url = ModuleConfig::get('auth.app_url') . '/verify/' . $token;
-            }
+            $url = $this->buildResetUrl($user, $token, $request);
 
             if ($to != '' && filter_var($to, FILTER_VALIDATE_EMAIL)) {
                 $content =
@@ -153,6 +151,61 @@ class AuthController extends \App\Http\Controllers\Controller
         return null;
     }
 
+    /**
+     * Which account a password-reset address belongs to.
+     *
+     * Shared by forgot() (resolving what the user typed) and reset() (resolving
+     * the address stored on the token row) so the two halves of one reset can
+     * never disagree about which account is being changed.
+     *
+     * @return object|null
+     */
+    protected function resolveResetUser(string $email, Request $request)
+    {
+        if ($resolver = ModuleConfig::callable('auth.reset_user_resolver')) {
+            return $resolver($email, $request);
+        }
+
+        return ModuleConfig::userQuery('auth')->where('email', $email)->first();
+    }
+
+    /**
+     * The link that goes in the reset email.
+     *
+     * The default is the historical build and stays byte-identical: the
+     * `frontend=true` flag picks front_end_url over app_url, and the token is a
+     * path segment. Anything else - a query-string token, a portal host, a
+     * per-account path - is the application's to construct.
+     */
+    protected function buildResetUrl($user, string $token, Request $request): string
+    {
+        if ($builder = ModuleConfig::callable('auth.reset_url_builder')) {
+            return (string) $builder($user, $token, $request);
+        }
+
+        $base =
+            $request->has('frontend') && $request->input('frontend') == 'true'
+                ? ModuleConfig::get('auth.front_end_url')
+                : ModuleConfig::get('auth.app_url');
+
+        return $base . '/verify/' . $token;
+    }
+
+    /**
+     * Fire the after-reset hooks.
+     *
+     * They receive the plaintext password because a hook's usual job is to
+     * mirror it onto another record that hashes it its own way. That makes a
+     * hook a place where a plaintext credential briefly exists - it must not be
+     * logged, returned or persisted unhashed.
+     */
+    protected function runAfterResetHooks($user, string $plainPassword): void
+    {
+        foreach (ModuleConfig::callables('auth.after_reset_hooks') as $hook) {
+            $hook($user, $plainPassword);
+        }
+    }
+
     public function reset(Request $request)
     {
         $error = '';
@@ -177,16 +230,37 @@ class AuthController extends \App\Http\Controllers\Controller
                 ->where('token', $request->input('code'))
                 ->first();
 
-            // Configured model rather than the package model - see forgot().
-            $user = ModuleConfig::userQuery('auth')
-                ->where('email', $token->email)
-                ->first();
-            $user->password = Hash::make($request->input('password'));
-            $user->save();
+            // Resolved through the same resolver forgot() used, so the account
+            // being changed is the one the token was issued for.
+            $user = $this->resolveResetUser((string) $token->email, $request);
 
-            DB::table('password_resets')
-                ->where('email', $user->email)
-                ->delete();
+            if (! $user) {
+                // A row whose address no longer resolves to anything - a
+                // renamed account, or a resolver that has since narrowed.
+                // Previously this dereferenced null and fatalled; answering
+                // with the same message a stale token gets is both truthful
+                // and useless to someone probing for valid addresses.
+                $error = ModuleConfig::message(
+                    'auth',
+                    'invalid_reset_token',
+                    'The token is no longer valid, please start the password request process again.'
+                );
+            } else {
+                $plainPassword = (string) $request->input('password');
+
+                $user->password = Hash::make($plainPassword);
+                $user->save();
+
+                $this->runAfterResetHooks($user, $plainPassword);
+
+                // Keyed on the ROW's address, not the resolved account's. They
+                // are the same thing unless a resolver looked past the typed
+                // address, and in that case deleting by the account's own
+                // address would leave the spent token alive and reusable.
+                DB::table('password_resets')
+                    ->where('email', $token->email)
+                    ->delete();
+            }
         }
 
         return response()->json([

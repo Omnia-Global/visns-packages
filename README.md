@@ -23,10 +23,12 @@ A comprehensive Laravel package that provides enhanced authentication, file mana
         -   [API Authentication](#api-authentication)
     -   [Auth Platform Modules](#auth-platform-modules)
         -   [Login extension points](#login-extension-points)
+        -   [Password reset: resolver, link and hooks](#password-reset-resolver-link-and-hooks)
         -   [Two-factor: the code channel](#two-factor-the-code-channel)
         -   [Passwordless OTP login](#passwordless-otp-login)
         -   [Staff impersonation](#staff-impersonation)
         -   [Zoom Phone call queue pop](#zoom-phone-call-queue-pop)
+        -   [Middleware aliases](#middleware-aliases)
         -   [Testing](#testing)
     -   [File Management](#file-management)
     -   [User Model](#user-model)
@@ -590,6 +592,68 @@ built their mailable around it. To use a sane signature, configure either:
 ],
 ```
 
+### Password reset: resolver, link and hooks
+
+`forgot()` and `reset()` originally assumed one account, one address, one link
+shape. Four keys lift each of those assumptions; all four default to exactly what
+the endpoints did before.
+
+| Config key | What it takes | Default |
+| --- | --- | --- |
+| `auth.reset_user_resolver` | invokable `($email, $request): ?User` | match on the `email` column |
+| `auth.reset_key_by_resolved_email` | bool | `false` (store the typed address) |
+| `auth.reset_url_builder` | invokable `($user, $token, $request): string` | `{app_url\|front_end_url}/verify/{token}` |
+| `auth.after_reset_hooks` | array of invokables `($user, $plainPassword)` | none |
+
+The **resolver** is used by *both* halves: `forgot()` asks it which account a
+typed address belongs to, and `reset()` asks it which account the address stored
+on the token row belongs to. Using one resolver for both is what stops the two
+halves of a single reset disagreeing about whose password is being changed.
+
+> **If you set a resolver, set `reset_key_by_resolved_email` too.** The row is
+> keyed on the typed address by default. That is only correct while the typed
+> address *is* the account's address — the moment a resolver looks past it, the
+> row records something `reset()` cannot match an account back to, and every
+> token it issues is dead on arrival. The default stays `false` purely so
+> existing installs are untouched.
+
+The **URL builder** owns the whole link, so a token can be a query parameter, a
+different host, anything:
+
+```php
+'auth' => [
+    'reset_user_resolver' => \App\Auth\ContactEmailResolver::class,
+    'reset_key_by_resolved_email' => true,
+    'reset_url_builder' => \App\Auth\PortalResetUrl::class,
+    'after_reset_hooks' => [\App\Auth\MirrorPasswordToContact::class],
+],
+```
+
+```php
+class PortalResetUrl
+{
+    public function __invoke($user, string $token, Request $request): string
+    {
+        $base = rtrim(config('portal.url'), '/') . '/verify/';
+
+        return $request->input('portal') === 'true'
+            ? $base . '?code=' . $token   // portal reads it from the query string
+            : $base . $token;             // CRM reads it from the path
+    }
+}
+```
+
+**After-reset hooks** run once the new password is saved, for mirroring it onto a
+second record. They are handed the **plaintext** password, because a mirror
+usually has to hash it its own way — which makes a hook one of the few places a
+plaintext credential exists. Never log, return or persist it unhashed.
+
+Two related fixes while you are here: a token row whose stored address no longer
+resolves to an account now answers the same "token is no longer valid" message
+instead of dereferencing null and 500-ing; and the spent row is deleted by the
+**row's** address rather than the resolved account's, so a token cannot survive
+its own use when the two differ.
+
 ### Two-factor: the code channel
 
 Alongside the existing authenticator-app flow there is now a driver that sends a
@@ -679,6 +743,16 @@ email or an SMS.
 `auth.minimal_user` instead of the model — for callers keeping the user in a
 cookie, which has a 4KB limit the full model does not fit inside.
 
+> **Set `otp.consume_on_success => true` unless you have a reason not to.**
+> With the default `false` — which is what the controller this was ported from
+> does — a code keeps working until it expires, *including after it has already
+> logged someone in*. Anyone who saw it in the meantime, over a shoulder or in a
+> lock-screen SMS preview, can log in behind the user for the rest of the
+> window. `true` clears the code the moment it is spent: one code, one login.
+> It ships `false` only so that adopting this module cannot silently change how
+> an existing deployment behaves. The attempt counter and any lock are reset on
+> success either way.
+
 > **Wart, faithfully preserved.** `login-otp` validates inside its own
 > catch-all, so a wrong-length code answers **500 with the generic failure
 > message**, not Laravel's 422 field error. That is what the front end this was
@@ -764,6 +838,41 @@ the monitor permission; set `register_broadcast_channel => false` to do it
 yourself in `routes/channels.php`. The front end should read the channel name
 from `/ajax/call-queue/live` rather than hardcoding it.
 
+**Dispatching your own event classes.** An application that already has
+`App\Events\CallQueue*` — with listeners and tests written against them — cannot
+be reached by dispatching the package's classes. Laravel's `Event::fake()` and
+its listener registry key on the **exact** class name, so a subclass, a
+`class_alias()` or a container binding is a different key and simply never
+matches. Name your classes instead:
+
+```php
+'call_queue' => ['events' => [
+    'ringing'  => \App\Events\CallQueueRinging::class,
+    'answered' => \App\Events\CallQueueAnswered::class,
+    'ended'    => \App\Events\CallQueueEnded::class,
+]],
+```
+
+**Required constructor contract** — a replacement is constructed with exactly the
+arguments the package class it replaces takes:
+
+| Key | Constructor |
+| --- | --- |
+| `ringing` | `__construct(ZoomLiveQueueCall $call)` |
+| `answered` | `__construct(string $callId)` |
+| `ended` | `__construct(string $callId)` |
+
+> The model handed to `ringing` is
+> **`Visnsstudio\VisnsPackages\Models\ZoomLiveQueueCall`**, not your application's
+> own model of the same name. If your event type-hints `App\Models\ZoomLiveQueueCall`
+> the call is a `TypeError` — widen the hint to the package model, or drop it.
+> This is the one edit adopting the module requires in an existing event class.
+
+Each key is independent; anything left unset keeps the package's own event. A
+class name that does not load falls back to the package event and logs a warning
+— a typo in config should cost the pop its custom listener, not stop the webhook
+recording calls at all.
+
 Behaviour worth knowing before you point Zoom at it:
 
 - The webhook answers **200 to everything** bar a bad signature. Zoom retries and
@@ -791,6 +900,20 @@ Two tables are needed; publish and run the migrations
 (`vendor:publish --tag=visns-packages-migrations`). Both no-op if the table
 already exists, so an application that already has them can adopt the module
 without a clash.
+
+### Middleware aliases
+
+The package fills in the aliases its own routes need — `zoom-webhook` and
+`zoom_webhook` (both spellings, so route definitions move across untouched) and,
+when Spatie is installed, `permission`. Each is only registered **if the
+application has not already claimed that name**: service providers boot after an
+application's own middleware registration, so a package that registered
+unconditionally would always win and silently change what every route carrying
+that name does.
+
+`accept-json` is the exception and is still registered unconditionally — it
+predates this rule, and changing it would alter which class an existing
+consumer's routes resolve to.
 
 ### Testing
 

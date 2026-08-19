@@ -204,6 +204,18 @@ class OtpController extends \App\Http\Controllers\Controller
 
             $contact->{$columns['attempts']} = 0;
             $contact->{$columns['locked_until']} = null;
+
+            // And, when the application asks for it, the code itself: one code,
+            // one login. Without this a spent code keeps working until it
+            // expires, so anyone who saw it - over a shoulder, in a lock-screen
+            // SMS preview, in a mail notification - can log in again inside
+            // that window. Off by default only because turning it on changes
+            // how an existing deployment behaves.
+            if (ModuleConfig::get('otp.consume_on_success', false)) {
+                $contact->{$columns['code']} = null;
+                $contact->{$columns['sent_at']} = null;
+            }
+
             $contact->save();
 
             // Step 5: mint the token and stamp the login.

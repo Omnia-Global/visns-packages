@@ -166,22 +166,37 @@ class VisnsPackagesServiceProvider extends ServiceProvider
 
         // Register middleware
         $router = $this->app['router'];
-        $router->aliasMiddleware('accept-json', AcceptJson::class);
-        $router->aliasMiddleware('zoom-webhook', VerifyZoomWebhookSignature::class);
-        // The consuming CRM registers this alias with an underscore; keep both
-        // so an application can move its route definitions across untouched.
-        $router->aliasMiddleware('zoom_webhook', VerifyZoomWebhookSignature::class);
 
-        // The opt-in modules gate their routes with `permission:...`. That alias
-        // is normally declared in the application's own bootstrap, so it is only
-        // filled in here when Spatie is installed AND the application has not
-        // already claimed the name - clobbering an application's own wrapper
-        // would silently change what every one of its routes checks.
-        if (
-            class_exists(\Spatie\Permission\Middleware\PermissionMiddleware::class) &&
-            !array_key_exists('permission', $router->getMiddleware())
-        ) {
-            $router->aliasMiddleware(
+        // `accept-json` predates this package having a convention about aliases
+        // and has always been registered unconditionally; leaving it that way
+        // rather than quietly changing which class an existing consumer's
+        // routes resolve to.
+        $router->aliasMiddleware('accept-json', AcceptJson::class);
+
+        // Everything below only fills a name in when the application has not
+        // already claimed it. A package that overwrites an application's alias
+        // silently changes what every route carrying that name actually does -
+        // and because providers boot after the application's own middleware
+        // registration, the package would always win.
+        //
+        // Both spellings of the Zoom alias: applications in the wild use the
+        // underscore form, so route definitions can move across untouched.
+        $this->aliasMiddlewareUnlessClaimed(
+            $router,
+            'zoom-webhook',
+            VerifyZoomWebhookSignature::class
+        );
+        $this->aliasMiddlewareUnlessClaimed(
+            $router,
+            'zoom_webhook',
+            VerifyZoomWebhookSignature::class
+        );
+
+        // The opt-in modules gate their routes with `permission:...`, an alias
+        // normally declared in the application's own bootstrap.
+        if (class_exists(\Spatie\Permission\Middleware\PermissionMiddleware::class)) {
+            $this->aliasMiddlewareUnlessClaimed(
+                $router,
                 'permission',
                 \Spatie\Permission\Middleware\PermissionMiddleware::class
             );
@@ -192,6 +207,25 @@ class VisnsPackagesServiceProvider extends ServiceProvider
 
         // Broadcast channel authorization for the call queue pop.
         $this->registerCallQueueChannel();
+    }
+
+    /**
+     * Register a middleware alias, unless the application already defines one
+     * under that name.
+     *
+     * @param  \Illuminate\Routing\Router  $router
+     * @return void
+     */
+    protected function aliasMiddlewareUnlessClaimed(
+        $router,
+        string $name,
+        string $class
+    ): void {
+        if (array_key_exists($name, $router->getMiddleware())) {
+            return;
+        }
+
+        $router->aliasMiddleware($name, $class);
     }
 
     /**
