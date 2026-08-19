@@ -380,6 +380,13 @@ return [
         'allow_multiple_sessions' => env('ALLOW_MULTIPLE_SESSIONS', false),
         'default_user_role' => env('DEFAULT_USER_ROLE'),
 
+        // Socialite redirects. FRONTEND_URL is a different variable from the
+        // FRONT_END_URL above; both exist in the wild, so both are honoured.
+        'socialite' => [
+            'frontend_url' => env('FRONTEND_URL', '/'),
+            'default_role' => env('SOCIALITE_DEFAULT_ROLE'),
+        ],
+
         /*
         | Password reset mail.
         |
@@ -743,6 +750,14 @@ return [
         */
         'channel' => 'call-queue-monitor',
         'append_env_suffix' => false,
+
+        /*
+        | Authorize the private channel here, admitting anyone holding the
+        | monitor permission. Set false when the application authorizes the
+        | channel itself in routes/channels.php - the package registration is a
+        | convenience, not a policy.
+        */
+        'register_broadcast_channel' => true,
 
         /*
         | Caller enrichment: an invokable implementing

@@ -8,17 +8,31 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Facades\Session;
 use Illuminate\Validation\ValidationException;
-use Laravel\Fortify\Fortify;
+use Symfony\Component\HttpFoundation\Response;
 
-use App\Mail\GenericMail;
-
-use Visnsstudio\VisnsPackages\Models\User;
+use Visnsstudio\VisnsPackages\Auth\DefaultUserResolver;
+use Visnsstudio\VisnsPackages\Auth\TwoFactorCodeManager;
 use Visnsstudio\VisnsPackages\Models\TwoFactorRememberToken;
+use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 
 use Carbon\Carbon;
 
+/**
+ * The package login flow.
+ *
+ * Two rules govern every change made here:
+ *
+ *  - With a stock config this controller behaves exactly as it always has. Every
+ *    extension point below defaults to the historical behaviour, so an
+ *    application upgrading the package without publishing the config sees no
+ *    difference at all.
+ *
+ *  - Nothing reads the environment directly. An environment read returns null
+ *    once `config:cache` has run, which is exactly the state production runs in,
+ *    so such a read works in development and silently evaporates on deploy.
+ *    Everything comes from config('visns-packages.auth.*') via ModuleConfig.
+ */
 class AuthController extends \App\Http\Controllers\Controller
 {
     public function forgot(Request $request)
@@ -27,7 +41,14 @@ class AuthController extends \App\Http\Controllers\Controller
 
         $request->validate(['email' => 'required|email']);
 
-        $checkUser = User::where('email', $request->only('email'))->count();
+        // Historically the package model; now the configured one. For the
+        // shipped default (visns-packages.user_model = App\Models\User) that is
+        // the same users table, so the count is unchanged - but an application
+        // pointing user_model somewhere else now gets its own accounts here
+        // instead of the package's.
+        $checkUser = ModuleConfig::userQuery('auth')
+            ->where('email', $request->input('email'))
+            ->count();
 
         if ($checkUser > 0) {
             $token = Str::random(60);
@@ -38,19 +59,22 @@ class AuthController extends \App\Http\Controllers\Controller
                 'created_at' => Carbon::now(),
             ]);
 
-            if (env('APP_ENV') == 'production') {
+            if (app()->environment('production')) {
                 $to = $request->email;
             } else {
-                $to = env('MAIL_TO_DEV');
+                // Outside production every reset mail is funnelled to one
+                // address so a copied production database cannot mail real
+                // clients.
+                $to = ModuleConfig::get('auth.mail_to_dev');
             }
 
             if (
                 $request->has('frontend') &&
                 $request->input('frontend') == 'true'
             ) {
-                $url = env('FRONT_END_URL') . '/verify/' . $token;
+                $url = ModuleConfig::get('auth.front_end_url') . '/verify/' . $token;
             } else {
-                $url = env('APP_URL') . '/verify/' . $token;
+                $url = ModuleConfig::get('auth.app_url') . '/verify/' . $token;
             }
 
             if ($to != '' && filter_var($to, FILTER_VALIDATE_EMAIL)) {
@@ -62,21 +86,71 @@ class AuthController extends \App\Http\Controllers\Controller
                 $content .=
                     '<p>If you have not requested for a password reset, please ignore this email.</p>';
 
-                Mail::to($to)->send(
-                    new GenericMail(
-                        $content,
-                        env('MAIL_FROM_ADDRESS'),
-                        env('APP_NAME') . ' - Password Reset Request'
-                    )
-                );
+                $mailable = $this->buildResetMailable($content);
+
+                if ($mailable !== null) {
+                    Mail::to($to)->send($mailable);
+                }
             }
         } else {
-            $error = 'The email address is not found, please try again.';
+            $error = ModuleConfig::message(
+                'auth',
+                'email_not_found',
+                'The email address is not found, please try again.'
+            );
         }
 
         return response()->json([
             'error' => $error,
         ]);
+    }
+
+    /**
+     * Build the password-reset mailable.
+     *
+     * Three tiers, in order:
+     *   1. auth.reset_mail_factory - fn ($content, $subject): Mailable.
+     *   2. auth.reset_mailable     - new $mailable($content, $subject, []).
+     *   3. Neither set             - \App\Mail\GenericMail($content, $from, $subject).
+     *
+     * Tier 3 looks wrong and is kept on purpose: the package has always passed
+     * the from-address as the second argument, and applications have built their
+     * GenericMail around that. Changing it would silently retitle every reset
+     * email in every existing installation. Applications with a sane signature
+     * use tier 1 or 2.
+     *
+     * The class is referenced fully-qualified and guarded with class_exists so
+     * the package no longer hard-depends on an application class merely to be
+     * loaded; with nothing configured and no GenericMail present the send is
+     * skipped and the endpoint answers exactly as before.
+     *
+     * @return \Illuminate\Contracts\Mail\Mailable|null
+     */
+    protected function buildResetMailable(string $content)
+    {
+        $subject =
+            ModuleConfig::get('auth.reset_subject')
+                ?: ModuleConfig::get('auth.app_name') . ' - Password Reset Request';
+
+        if ($factory = ModuleConfig::callable('auth.reset_mail_factory')) {
+            return $factory($content, $subject);
+        }
+
+        $mailable = ModuleConfig::get('auth.reset_mailable');
+
+        if (is_string($mailable) && $mailable !== '' && class_exists($mailable)) {
+            return new $mailable($content, $subject, []);
+        }
+
+        if (class_exists(\App\Mail\GenericMail::class)) {
+            return new \App\Mail\GenericMail(
+                $content,
+                ModuleConfig::get('auth.mail_from_address'),
+                $subject
+            );
+        }
+
+        return null;
     }
 
     public function reset(Request $request)
@@ -93,14 +167,20 @@ class AuthController extends \App\Http\Controllers\Controller
             ->count();
 
         if ($checkToken == 0) {
-            $error =
-                'The token is no longer valid, please start the password request process again.';
+            $error = ModuleConfig::message(
+                'auth',
+                'invalid_reset_token',
+                'The token is no longer valid, please start the password request process again.'
+            );
         } else {
             $token = DB::table('password_resets')
                 ->where('token', $request->input('code'))
                 ->first();
 
-            $user = User::where('email', $token->email)->first();
+            // Configured model rather than the package model - see forgot().
+            $user = ModuleConfig::userQuery('auth')
+                ->where('email', $token->email)
+                ->first();
             $user->password = Hash::make($request->input('password'));
             $user->save();
 
@@ -117,51 +197,78 @@ class AuthController extends \App\Http\Controllers\Controller
     public function authenticate(Request $request)
     {
         $error = '';
-
-        // Determine if the input is an email address or a username
-        $isEmail =
-            filter_var($request->input('email'), FILTER_VALIDATE_EMAIL) !==
-            false;
-
-        // Prepare credentials based on the input type
-        $credentials = $isEmail
-            ? [
-                'email' => $request->input('email'),
-                'password' => $request->input('password'),
-            ]
-            : [
-                'username' => $request->input('email'),
-                'password' => $request->input('password'),
-            ];
-
-        $user = '';
         $requiresTwoFactor = false;
 
-        // First, find the user by email or username
-        if ($isEmail) {
-            $user = \App\Models\User::where(
-                'email',
-                $request->input('email')
-            )->first();
-        } else {
-            $user = \App\Models\User::where(
-                'username',
-                $request->input('email')
-            )->first();
+        // '' rather than null on failure: the historical response shape, which
+        // the front end distinguishes from a user object.
+        $payload = '';
+
+        $user = $this->resolveUser((string) $request->input('email'), $request);
+
+        // Gates normally run after the password check so they cannot be used to
+        // probe which accounts exist. An application that must reject an account
+        // before the password is even looked at opts in explicitly.
+        if ($user && $this->gatesRunFirst()) {
+            if ($gate = $this->runPreLoginGates($user, $request)) {
+                return $gate;
+            }
         }
 
-        // If user exists, check if disabled and then check password
         if ($user && $user->disabled) {
-            $error =
-                'Your account has been disabled. Please contact the administrator.';
+            $error = ModuleConfig::message(
+                'auth',
+                'account_disabled',
+                'Your account has been disabled. Please contact the administrator.'
+            );
             $request->session()->flash('errors');
-            $user = ''; // Reset user if account is disabled
         } elseif (
             $user &&
             Hash::check($request->input('password'), $user->password)
         ) {
-            // Check if user has 2FA enabled and confirmed
-            if ($user->two_factor_secret && $user->two_factor_confirmed_at) {
+            if (! $this->gatesRunFirst()) {
+                if ($gate = $this->runPreLoginGates($user, $request)) {
+                    return $gate;
+                }
+            }
+
+            if ($this->usesCodeDriver()) {
+                $manager = $this->twoFactorManager();
+
+                if ($manager->shouldChallenge($user, $request)) {
+                    try {
+                        $manager->send($user, $manager->issue($user));
+                    } catch (\Throwable $e) {
+                        // A code that never left the building must not let the
+                        // login through: refuse, and say so.
+                        return response()->json([
+                            'error' => ModuleConfig::message(
+                                'auth',
+                                'two_factor_send_failed',
+                                'The verification code could not be sent, please try again.'
+                            ),
+                            'previous' => $this->filteredPrevious(
+                                $request->input('location')
+                            ),
+                            'user' => '',
+                            'requires_two_factor' => false,
+                        ]);
+                    }
+
+                    $request->session()->put('auth.two_factor.user_id', $user->id);
+
+                    return response()->json([
+                        'error' => '',
+                        'previous' => $this->filteredPrevious(
+                            $request->input('location')
+                        ),
+                        'user' => null,
+                        'requires_two_factor' => true,
+                    ]);
+                }
+
+                $this->loginToSession($user, $request);
+                $payload = $user->load('roles.permissions');
+            } elseif ($user->two_factor_secret && $user->two_factor_confirmed_at) {
                 // Check if there's a valid remember token for this device
                 $deviceIdentifier = $this->getDeviceIdentifier($request);
                 $rememberToken = TwoFactorRememberToken::findValidTokenByDevice(
@@ -171,59 +278,52 @@ class AuthController extends \App\Http\Controllers\Controller
 
                 if ($rememberToken) {
                     // User has a valid remember token, skip 2FA
-                    Auth::login($user);
+                    $this->loginToSession($user, $request);
 
-                    if (!env('ALLOW_MULTIPLE_SESSIONS', false)) {
-                        Auth::logoutOtherDevices($request->input('password'));
-                    }
-
-                    $user = $user->load('roles.permissions');
+                    $payload = $user->load('roles.permissions');
                 } else {
-                    // Check if we're in production
-                    if (env('APP_ENV') == 'production') {
-                        // In production, require 2FA
+                    // 2FA is only ever demanded in production: outside it there
+                    // is no shared authenticator and no way to self-serve.
+                    if (app()->environment('production')) {
                         $request
                             ->session()
                             ->put('auth.two_factor.user_id', $user->id);
                         $requiresTwoFactor = true;
+
+                        // The user model still goes back on a TOTP challenge -
+                        // unloaded, as it always has - because the challenge
+                        // screen renders the account it is challenging. The
+                        // code driver deliberately returns null instead: there
+                        // the account is identified by a code sent out of band,
+                        // so echoing the record would hand an unauthenticated
+                        // caller a user lookup.
+                        $payload = $user;
                     } else {
-                        // In non-production, skip 2FA and log the user in
-                        Auth::login($user);
+                        $this->loginToSession($user, $request);
 
-                        if (!env('ALLOW_MULTIPLE_SESSIONS', false)) {
-                            Auth::logoutOtherDevices(
-                                $request->input('password')
-                            );
-                        }
-
-                        $user = $user->load('roles.permissions');
+                        $payload = $user->load('roles.permissions');
                         $requiresTwoFactor = false;
                     }
                 }
             } else {
                 // User doesn't have 2FA, proceed with normal login
-                Auth::login($user);
+                $this->loginToSession($user, $request);
 
-                if (!env('ALLOW_MULTIPLE_SESSIONS', false)) {
-                    Auth::logoutOtherDevices($request->input('password'));
-                }
-
-                $user = $user->load('roles.permissions');
+                $payload = $user->load('roles.permissions');
             }
         } else {
-            $error = 'Login unsuccessful, please try again.';
+            $error = ModuleConfig::message(
+                'auth',
+                'login_failed',
+                'Login unsuccessful, please try again.'
+            );
             $request->session()->flash('errors');
-            $user = ''; // Reset user if authentication failed
         }
 
         return response()->json([
             'error' => $error,
-            'previous' =>
-                $request->input('location') == '/' ||
-                $request->input('location') == '/login'
-                    ? ''
-                    : $request->input('location'),
-            'user' => $user,
+            'previous' => $this->filteredPrevious($request->input('location')),
+            'user' => $payload,
             'requires_two_factor' => $requiresTwoFactor,
         ]);
     }
@@ -247,15 +347,20 @@ class AuthController extends \App\Http\Controllers\Controller
      */
     public function logout_api(Request $request)
     {
-        // Revoke the user's current token
-        if ($request->user()) {
-            $request
-                ->user()
-                ->currentAccessToken()
-                ->delete();
+        // Revoke only the token used for this request, not every token the user
+        // holds. Guard on PersonalAccessToken: a stateful-SPA (session) request
+        // yields a TransientToken, which has no delete() and used to fatal here.
+        $token = $request->user()?->currentAccessToken();
+
+        if ($token instanceof \Laravel\Sanctum\PersonalAccessToken) {
+            $token->delete();
         }
 
-        return response()->json(['message' => 'Successfully logged out']);
+        return response()->json(
+            ModuleConfig::get('auth.logout_response', [
+                'message' => 'Successfully logged out',
+            ])
+        );
     }
 
     /**
@@ -275,8 +380,12 @@ class AuthController extends \App\Http\Controllers\Controller
                 'password' => 'required|string|min:8|confirmed',
             ]);
 
-            // Create the user
-            $user = User::create([
+            // Configured model rather than the package model. An application
+            // pointing user_model at its own class must make sure name/username
+            // are fillable there, or mass assignment will drop them.
+            $model = ModuleConfig::userModel('auth');
+
+            $user = $model::create([
                 'name' => $request->name,
                 'email' => $request->email,
                 'username' => $request->username,
@@ -285,9 +394,9 @@ class AuthController extends \App\Http\Controllers\Controller
             ]);
 
             // Assign default role if configured
-            if (env('DEFAULT_USER_ROLE')) {
+            if ($defaultRole = ModuleConfig::get('auth.default_user_role')) {
                 if (method_exists($user, 'syncRoles')) {
-                    $user->syncRoles([env('DEFAULT_USER_ROLE')]);
+                    $user->syncRoles([$defaultRole]);
                 }
             }
 
@@ -296,6 +405,8 @@ class AuthController extends \App\Http\Controllers\Controller
 
             // Create a token for API access
             $token = $user->createToken('authToken');
+
+            $this->runPostLoginHooks($user, $request);
 
             // Return the token
             return response()->json(
@@ -309,7 +420,11 @@ class AuthController extends \App\Http\Controllers\Controller
             // Return validation errors as JSON
             return response()->json(
                 [
-                    'message' => 'The given data was invalid.',
+                    'message' => ModuleConfig::message(
+                        'auth',
+                        'invalid_data',
+                        'The given data was invalid.'
+                    ),
                     'errors' => $e->errors(),
                 ],
                 422
@@ -318,7 +433,11 @@ class AuthController extends \App\Http\Controllers\Controller
             // Handle other exceptions
             return response()->json(
                 [
-                    'message' => 'An error occurred during registration.',
+                    'message' => ModuleConfig::message(
+                        'auth',
+                        'registration_failed',
+                        'An error occurred during registration.'
+                    ),
                     'error' => $e->getMessage(),
                 ],
                 500
@@ -328,29 +447,23 @@ class AuthController extends \App\Http\Controllers\Controller
 
     public function login_api(Request $request)
     {
-        $isEmail =
-            filter_var($request->input('username'), FILTER_VALIDATE_EMAIL) !==
-            false;
+        $user = $this->resolveUser((string) $request->input('username'), $request);
 
-        // First, find the user by email or username
-        if ($isEmail) {
-            $user = \App\Models\User::where(
-                'email',
-                $request->input('username')
-            )->first();
-        } else {
-            $user = \App\Models\User::where(
-                'username',
-                $request->input('username')
-            )->first();
+        if ($user && $this->gatesRunFirst()) {
+            if ($gate = $this->runPreLoginGates($user, $request)) {
+                return $gate;
+            }
         }
 
         // If user exists, check if disabled and then check password
         if ($user && $user->disabled) {
             return response()->json(
                 [
-                    'error' =>
-                        'Your account has been disabled. Please contact the administrator.',
+                    'error' => ModuleConfig::message(
+                        'auth',
+                        'account_disabled',
+                        'Your account has been disabled. Please contact the administrator.'
+                    ),
                 ],
                 401
             );
@@ -358,6 +471,48 @@ class AuthController extends \App\Http\Controllers\Controller
             $user &&
             Hash::check($request->input('password'), $user->password)
         ) {
+            if (! $this->gatesRunFirst()) {
+                if ($gate = $this->runPreLoginGates($user, $request)) {
+                    return $gate;
+                }
+            }
+
+            if ($this->usesCodeDriver()) {
+                $manager = $this->twoFactorManager();
+
+                if ($manager->shouldChallenge($user, $request)) {
+                    try {
+                        $manager->send($user, $manager->issue($user));
+                    } catch (\Throwable $e) {
+                        return response()->json(
+                            [
+                                'error' => ModuleConfig::message(
+                                    'auth',
+                                    'two_factor_send_failed',
+                                    'The verification code could not be sent, please try again.'
+                                ),
+                            ],
+                            500
+                        );
+                    }
+
+                    // Same envelope the TOTP path returns, so the existing API
+                    // challenge endpoint completes either driver.
+                    return response()->json(
+                        [
+                            'two_factor_required' => true,
+                            'user_id' => $user->id,
+                        ],
+                        200
+                    );
+                }
+
+                return response()->json(
+                    ['id' => $this->issueApiToken($user, $request)],
+                    200
+                );
+            }
+
             // Check if user has 2FA enabled and confirmed
             if ($user->two_factor_secret && $user->two_factor_confirmed_at) {
                 // Check if there's a valid remember token for this device
@@ -371,15 +526,13 @@ class AuthController extends \App\Http\Controllers\Controller
 
                 if ($rememberToken) {
                     // User has a valid remember token, skip 2FA
-                    Auth::login($user);
-                    $token = $user->createToken('authToken');
                     return response()->json(
-                        ['id' => $token->plainTextToken],
+                        ['id' => $this->issueApiToken($user, $request)],
                         200
                     );
                 } else {
                     // For API, check if we're in production before requiring 2FA
-                    if (env('APP_ENV') == 'production') {
+                    if (app()->environment('production')) {
                         // Return a special response indicating 2FA is required
                         return response()->json(
                             [
@@ -390,10 +543,8 @@ class AuthController extends \App\Http\Controllers\Controller
                         );
                     } else {
                         // Skip 2FA in non-production environments
-                        Auth::login($user);
-                        $token = $user->createToken('authToken');
                         return response()->json(
-                            ['id' => $token->plainTextToken],
+                            ['id' => $this->issueApiToken($user, $request)],
                             200
                         );
                     }
@@ -401,13 +552,23 @@ class AuthController extends \App\Http\Controllers\Controller
             }
 
             // User doesn't have 2FA, proceed with normal login and token creation
-            Auth::login($user);
-            $token = $user->createToken('authToken');
-            return response()->json(['id' => $token->plainTextToken], 200);
+            return response()->json(
+                ['id' => $this->issueApiToken($user, $request)],
+                200
+            );
         }
 
         // Authentication failed
-        return response()->json(['error' => 'Unauthenticated'], 401);
+        return response()->json(
+            [
+                'error' => ModuleConfig::message(
+                    'auth',
+                    'unauthenticated',
+                    'Unauthenticated'
+                ),
+            ],
+            401
+        );
     }
 
     /**
@@ -418,16 +579,21 @@ class AuthController extends \App\Http\Controllers\Controller
      */
     public function twoFactorAuthenticate(Request $request)
     {
+        if ($this->usesCodeDriver()) {
+            return $this->twoFactorAuthenticateWithCode($request);
+        }
+
         // If not in production, skip 2FA validation and return success
-        if (env('APP_ENV') != 'production') {
+        if (! app()->environment('production')) {
             // Get the user ID from the session
             $userId = $request->session()->get('auth.two_factor.user_id');
 
             if ($userId) {
-                $user = User::find($userId);
+                $user = $this->findUser($userId);
                 if ($user) {
                     // Complete the login process
                     $this->completeLogin($user);
+                    $this->runPostLoginHooks($user, $request);
                     return response()->json([
                         'user' => $user->load('roles.permissions'),
                     ]);
@@ -437,7 +603,7 @@ class AuthController extends \App\Http\Controllers\Controller
             // If we can't find the user, return an error
             return response()->json(
                 [
-                    'error' => 'Invalid two-factor authentication session.',
+                    'error' => $this->invalidSessionMessage(),
                 ],
                 200
             );
@@ -454,28 +620,25 @@ class AuthController extends \App\Http\Controllers\Controller
         if (!$userId) {
             return response()->json(
                 [
-                    'error' => 'Invalid two-factor authentication session.',
+                    'error' => $this->invalidSessionMessage(),
                 ],
                 200
             );
         }
 
-        $user = User::find($userId);
+        $user = $this->findUser($userId);
 
         if (!$user) {
             $request->session()->forget('auth.two_factor.user_id');
             return response()->json(
                 [
-                    'error' => 'User not found.',
+                    'error' => $this->userNotFoundMessage(),
                 ],
                 200
             );
         }
 
-        // Use the UserController to validate the 2FA code
-        $userController = new \Visnsstudio\VisnsPackages\Controllers\UserController();
-
-        if ($userController->validateTwoFactorCode($user, $request->code)) {
+        if ($this->validateTotpCode($user, (string) $request->code)) {
             // Complete the login process
             $this->completeLogin($user);
 
@@ -485,19 +648,168 @@ class AuthController extends \App\Http\Controllers\Controller
                 TwoFactorRememberToken::createToken($user, $deviceIdentifier);
             }
 
+            $this->runPostLoginHooks($user, $request);
+
             return response()->json([
                 'user' => $user->load('roles.permissions'),
             ]);
         }
 
-        // If we reach here, the code was invalid
+        // If we reach here, the code was invalid. 200, not 401: the front end
+        // has always read `error` off a 200 body here, and a 401 would trip the
+        // global "session expired" interceptor and bounce the user off the
+        // challenge screen.
         return response()->json(
             [
-                'error' =>
-                    'The provided two-factor authentication code was invalid.',
+                'error' => $this->invalidCodeMessage(),
             ],
             200
         );
+    }
+
+    /**
+     * The code-driver counterpart of twoFactorAuthenticate().
+     *
+     * Kept separate rather than woven into the TOTP branch so the TOTP flow
+     * stays exactly what it was; the two share nothing but the session key.
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    protected function twoFactorAuthenticateWithCode(Request $request)
+    {
+        $request->validate([
+            'code' => 'required|string',
+            'previous_url' => 'sometimes|nullable|string',
+            'remember' => 'sometimes|boolean',
+        ]);
+
+        $previous = $this->filteredPrevious($request->input('previous_url'));
+
+        $userId = $request->session()->get('auth.two_factor.user_id');
+
+        if (!$userId) {
+            return response()->json(
+                [
+                    'error' => $this->invalidSessionMessage(),
+                    'user' => null,
+                    'previous' => $previous,
+                ],
+                200
+            );
+        }
+
+        $user = $this->findUser($userId);
+
+        if (!$user) {
+            $request->session()->forget('auth.two_factor.user_id');
+
+            return response()->json(
+                [
+                    'error' => $this->userNotFoundMessage(),
+                    'user' => null,
+                    'previous' => $previous,
+                ],
+                200
+            );
+        }
+
+        $manager = $this->twoFactorManager();
+        $result = $manager->verify($user, (string) $request->input('code'));
+
+        if ($result !== true) {
+            // 200 with an `error` body, matching the TOTP endpoint above.
+            return response()->json(
+                [
+                    'error' => ModuleConfig::message(
+                        'auth',
+                        $result,
+                        $this->invalidCodeMessage()
+                    ),
+                    'user' => null,
+                    'previous' => $previous,
+                ],
+                200
+            );
+        }
+
+        $manager->consume($user);
+
+        Auth::login($user);
+
+        session()->forget('auth.two_factor.user_id');
+        session()->regenerate();
+
+        // Remember-this-device is opt-in for the code driver: an SMS code is a
+        // possession factor tied to the phone, not the browser.
+        if ($manager->remembersDevices() && $request->input('remember', false)) {
+            TwoFactorRememberToken::createToken(
+                $user,
+                $this->getDeviceIdentifier($request)
+            );
+        }
+
+        $this->runPostLoginHooks($user, $request);
+
+        return response()->json([
+            'error' => '',
+            'user' => $user->load('roles.permissions'),
+            'previous' => $previous,
+        ]);
+    }
+
+    /**
+     * Re-send the login code the user is currently being challenged for.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function twoFactorResend(Request $request)
+    {
+        $manager = $this->twoFactorManager();
+        $userId = $request->session()->get('auth.two_factor.user_id');
+
+        // No code channel, or no challenge in flight: there is nothing to
+        // re-send, and saying so is safer than issuing a code nobody asked for.
+        if (! $this->usesCodeDriver() || ! $userId || $manager->trigger() === 'never') {
+            return response()->json(
+                ['error' => $this->invalidSessionMessage()],
+                200
+            );
+        }
+
+        $user = $this->findUser($userId);
+
+        if (! $user) {
+            $request->session()->forget('auth.two_factor.user_id');
+
+            return response()->json(
+                ['error' => $this->invalidSessionMessage()],
+                200
+            );
+        }
+
+        // Deliberately NOT gated on shouldChallenge(): the trigger rules decided
+        // when the challenge started, and the user is already sitting on the
+        // code screen. Re-evaluating them here would strand anyone whose IP
+        // changed back mid-challenge (or who is resending from staging) with a
+        // screen they cannot get past. 'never', handled above, is the one case
+        // where the channel itself is off.
+        try {
+            $manager->send($user, $manager->issue($user));
+        } catch (\Throwable $e) {
+            return response()->json(
+                [
+                    'error' => ModuleConfig::message(
+                        'auth',
+                        'two_factor_send_failed',
+                        'The verification code could not be sent, please try again.'
+                    ),
+                ],
+                200
+            );
+        }
+
+        return response()->json(['error' => '']);
     }
 
     /**
@@ -563,25 +875,27 @@ class AuthController extends \App\Http\Controllers\Controller
     public function twoFactorAuthenticateApi(Request $request)
     {
         // If not in production, skip 2FA validation and return success
-        if (env('APP_ENV') != 'production') {
+        if (! app()->environment('production')) {
             $request->validate([
                 'user_id' => 'required|exists:users,id',
             ]);
 
-            $user = User::find($request->user_id);
+            $user = $this->findUser($request->user_id);
 
             if (!$user) {
                 return response()->json(
                     [
-                        'error' => 'User not found.',
+                        'error' => $this->userNotFoundMessage(),
                     ],
                     200
                 );
             }
 
             // Skip 2FA validation and create token
-            $token = $user->createToken('authToken');
-            return response()->json(['id' => $token->plainTextToken], 200);
+            return response()->json(
+                ['id' => $this->createApiToken($user, $request)],
+                200
+            );
         }
 
         // Normal 2FA validation for production
@@ -592,21 +906,51 @@ class AuthController extends \App\Http\Controllers\Controller
             'device_identifier' => 'sometimes|string',
         ]);
 
-        $user = User::find($request->user_id);
+        $user = $this->findUser($request->user_id);
 
         if (!$user) {
             return response()->json(
                 [
-                    'error' => 'User not found.',
+                    'error' => $this->userNotFoundMessage(),
                 ],
                 200
             );
         }
 
-        // Use the UserController to validate the 2FA code
-        $userController = new \Visnsstudio\VisnsPackages\Controllers\UserController();
+        if ($this->usesCodeDriver()) {
+            $manager = $this->twoFactorManager();
+            $result = $manager->verify($user, (string) $request->code);
 
-        if ($userController->validateTwoFactorCode($user, $request->code)) {
+            if ($result !== true) {
+                return response()->json(
+                    [
+                        'error' => ModuleConfig::message(
+                            'auth',
+                            $result,
+                            $this->invalidCodeMessage()
+                        ),
+                    ],
+                    200
+                );
+            }
+
+            $manager->consume($user);
+
+            if ($manager->remembersDevices() && $request->input('remember', false)) {
+                TwoFactorRememberToken::createToken(
+                    $user,
+                    $request->input('device_identifier') ?:
+                        $this->getDeviceIdentifier($request)
+                );
+            }
+
+            return response()->json(
+                ['id' => $this->createApiToken($user, $request)],
+                200
+            );
+        }
+
+        if ($this->validateTotpCode($user, (string) $request->code)) {
             // If remember is true, create a remember token for this device
             if ($request->input('remember', false)) {
                 $deviceIdentifier =
@@ -616,15 +960,16 @@ class AuthController extends \App\Http\Controllers\Controller
             }
 
             // Create a token for API access
-            $token = $user->createToken('authToken');
-            return response()->json(['id' => $token->plainTextToken], 200);
+            return response()->json(
+                ['id' => $this->createApiToken($user, $request)],
+                200
+            );
         }
 
         // If we reach here, the code was invalid
         return response()->json(
             [
-                'error' =>
-                    'The provided two-factor authentication code was invalid.',
+                'error' => $this->invalidCodeMessage(),
             ],
             200
         );
@@ -644,5 +989,199 @@ class AuthController extends \App\Http\Controllers\Controller
 
         // Create a hash of these values
         return hash('sha256', $userAgent . $ip);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Extension points
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * Find the account the login form is talking about.
+     *
+     * @return object|null
+     */
+    protected function resolveUser(string $identifier, Request $request)
+    {
+        $resolver = ModuleConfig::callable('auth.user_resolver')
+            ?: app(DefaultUserResolver::class);
+
+        return $resolver($identifier, $request);
+    }
+
+    /**
+     * Look a user up by primary key on the configured model.
+     *
+     * The 2FA endpoints used to hardcode the package's own User model here.
+     * They now honour visns-packages.auth.user_model / user_model, which for the
+     * shipped default (App\Models\User) means the challenge completes against
+     * the SAME class the initial login found - previously the two halves of one
+     * login could be two different classes over one row, which is why
+     * Auth::login() sometimes stored a user the application's own guard did not
+     * recognise.
+     *
+     * @param  mixed  $id
+     * @return object|null
+     */
+    protected function findUser($id)
+    {
+        return ModuleConfig::userQuery('auth')->find($id);
+    }
+
+    protected function gatesRunFirst(): bool
+    {
+        return (bool) ModuleConfig::get(
+            'auth.run_gates_before_credential_check',
+            false
+        );
+    }
+
+    /**
+     * Run the configured gates. The first one returning a Response short-circuits
+     * the login and that Response goes to the client untouched - a gate owns its
+     * own status code and body.
+     *
+     * @return \Symfony\Component\HttpFoundation\Response|null
+     */
+    protected function runPreLoginGates($user, Request $request)
+    {
+        foreach (ModuleConfig::callables('auth.pre_login_gates') as $gate) {
+            $result = $gate($user, $request);
+
+            if ($result instanceof Response) {
+                return $result;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Fire the post-login hooks (last-login stamps, IP columns, token cleanup).
+     * A hook is a side effect, never a veto: by this point the user is in.
+     */
+    protected function runPostLoginHooks($user, Request $request): void
+    {
+        foreach (ModuleConfig::callables('auth.post_login_hooks') as $hook) {
+            $hook($user, $request);
+        }
+    }
+
+    /**
+     * Session login plus the single-session enforcement the package has always
+     * applied, followed by the post-login hooks.
+     */
+    protected function loginToSession($user, Request $request): void
+    {
+        Auth::login($user);
+
+        if (! ModuleConfig::get('auth.allow_multiple_sessions', false)) {
+            Auth::logoutOtherDevices($request->input('password'));
+        }
+
+        $this->runPostLoginHooks($user, $request);
+    }
+
+    /**
+     * Log in for the API and mint the Sanctum token, running the post-login
+     * hooks once the token exists so a hook can see or prune it.
+     */
+    protected function issueApiToken($user, Request $request): string
+    {
+        Auth::login($user);
+
+        return $this->createApiToken($user, $request);
+    }
+
+    /**
+     * Mint a token WITHOUT touching the session guard.
+     *
+     * The 2FA API endpoints have never called Auth::login() - they are stateless
+     * and answer a challenge that a previous request started - so they must not
+     * start doing it now.
+     */
+    protected function createApiToken($user, Request $request): string
+    {
+        $token = $user->createToken('authToken');
+
+        $this->runPostLoginHooks($user, $request);
+
+        return $token->plainTextToken;
+    }
+
+    /**
+     * The `previous` value echoed back to the front end. '/' and '/login' are
+     * blanked so a post-login redirect cannot bounce the user back to the login
+     * screen; an application that routes its own redirects turns this off.
+     *
+     * @param  mixed  $location
+     * @return mixed
+     */
+    protected function filteredPrevious($location)
+    {
+        if (! ModuleConfig::get('auth.filter_previous', true)) {
+            return $location;
+        }
+
+        return $location == '/' || $location == '/login' ? '' : $location;
+    }
+
+    protected function usesCodeDriver(): bool
+    {
+        return $this->twoFactorManager()->driver() === 'code';
+    }
+
+    protected function twoFactorManager(): TwoFactorCodeManager
+    {
+        return app(TwoFactorCodeManager::class);
+    }
+
+    /**
+     * Validate a TOTP/recovery code through UserController.
+     *
+     * UserController::validateTwoFactorCode() type-hints the package's own User
+     * model, while the rest of this controller now resolves the CONFIGURED model
+     * (which need not extend it). Re-reading the same row through the package
+     * model keeps that call legal and touches the same database record, so
+     * recovery-code consumption still persists.
+     */
+    protected function validateTotpCode($user, string $code): bool
+    {
+        $packageUser = $user instanceof \Visnsstudio\VisnsPackages\Models\User
+            ? $user
+            : \Visnsstudio\VisnsPackages\Models\User::find($user->getKey());
+
+        if (! $packageUser) {
+            return false;
+        }
+
+        return (bool) (new UserController())->validateTwoFactorCode(
+            $packageUser,
+            $code
+        );
+    }
+
+    protected function invalidSessionMessage(): string
+    {
+        return ModuleConfig::message(
+            'auth',
+            'invalid_two_factor_session',
+            'Invalid two-factor authentication session.'
+        );
+    }
+
+    protected function userNotFoundMessage(): string
+    {
+        return ModuleConfig::message('auth', 'user_not_found', 'User not found.');
+    }
+
+    protected function invalidCodeMessage(): string
+    {
+        return ModuleConfig::message(
+            'auth',
+            'invalid_two_factor_code',
+            'The provided two-factor authentication code was invalid.'
+        );
     }
 }

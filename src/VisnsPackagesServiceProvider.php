@@ -27,6 +27,12 @@ use Visnsstudio\VisnsPackages\Controllers\ProposalTemplateController;
 use Visnsstudio\VisnsPackages\Controllers\BrandingProfileController;
 use Visnsstudio\VisnsPackages\Controllers\OAuthController;
 use Visnsstudio\VisnsPackages\Middleware\AcceptJson;
+use Visnsstudio\VisnsPackages\Middleware\VerifyZoomWebhookSignature;
+use Visnsstudio\VisnsPackages\Controllers\OtpController;
+use Visnsstudio\VisnsPackages\Controllers\ImpersonationController;
+use Visnsstudio\VisnsPackages\Controllers\ZoomWebhookController;
+use Visnsstudio\VisnsPackages\Controllers\CallQueueController;
+use Visnsstudio\VisnsPackages\Controllers\CallQueueSettingsController;
 use Visnsstudio\VisnsPackages\Services\FilePathResolver;
 use Visnsstudio\VisnsPackages\Services\OAuthManager;
 
@@ -161,9 +167,16 @@ class VisnsPackagesServiceProvider extends ServiceProvider
         // Register middleware
         $router = $this->app['router'];
         $router->aliasMiddleware('accept-json', AcceptJson::class);
+        $router->aliasMiddleware('zoom-webhook', VerifyZoomWebhookSignature::class);
+        // The consuming CRM registers this alias with an underscore; keep both
+        // so an application can move its route definitions across untouched.
+        $router->aliasMiddleware('zoom_webhook', VerifyZoomWebhookSignature::class);
 
         // Register routes
         $this->registerRoutes();
+
+        // Broadcast channel authorization for the call queue pop.
+        $this->registerCallQueueChannel();
     }
 
     /**
@@ -211,6 +224,14 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                                 Route::post(
                                     '/two-factor-challenge',
                                     'twoFactorAuthenticate'
+                                );
+
+                                // Re-send the code for the code-channel 2FA
+                                // driver. Inert under the default TOTP driver,
+                                // which has no code to re-send.
+                                Route::post(
+                                    '/two-factor-resend',
+                                    'twoFactorResend'
                                 );
                             });
 
@@ -561,12 +582,243 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                         });
                 });
 
+            // Opt-in modules. Each ships disabled, so an existing consumer sees
+            // no new endpoints on upgrade.
+            $this->registerOtpRoutes($apiMiddleware, $apiPrefix);
+            $this->registerImpersonationRoutes(
+                $middleware,
+                $prefix,
+                $apiMiddleware,
+                $apiPrefix
+            );
+            $this->registerCallQueueRoutes($middleware, $prefix);
+
             // Register dynamic entity routes first (they will be more general)
             $this->registerDynamicEntityRoutes();
 
             // Register custom routes after (they will override/supplement dynamic routes)
             $this->registerCustomEntityRoutes();
         }
+    }
+
+    /**
+     * Passwordless OTP login.
+     *
+     * Two unauthenticated endpoints, so the module is off until an application
+     * says otherwise. They sit under the package's API prefix, which puts the
+     * defaults at /api/auth/request-otp and /api/auth/login-otp.
+     *
+     * @return void
+     */
+    protected function registerOtpRoutes(array $apiMiddleware, string $apiPrefix)
+    {
+        if (!config('visns-packages.otp.enabled', false)) {
+            return;
+        }
+
+        $middleware =
+            config('visns-packages.otp.middleware') ?: $apiMiddleware;
+
+        $uris = (array) config('visns-packages.otp.uris', []);
+
+        Route::middleware($middleware)
+            ->prefix($apiPrefix)
+            ->group(function () use ($uris) {
+                Route::post(
+                    $uris['request'] ?? 'auth/request-otp',
+                    [OtpController::class, 'requestOtp']
+                );
+
+                Route::post($uris['login'] ?? 'auth/login-otp', [
+                    OtpController::class,
+                    'loginOtp',
+                ]);
+            });
+    }
+
+    /**
+     * Staff impersonation.
+     *
+     * The two halves live on opposite sides of a trust boundary and are
+     * registered separately because of it: issuing runs inside the CRM behind a
+     * session and a permission, while validation is called by the portal with
+     * nothing but the token, so it goes in the API group and answers with a
+     * whitelisted payload only.
+     *
+     * @return void
+     */
+    protected function registerImpersonationRoutes(
+        array $middleware,
+        string $prefix,
+        array $apiMiddleware,
+        string $apiPrefix
+    ) {
+        if (!config('visns-packages.impersonation.enabled', false)) {
+            return;
+        }
+
+        $uris = (array) config('visns-packages.impersonation.uris', []);
+
+        $issueMiddleware = config(
+            'visns-packages.impersonation.issue_middleware'
+        );
+
+        if (!is_array($issueMiddleware)) {
+            $issueMiddleware = array_merge($middleware, ['auth']);
+
+            // Impersonation grants a live session as somebody else, so it is a
+            // higher privilege than ordinary client editing and gets its own
+            // permission rather than riding on an existing one. Set the
+            // permission to null to gate it some other way.
+            $permission = config(
+                'visns-packages.impersonation.permission',
+                'Impersonate Client'
+            );
+
+            if (is_string($permission) && $permission !== '') {
+                $issueMiddleware[] = 'permission:' . $permission;
+            }
+        }
+
+        Route::middleware($issueMiddleware)
+            ->prefix($prefix)
+            ->group(function () use ($uris) {
+                Route::post(
+                    $uris['issue'] ?? 'ajax/impersonateClient',
+                    [ImpersonationController::class, 'issue']
+                );
+            });
+
+        $validateMiddleware =
+            config('visns-packages.impersonation.validate_middleware') ?:
+            $apiMiddleware;
+
+        Route::middleware($validateMiddleware)
+            ->prefix($apiPrefix)
+            ->group(function () use ($uris) {
+                Route::post(
+                    $uris['validate'] ?? 'validateImpersonationToken',
+                    [ImpersonationController::class, 'validate']
+                );
+            });
+    }
+
+    /**
+     * Zoom Phone call queue pop.
+     *
+     * The webhook is registered on its own, outside every other group: its URI
+     * is whatever the Zoom app is pointed at (absolute, no package prefix), and
+     * the only thing guarding it is the signature middleware - session
+     * middleware on a machine-to-machine callback would only get in the way.
+     *
+     * @return void
+     */
+    protected function registerCallQueueRoutes(array $middleware, string $prefix)
+    {
+        if (!config('visns-packages.call_queue.enabled', false)) {
+            return;
+        }
+
+        $uris = (array) config('visns-packages.call_queue.uris', []);
+        $permissions = (array) config(
+            'visns-packages.call_queue.permissions',
+            []
+        );
+
+        $webhookMiddleware = array_merge(
+            (array) config('visns-packages.call_queue.webhook_middleware', []),
+            [VerifyZoomWebhookSignature::class]
+        );
+
+        Route::middleware($webhookMiddleware)->post(
+            $uris['webhook'] ?? 'api/zoom/webhook',
+            [ZoomWebhookController::class, 'handle']
+        );
+
+        $routeMiddleware =
+            config('visns-packages.call_queue.routes_middleware') ?: $middleware;
+
+        $monitor = $permissions['monitor'] ?? 'Call Queue Monitor';
+        $settings = $permissions['settings'] ?? 'Call Queue Settings';
+
+        Route::middleware(
+            $this->withPermission($routeMiddleware, $monitor)
+        )
+            ->prefix($prefix)
+            ->group(function () use ($uris) {
+                Route::get($uris['live'] ?? 'ajax/call-queue/live', [
+                    CallQueueController::class,
+                    'live',
+                ]);
+            });
+
+        Route::middleware(
+            $this->withPermission($routeMiddleware, $settings)
+        )
+            ->prefix($prefix)
+            ->group(function () use ($uris) {
+                $settingsUri = $uris['settings'] ?? 'ajax/call-queue/settings';
+
+                Route::get($settingsUri, [
+                    CallQueueSettingsController::class,
+                    'index',
+                ]);
+
+                Route::put($settingsUri . '/{queueId}', [
+                    CallQueueSettingsController::class,
+                    'update',
+                ]);
+            });
+    }
+
+    /**
+     * Authorize the call queue's private broadcast channel.
+     *
+     * The permission row may not exist yet on an environment that has not
+     * seeded it, and a lookup that throws here would take the whole
+     * broadcasting auth route down - so a failure denies rather than escapes.
+     *
+     * @return void
+     */
+    protected function registerCallQueueChannel(): void
+    {
+        if (
+            !config('visns-packages.call_queue.enabled', false) ||
+            !config('visns-packages.call_queue.register_broadcast_channel', true)
+        ) {
+            return;
+        }
+
+        $permission = config(
+            'visns-packages.call_queue.permissions.monitor',
+            'Call Queue Monitor'
+        );
+
+        \Illuminate\Support\Facades\Broadcast::channel(
+            \Visnsstudio\VisnsPackages\Support\CallQueueChannel::name(),
+            function ($user) use ($permission) {
+                try {
+                    return $user->hasPermissionTo($permission);
+                } catch (\Throwable $e) {
+                    return false;
+                }
+            }
+        );
+    }
+
+    /**
+     * Append a permission middleware to a stack, unless the permission has been
+     * configured away.
+     *
+     * @return array<int, string>
+     */
+    protected function withPermission(array $middleware, $permission): array
+    {
+        if (!is_string($permission) || $permission === '') {
+            return $middleware;
+        }
+
+        return array_merge($middleware, ['permission:' . $permission]);
     }
 
     /**
