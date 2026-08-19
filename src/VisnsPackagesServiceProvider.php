@@ -172,6 +172,21 @@ class VisnsPackagesServiceProvider extends ServiceProvider
         // so an application can move its route definitions across untouched.
         $router->aliasMiddleware('zoom_webhook', VerifyZoomWebhookSignature::class);
 
+        // The opt-in modules gate their routes with `permission:...`. That alias
+        // is normally declared in the application's own bootstrap, so it is only
+        // filled in here when Spatie is installed AND the application has not
+        // already claimed the name - clobbering an application's own wrapper
+        // would silently change what every one of its routes checks.
+        if (
+            class_exists(\Spatie\Permission\Middleware\PermissionMiddleware::class) &&
+            !array_key_exists('permission', $router->getMiddleware())
+        ) {
+            $router->aliasMiddleware(
+                'permission',
+                \Spatie\Permission\Middleware\PermissionMiddleware::class
+            );
+        }
+
         // Register routes
         $this->registerRoutes();
 
@@ -698,7 +713,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             ->group(function () use ($uris) {
                 Route::post(
                     $uris['validate'] ?? 'validateImpersonationToken',
-                    [ImpersonationController::class, 'validate']
+                    [ImpersonationController::class, 'validateToken']
                 );
             });
     }

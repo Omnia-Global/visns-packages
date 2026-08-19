@@ -15,9 +15,9 @@ use Carbon\Carbon;
 /**
  * Staff impersonation of a client's portal account.
  *
- * issue() runs in the CRM behind a session and a permission; validate() runs
- * unauthenticated in the portal, holding nothing but the token that arrived in
- * the URL. The two halves are shaped by that asymmetry - see the comments on
+ * issue() runs in the CRM behind a session and a permission; validateToken()
+ * runs unauthenticated in the portal, holding nothing but the token that
+ * arrived in the URL. The two halves are shaped by that asymmetry - see the comments on
  * each method.
  */
 class ImpersonationController extends \App\Http\Controllers\Controller
@@ -121,11 +121,12 @@ class ImpersonationController extends \App\Http\Controllers\Controller
      * Unauthenticated by necessity: the portal calls this before it has a
      * session, holding only the token from the URL.
      *
-     * The name deliberately shadows ValidatesRequests::validate() - a class
-     * method wins over a trait method, so nothing breaks, but never call
-     * $this->validate() inside this controller; use $request->validate().
+     * Named validateToken() rather than validate(): the application base
+     * controller uses ValidatesRequests, so `validate` is already a real method
+     * with a different signature and overriding it is a fatal error, not a
+     * shadow.
      */
-    public function validate(Request $request)
+    public function validateToken(Request $request)
     {
         $request->validate(['token' => 'required|string']);
 

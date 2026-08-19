@@ -3,6 +3,7 @@
     "description": "Laravel/PHP packages used for Omnia Global Projects",
     "type": "library",
     "license": "MIT",
+    "version": "4.3.0",
     "autoload": {
         "psr-4": {
             "Visnsstudio\\VisnsPackages\\": "src/"
@@ -29,11 +30,14 @@
     },
     "require-dev": {
         "phpunit/phpunit": "^10.0",
-        "orchestra/testbench": "^9.0"
+        "orchestra/testbench": "^9.0",
+        "laravel/sanctum": "^4.0",
+        "spatie/laravel-permission": "^6.0"
     },
     "autoload-dev": {
         "psr-4": {
-            "Visnsstudio\\VisnsPackages\\Tests\\": "tests/"
+            "Visnsstudio\\VisnsPackages\\Tests\\": "tests/",
+            "App\\": "tests/Fixtures/app/"
         }
     },
     "extra": {
@@ -42,5 +46,8 @@
                 "Visnsstudio\\VisnsPackages\\VisnsPackagesServiceProvider"
             ]
         }
+    },
+    "scripts": {
+        "test": "phpunit --testsuite=Platform"
     }
 }

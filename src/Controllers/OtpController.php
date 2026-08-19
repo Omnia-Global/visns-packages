@@ -144,6 +144,13 @@ class OtpController extends \App\Http\Controllers\Controller
     public function loginOtp(Request $request)
     {
         try {
+            // Inside the try on purpose. A ValidationException raised here is
+            // caught by the handler at the bottom and answered as the generic
+            // 500 failure, NOT as Laravel's 422 field error - which is what the
+            // controller this was ported from does, and what the portal front
+            // end reads in production today. It is a wart, and it is contract:
+            // moving the validate() call outside the try would change the
+            // status and body a mistyped code produces.
             $request->validate([
                 'contact' => 'required|string',
                 'otp_code' => 'required|string|size:' . $this->codeLength(),
