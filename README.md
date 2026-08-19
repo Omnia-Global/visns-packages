@@ -896,6 +896,44 @@ Behaviour worth knowing before you point Zoom at it:
 > honours it this starts working with no code change. The full write-up is in
 > `src/Services/Zoom/ZoomCallQueueService.php` — read it before re-investigating.
 
+**Substituting your own Zoom client.** The settings page's client is named in
+config and resolved through the container:
+
+```php
+'call_queue' => [
+    'zoom_service' => \App\Helpers\ZoomCallQueueService::class,
+],
+```
+
+A class **string**, never a closure, so the file survives `config:cache`. Because
+the container is asked for whatever class is named, an `instance()` or `bind()`
+double for *that* class is honoured — which is how a test suite guarantees no
+save reaches the live Zoom tenant:
+
+```php
+$this->app->instance(\App\Helpers\ZoomCallQueueService::class, $fake);
+```
+
+Required public contract. Your class need not extend anything here — it only has
+to answer these:
+
+| Method | Called by | Must return |
+| --- | --- | --- |
+| `listQueues(): array` | settings page load | `['success' => bool, 'queues' => array<int, array>, 'error' => string?]` — each queue keyed `id`, `name`, `extension_number`, `status`, `phone_numbers[0].number` |
+| `setPickupCode(string $queueId, string $code): array` | saving a code | `['success' => bool, 'http_code' => int?, 'error' => string?]`; `$code` is bare digits, no `*` |
+| `disablePickupCode(string $queueId): array` | clearing a code | same shape as above |
+| `getQueue(string $queueId): array` | — | not called by this package; present on its own client |
+| `getPolicies(string $queueId): array` | — | not called by this package; present on its own client |
+
+Only the first three are on the request path. `success => false` on either write
+returns 422 with your `error` as the message and stores nothing, so the pop can
+never advertise a code your client refused. A `zoom_service` naming a class that
+does not load falls back to the package's own client rather than 500-ing the
+settings page.
+
+The `call_queue.api.*` credentials are read by the **package's** client only; a
+replacement is built by the container and reads its own configuration.
+
 Two tables are needed; publish and run the migrations
 (`vendor:publish --tag=visns-packages-migrations`). Both no-op if the table
 already exists, so an application that already has them can adopt the module

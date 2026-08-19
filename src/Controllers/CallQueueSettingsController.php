@@ -7,6 +7,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Validation\ValidationException;
 use Visnsstudio\VisnsPackages\Models\ZoomCallQueueSetting;
 use Visnsstudio\VisnsPackages\Services\Zoom\ZoomCallQueueService;
+use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 
 /**
  * Settings -> Call Queues: the pickup code and pop exclusion for every Zoom call
@@ -26,8 +27,49 @@ use Visnsstudio\VisnsPackages\Services\Zoom\ZoomCallQueueService;
  */
 class CallQueueSettingsController extends \App\Http\Controllers\Controller
 {
-    public function __construct(private ZoomCallQueueService $zoom)
+    /** Memoised for the life of the request; see zoom(). */
+    private ?object $zoom = null;
+
+    /**
+     * The Zoom client this controller talks to.
+     *
+     * Resolved from the container by the class name in
+     * `call_queue.zoom_service`, rather than type-hinted on the constructor.
+     * Two reasons, both of which bit a real adoption:
+     *
+     *  - A constructor type-hint on the package's own class names exactly one
+     *    implementation. An application with its own Zoom client (its own
+     *    credentials, its own base service, its own retry policy) had no way to
+     *    put it in the loop.
+     *  - The container is asked for the CONFIGURED class, so an application's
+     *    `instance()` or `bind()` double for that class is honoured. Without
+     *    that, a test suite binding a fake would have been ignored and every
+     *    save in it would have gone to the live Zoom tenant.
+     *
+     * Resolution is lazy and per-request rather than in the constructor so that
+     * a binding registered after the controller was constructed still wins, and
+     * so that a route that never touches Zoom never builds a client.
+     *
+     * The config value is a class STRING, never a closure - this file has to
+     * survive `php artisan config:cache`.
+     */
+    protected function zoom(): object
     {
+        return $this->zoom ??= app($this->zoomServiceClass());
+    }
+
+    /**
+     * @return class-string
+     */
+    protected function zoomServiceClass(): string
+    {
+        $configured = ModuleConfig::get('call_queue.zoom_service');
+
+        if (is_string($configured) && $configured !== '' && class_exists($configured)) {
+            return $configured;
+        }
+
+        return ZoomCallQueueService::class;
     }
 
     /**
@@ -40,7 +82,7 @@ class CallQueueSettingsController extends \App\Http\Controllers\Controller
     public function index()
     {
         $local = ZoomCallQueueSetting::all()->keyBy('queue_id');
-        $result = $this->zoom->listQueues();
+        $result = $this->zoom()->listQueues();
 
         if (! $result['success']) {
             return response()->json([
@@ -113,9 +155,9 @@ class CallQueueSettingsController extends \App\Http\Controllers\Controller
                 if ($code !== null) {
                     $this->assertValidCode($code);
 
-                    $push = $this->zoom->setPickupCode($queueId, $code);
+                    $push = $this->zoom()->setPickupCode($queueId, $code);
                 } else {
-                    $push = $this->zoom->disablePickupCode($queueId);
+                    $push = $this->zoom()->disablePickupCode($queueId);
                 }
 
                 if (! ($push['success'] ?? false)) {

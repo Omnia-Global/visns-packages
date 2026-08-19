@@ -861,6 +861,28 @@ return [
         */
         'pickup_prefix' => '*99',
 
+        /*
+        | The Zoom client the settings page talks to.
+        |
+        | A class STRING, resolved through the container - never a closure, so
+        | this file survives `php artisan config:cache`. Because the container
+        | is asked for whatever class is named here, an application's
+        | `instance()` or `bind()` double for that class is honoured: a test
+        | suite can substitute a fake and be certain no save reaches the live
+        | Zoom tenant.
+        |
+        | Point it at your own client when you already have one - its own
+        | credentials, base service or retry policy. It must satisfy the public
+        | contract in the README ("Substituting your own Zoom client"): the
+        | settings page calls listQueues(), setPickupCode() and
+        | disablePickupCode(); getQueue() and getPolicies() round out the
+        | package's own class but are not called from here.
+        |
+        | The `api` credentials below are read by the PACKAGE's client only. A
+        | replacement is constructed by the container and reads its own.
+        */
+        'zoom_service' => \Visnsstudio\VisnsPackages\Services\Zoom\ZoomCallQueueService::class,
+
         'api' => [
             'account_id' => env('ZOOM_ACCOUNT_ID'),
             'client_id' => env('ZOOM_CLIENT_ID'),
