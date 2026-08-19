@@ -7,6 +7,7 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
@@ -329,6 +330,9 @@ class AuthController extends \App\Http\Controllers\Controller
                     }
 
                     $request->session()->put('auth.two_factor.user_id', $user->id);
+                    // Captured here, while the request is still the one that
+                    // proved the password. The challenge POST cannot widen it.
+                    $this->stashRemember($request, $user);
 
                     return response()->json([
                         'error' => '',
@@ -340,7 +344,11 @@ class AuthController extends \App\Http\Controllers\Controller
                     ]);
                 }
 
-                $this->loginToSession($user, $request);
+                $this->loginToSession(
+                    $user,
+                    $request,
+                    $this->wantsRemember($request, $user)
+                );
                 $payload = $user->load('roles.permissions');
             } elseif ($user->two_factor_secret && $user->two_factor_confirmed_at) {
                 // Check if there's a valid remember token for this device
@@ -352,7 +360,11 @@ class AuthController extends \App\Http\Controllers\Controller
 
                 if ($rememberToken) {
                     // User has a valid remember token, skip 2FA
-                    $this->loginToSession($user, $request);
+                    $this->loginToSession(
+                        $user,
+                        $request,
+                        $this->wantsRemember($request, $user)
+                    );
 
                     $payload = $user->load('roles.permissions');
                 } else {
@@ -362,6 +374,7 @@ class AuthController extends \App\Http\Controllers\Controller
                         $request
                             ->session()
                             ->put('auth.two_factor.user_id', $user->id);
+                        $this->stashRemember($request, $user);
                         $requiresTwoFactor = true;
 
                         // The user model still goes back on a TOTP challenge -
@@ -373,7 +386,11 @@ class AuthController extends \App\Http\Controllers\Controller
                         // caller a user lookup.
                         $payload = $user;
                     } else {
-                        $this->loginToSession($user, $request);
+                        $this->loginToSession(
+                            $user,
+                            $request,
+                            $this->wantsRemember($request, $user)
+                        );
 
                         $payload = $user->load('roles.permissions');
                         $requiresTwoFactor = false;
@@ -381,7 +398,11 @@ class AuthController extends \App\Http\Controllers\Controller
                 }
             } else {
                 // User doesn't have 2FA, proceed with normal login
-                $this->loginToSession($user, $request);
+                $this->loginToSession(
+                    $user,
+                    $request,
+                    $this->wantsRemember($request, $user)
+                );
 
                 $payload = $user->load('roles.permissions');
             }
@@ -704,6 +725,7 @@ class AuthController extends \App\Http\Controllers\Controller
 
         if (!$user) {
             $request->session()->forget('auth.two_factor.user_id');
+            $request->session()->forget(self::REMEMBER_SESSION_KEY);
             return response()->json(
                 [
                     'error' => $this->userNotFoundMessage(),
@@ -776,6 +798,7 @@ class AuthController extends \App\Http\Controllers\Controller
 
         if (!$user) {
             $request->session()->forget('auth.two_factor.user_id');
+            $request->session()->forget(self::REMEMBER_SESSION_KEY);
 
             return response()->json(
                 [
@@ -808,13 +831,20 @@ class AuthController extends \App\Http\Controllers\Controller
 
         $manager->consume($user);
 
-        Auth::login($user);
+        // Remember ME: the choice made at the original login, taken from the
+        // session. NOT $request->input('remember') - by this point the caller
+        // is only half authenticated, so its request body must not be able to
+        // extend the session's lifetime.
+        Auth::login($user, $this->takeStashedRemember($user));
 
         session()->forget('auth.two_factor.user_id');
         session()->regenerate();
 
-        // Remember-this-device is opt-in for the code driver: an SMS code is a
-        // possession factor tied to the phone, not the browser.
+        // Remember this DEVICE - a different feature that happens to share the
+        // field name, and one the challenge request legitimately owns: it is
+        // about the browser answering the challenge, so it can only be decided
+        // here. Opt-in for the code driver, because an SMS code is a possession
+        // factor tied to the phone, not to this browser.
         if ($manager->remembersDevices() && $request->input('remember', false)) {
             TwoFactorRememberToken::createToken(
                 $user,
@@ -855,6 +885,7 @@ class AuthController extends \App\Http\Controllers\Controller
 
         if (! $user) {
             $request->session()->forget('auth.two_factor.user_id');
+            $request->session()->forget(self::REMEMBER_SESSION_KEY);
 
             return response()->json(
                 ['error' => $this->invalidSessionMessage()],
@@ -926,17 +957,23 @@ class AuthController extends \App\Http\Controllers\Controller
      */
     protected function completeLogin($user)
     {
+        // Read the remember choice before the session is torn down. It is the
+        // one made at the original credentialed login, not anything in the
+        // challenge request.
+        $remember = $this->takeStashedRemember($user);
+
         // Clear the 2FA session
         session()->forget('auth.two_factor.user_id');
 
         // Log in the user
-        Auth::login($user);
+        Auth::login($user, $remember);
 
         // Handle multiple sessions if needed
         // Note: We can't logout other devices here because we don't have the password
         // in the 2FA verification request. This is handled in the initial login step.
 
-        // Regenerate the session
+        // Regenerate the session. Safe after the login: this rotates the session
+        // id but the recaller lives on the cookie jar, so it is untouched.
         session()->regenerate();
     }
 
@@ -1145,16 +1182,151 @@ class AuthController extends \App\Http\Controllers\Controller
     /**
      * Session login plus the single-session enforcement the package has always
      * applied, followed by the post-login hooks.
+     *
+     * The order matters and is not arbitrary. Auth::login() queues the recaller
+     * cookie; logoutOtherDevices() then rehashes the password, which would
+     * invalidate that cookie - so it re-queues the recaller itself off the back
+     * of the new hash. Doing it the other way round would leave the user holding
+     * a recaller built from a password hash that no longer exists, i.e. a
+     * "remember me" that silently stops working on the next visit.
      */
-    protected function loginToSession($user, Request $request): void
+    protected function loginToSession($user, Request $request, bool $remember = false): void
     {
-        Auth::login($user);
+        Auth::login($user, $remember);
 
         if (! ModuleConfig::get('auth.allow_multiple_sessions', false)) {
             Auth::logoutOtherDevices($request->input('password'));
         }
 
         $this->runPostLoginHooks($user, $request);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Remember me
+    |--------------------------------------------------------------------------
+    |
+    | Two different features arrive in this controller under the name
+    | `remember`, and keeping them apart is the whole job of this block:
+    |
+    |   1. Remember ME - the session guard's recaller cookie, "keep me logged
+    |      in". Governed by auth.remember_enabled. Its source of truth is the
+    |      value sent to authenticate(), stashed in the session; a 2FA challenge
+    |      NEVER reads it off its own request body.
+    |
+    |   2. Remember this DEVICE - skipping the 2FA challenge next time, stored
+    |      in the package's TwoFactorRememberToken table. Governed by
+    |      two_factor.remember_device. That one does read the challenge request,
+    |      and always has.
+    |
+    | Point 1's session stash is what stops a tampered challenge POST widening
+    | the session: by the time the challenge is answered the user is only half
+    | authenticated, so anything in that request body is attacker-controllable
+    | in a way the original credentialed request was not.
+    */
+
+    /** The session key carrying the remember choice across a 2FA challenge. */
+    protected const REMEMBER_SESSION_KEY = 'auth.two_factor.remember';
+
+    protected function rememberEnabled(): bool
+    {
+        return (bool) ModuleConfig::get('auth.remember_enabled', false);
+    }
+
+    /**
+     * Did this login ask to be remembered, and may it be?
+     *
+     * Returns false whenever the feature is off, so every call site can pass the
+     * result straight to Auth::login() without repeating the check.
+     */
+    protected function wantsRemember(Request $request, $user): bool
+    {
+        if (! $this->rememberEnabled()) {
+            return false;
+        }
+
+        return $this->grantRemember($user, $request->boolean('remember'));
+    }
+
+    /**
+     * Gate a remember request on the model actually being able to store a
+     * remember token.
+     */
+    protected function grantRemember($user, bool $requested): bool
+    {
+        if (! $requested || ! $this->rememberEnabled()) {
+            return false;
+        }
+
+        if (! $this->supportsRememberToken($user)) {
+            // Degrade rather than fail: without the column Auth::login() would
+            // throw on the save, turning a missing migration into a login
+            // outage. The user simply is not remembered.
+            Log::warning(
+                'visns-packages: remember me is enabled but the user model cannot store a remember token; logging in without it',
+                [
+                    'model' => get_class($user),
+                    'user_id' => $user->getKey(),
+                ]
+            );
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Can this model hold a remember token?
+     *
+     * A model retrieved with `select *` carries every table column in its
+     * attribute bag, so array_key_exists() answers this without the
+     * introspection query Schema::hasColumn() would cost on every login.
+     */
+    protected function supportsRememberToken($user): bool
+    {
+        if (
+            ! is_object($user) ||
+            ! method_exists($user, 'getRememberToken') ||
+            ! method_exists($user, 'setRememberToken') ||
+            ! method_exists($user, 'getRememberTokenName')
+        ) {
+            return false;
+        }
+
+        $column = (string) $user->getRememberTokenName();
+
+        // An Authenticatable can opt out entirely by returning an empty name.
+        if ($column === '') {
+            return false;
+        }
+
+        return method_exists($user, 'getAttributes')
+            && array_key_exists($column, $user->getAttributes());
+    }
+
+    /**
+     * Park the remember choice for the 2FA challenge that is about to happen.
+     */
+    protected function stashRemember(Request $request, $user): void
+    {
+        $request->session()->put(
+            self::REMEMBER_SESSION_KEY,
+            $this->wantsRemember($request, $user)
+        );
+    }
+
+    /**
+     * Read back - and clear - the remember choice made at the original login.
+     *
+     * Deliberately takes nothing from the current request: see the block
+     * comment above.
+     */
+    protected function takeStashedRemember($user): bool
+    {
+        $stashed = (bool) session()->pull(self::REMEMBER_SESSION_KEY, false);
+
+        return $this->grantRemember($user, $stashed);
     }
 
     /**

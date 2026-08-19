@@ -24,6 +24,7 @@ A comprehensive Laravel package that provides enhanced authentication, file mana
     -   [Auth Platform Modules](#auth-platform-modules)
         -   [Login extension points](#login-extension-points)
         -   [Password reset: resolver, link and hooks](#password-reset-resolver-link-and-hooks)
+        -   [Remember me](#remember-me)
         -   [Two-factor: the code channel](#two-factor-the-code-channel)
         -   [Passwordless OTP login](#passwordless-otp-login)
         -   [Staff impersonation](#staff-impersonation)
@@ -653,6 +654,60 @@ resolves to an account now answers the same "token is no longer valid" message
 instead of dereferencing null and 500-ing; and the spent row is deleted by the
 **row's** address rather than the resolved account's, so a token cannot survive
 its own use when the two differ.
+
+### Remember me
+
+The login screens have always sent `remember`, and these endpoints have always
+accepted it — and then dropped it. Nothing reached the session guard, so no
+recaller cookie was ever issued and the tick box did nothing at all.
+
+```php
+'auth' => ['remember_enabled' => true],
+```
+
+Off by default. Switching it on lengthens how long a session survives on every
+machine a user ticks the box on — a security posture decision, not a bug fix,
+and not something that should happen to an application merely because it
+upgraded. Needs the standard Laravel `remember_token` column on the users table.
+
+**One source of truth: the original login.** The choice is read from the request
+that proved the password, stashed in the session under
+`auth.two_factor.remember`, and applied when the login actually completes:
+
+| Path | Where `remember` is read |
+| --- | --- |
+| plain login (no 2FA) | the `authenticate()` request |
+| code-driver challenge | the session stash from `authenticate()` |
+| TOTP challenge | the session stash from `authenticate()` |
+| API login / API challenge | not applied — token clients have no recaller |
+
+A challenge request's own `remember` field is **ignored** for this. By the time
+the challenge is answered the caller is only half authenticated, so its body must
+not be able to extend the session's lifetime; the stash is what makes a tampered
+challenge POST unable to widen it. The stash is consumed on use and dropped if
+the challenge is abandoned.
+
+> **`remember` means two different things on the challenge endpoint.** This
+> feature (recaller cookie, `remember_enabled`) reads the *session*.
+> Remember-this-device (skipping the 2FA challenge next time,
+> `two_factor.remember_device`, stored in the package's own table) reads the
+> *challenge request*, and always has — that one is legitimately about the
+> browser answering the challenge, so it can only be decided there. Turning on
+> `remember_enabled` does not change it.
+
+Interplay handled, with tests pinning each:
+
+- **`logoutOtherDevices()`** rehashes the password, and the recaller embeds a
+  slice of that hash. The login happens first so the recaller is queued, then the
+  rehash re-queues it off the new hash — otherwise "remember me" would silently
+  stop working on the next visit.
+- **`session()->regenerate()`** in the 2FA completion rotates the session id; the
+  recaller lives on the cookie jar and is unaffected.
+- **`logout()`** clears it — Laravel queues a forget-cookie *and* cycles the
+  stored token, so a copy taken off the wire is worthless too.
+- **A model that cannot store a remember token** (missing migration, or an
+  `Authenticatable` opting out) logs a warning and logs in without a recaller. A
+  missing column costs the tick box, not the login.
 
 ### Two-factor: the code channel
 

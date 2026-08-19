@@ -380,6 +380,33 @@ return [
         'allow_multiple_sessions' => env('ALLOW_MULTIPLE_SESSIONS', false),
         'default_user_role' => env('DEFAULT_USER_ROLE'),
 
+        /*
+        | Does "remember me" actually remember?
+        |
+        | The login screens have always sent `remember` and these endpoints have
+        | always accepted it - and then dropped it on the floor. Nothing was
+        | passed to the session guard, so no recaller cookie was ever issued and
+        | the tick box did nothing at all.
+        |
+        | True wires it up: a login that asked to be remembered is made with
+        | Auth::login($user, true), and Laravel issues the long-lived recaller
+        | cookie. It defaults to FALSE because switching it on lengthens how
+        | long a session survives on every machine a user ticks the box on -
+        | that is a security posture decision, not a bug fix, and it must not
+        | happen to an application merely because it upgraded.
+        |
+        | The users table needs the standard `remember_token` column. A model
+        | without it degrades to the old behaviour (no recaller) with a warning
+        | in the log, rather than failing the login on a missing column.
+        |
+        | Note this is unrelated to `two_factor.remember_device`, which is about
+        | skipping the 2FA challenge on a known device and is stored in the
+        | package's own table. The two features share the `remember` request
+        | field but nothing else - see the AuthController for how the two are
+        | told apart.
+        */
+        'remember_enabled' => false,
+
         // Socialite redirects. FRONTEND_URL is a different variable from the
         // FRONT_END_URL above; both exist in the wild, so both are honoured.
         'socialite' => [
