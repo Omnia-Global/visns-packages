@@ -353,6 +353,431 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Authentication
+    |--------------------------------------------------------------------------
+    |
+    | Everything the auth controller used to read straight out of env() lives
+    | here, plus the extension points an application needs to bend the login
+    | flow to its own rules without forking the controller.
+    |
+    | EVERY default in this section reproduces the behaviour the package had
+    | before the section existed, so an application that publishes nothing keeps
+    | working exactly as it did.
+    |
+    */
+    'auth' => [
+        // Falls back to visns-packages.user_model when null. Every auth code
+        // path resolves the model through this - nothing hardcodes App\Models\User.
+        'user_model' => null,
+
+        // Values the controller used to read with env(), which returns null
+        // once `php artisan config:cache` has run.
+        'app_name' => env('APP_NAME'),
+        'app_url' => env('APP_URL'),
+        'front_end_url' => env('FRONT_END_URL'),
+        'mail_to_dev' => env('MAIL_TO_DEV'),
+        'mail_from_address' => env('MAIL_FROM_ADDRESS'),
+        'allow_multiple_sessions' => env('ALLOW_MULTIPLE_SESSIONS', false),
+        'default_user_role' => env('DEFAULT_USER_ROLE'),
+
+        /*
+        | Password reset mail.
+        |
+        | Resolution order:
+        |   1. `reset_mail_factory` - any callable/invokable class:
+        |          fn (string $content, string $subject): Mailable
+        |      Use this when the application's mailable has a signature of its
+        |      own; nothing else here has to match.
+        |   2. `reset_mailable` - built as `new $mailable($content, $subject, [])`.
+        |   3. Neither set - the historical call is preserved verbatim:
+        |          new \App\Mail\GenericMail($content, $mailFromAddress, $subject)
+        |      (yes, the second argument is the from-address; that is what this
+        |      package has always sent, and applications relying on it must not
+        |      break on upgrade.)
+        |
+        | `reset_subject` defaults to "{app_name} - Password Reset Request".
+        */
+        'reset_mail_factory' => null,
+        'reset_mailable' => null,
+        'reset_subject' => null,
+
+        /*
+        | Shape of the JSON body returned by logout_api(). The historical shape
+        | is kept as the default; an application wanting the CRM's `{"error":""}`
+        | sets it here.
+        */
+        'logout_response' => ['message' => 'Successfully logged out'],
+
+        /*
+        | Pluggable user lookup. An invokable class (or callable) receiving the
+        | login identifier and the request, returning a user model or null.
+        |
+        |     'user_resolver' => \App\Auth\PortalUserResolver::class,
+        |
+        | Null keeps the built-in resolver: an identifier that validates as an
+        | email address is looked up on `email`, anything else on `username`.
+        */
+        'user_resolver' => null,
+
+        /*
+        | Login lifecycle hooks.
+        |
+        | `pre_login_gates`: invokable classes run once the account has been
+        | found, each called as ($user, $request) and returning either null
+        | ("carry on") or a Response, which is returned to the client as-is.
+        | Use for things like an inactive-client 403 or a role lockout.
+        |
+        | `post_login_hooks`: invokable classes run as ($user, $request) after a
+        | successful login - stamping last-login columns, purging tokens, etc.
+        |
+        | `run_gates_before_credential_check`: by default gates run AFTER the
+        | password has been verified, so a gate can never be used to probe which
+        | accounts exist. Applications that must reject (say) an inactive
+        | account before the password is even checked - which is what the
+        | Throughlife CRM's portal login does - set this true.
+        */
+        'pre_login_gates' => [],
+        'post_login_hooks' => [],
+        'run_gates_before_credential_check' => false,
+
+        /*
+        | authenticate() has always blanked a `location` of '/' or '/login' in
+        | the `previous` field it echoes back. Set false to echo the location
+        | untouched.
+        */
+        'filter_previous' => true,
+
+        /*
+        | Every user-facing string the auth controller can emit. Defaults are
+        | the strings the package has always returned.
+        */
+        'messages' => [
+            'account_disabled' =>
+                'Your account has been disabled. Please contact the administrator.',
+            'login_failed' => 'Login unsuccessful, please try again.',
+            'email_not_found' =>
+                'The email address is not found, please try again.',
+            'invalid_reset_token' =>
+                'The token is no longer valid, please start the password request process again.',
+            'unauthenticated' => 'Unauthenticated',
+            'registration_failed' => 'An error occurred during registration.',
+            'invalid_data' => 'The given data was invalid.',
+            'invalid_two_factor_session' =>
+                'Invalid two-factor authentication session.',
+            'user_not_found' => 'User not found.',
+            'invalid_two_factor_code' =>
+                'The provided two-factor authentication code was invalid.',
+            'two_factor_code_expired' =>
+                'The verification code has expired, please request a new one.',
+            'two_factor_code_missing' =>
+                'No verification code has been sent, please start again.',
+            'two_factor_send_failed' =>
+                'The verification code could not be sent, please try again.',
+        ],
+
+        /*
+        |----------------------------------------------------------------------
+        | Two-factor authentication
+        |----------------------------------------------------------------------
+        |
+        | 'driver':
+        |   'totp' (default) - the existing authenticator-app flow, unchanged.
+        |   'code'           - a one-time numeric code the application delivers
+        |                      itself (SMS, email, whatever) through a
+        |                      TwoFactorCodeSender binding.
+        |
+        | 'trigger' decides WHEN 2FA is demanded, and is only ever evaluated in
+        | the production environment - outside production 2FA is skipped, which
+        | is what both the package's TOTP flow and the CRM's code flow have
+        | always done:
+        |   'always'    (default) - every login that has 2FA available
+        |   'ip_change'           - only when the request IP differs from the
+        |                           value in `ip_column`, which is why the
+        |                           post-login IP hook matters
+        |   'never'               - 2FA is never demanded
+        |
+        | The code driver stores the live code in `code_column` and the time it
+        | was sent in `code_sent_at_column`; both are nulled the moment a code
+        | is used, so a code is good for exactly one login.
+        |
+        | 'sender' names a class implementing
+        | Visnsstudio\VisnsPackages\Contracts\TwoFactorCodeSender. When null the
+        | container binding for that interface is used, and when nothing is
+        | bound the package's logging sender takes it (so a misconfigured
+        | application fails loudly in the log rather than silently letting
+        | people in).
+        |
+        | 'message_template' is rendered with `{code}` replaced by the code. When
+        | 'append_autofill_suffix' is true the SMS autofill trailer
+        | "\n\n@{host} #{code}" is appended, host coming from config('app.url').
+        */
+        'two_factor' => [
+            'driver' => 'totp',
+            'trigger' => 'always',
+            'ip_column' => 'last_logged_ip_address',
+            'code_column' => 'two_factor_token',
+            'code_sent_at_column' => 'two_factor_token_sent_at',
+            'expiry_minutes' => 15,
+            'sender' => null,
+            'message_template' => 'Your verification code is: {code}',
+            'append_autofill_suffix' => true,
+            // Remember-this-device is a TOTP feature; the code driver only
+            // honours it when this is switched on.
+            'remember_device' => false,
+        ],
+
+        /*
+        | The whitelisted user payload returned by endpoints that must not
+        | serialize a whole user model (impersonation validation, OTP login with
+        | minimal_response). Relations are loaded and reduced to the named
+        | fields; a missing relation becomes null.
+        */
+        'minimal_user' => [
+            'fields' => [
+                'id',
+                'firstname',
+                'surname',
+                'email',
+                'company_contact_id',
+                'dateLastLogged',
+            ],
+            'relations' => [
+                'company_contact' => [
+                    'fields' => ['id', 'company_id', 'firstname', 'surname'],
+                ],
+            ],
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Passwordless OTP login
+    |--------------------------------------------------------------------------
+    |
+    | A contact (email address or mobile number) is exchanged for a one-time
+    | code, and the code for an API token. Off by default: enabling it publishes
+    | two unauthenticated endpoints.
+    |
+    | 'contact_resolver' is how a raw contact string becomes the record the code
+    | is stored against - an invokable class implementing
+    | Visnsstudio\VisnsPackages\Contracts\OtpContactResolver. The bundled
+    | default searches the user table; an application with its own contact table
+    | (the CRM searches company_contact) registers its own.
+    |
+    | 'sender' names a Visnsstudio\VisnsPackages\Contracts\OtpSender
+    | implementation; when null the container binding is used, falling back to
+    | the package's logging sender.
+    |
+    */
+    'otp' => [
+        'enabled' => false,
+
+        'uris' => [
+            'request' => 'auth/request-otp',
+            'login' => 'auth/login-otp',
+        ],
+
+        // Null = the package's api_middleware.
+        'middleware' => null,
+
+        'contact_resolver' => null,
+        'sender' => null,
+
+        // How the resolved contact record is joined to a user account.
+        'user_model' => null,
+        'user_foreign_key' => 'company_contact_id',
+        'user_relations' => ['company_contact', 'roles.permissions'],
+
+        // Name given to the Sanctum token minted on a successful OTP login.
+        'token_name' => 'auth_token',
+
+        'code_length' => 6,
+        'expiry_minutes' => 5,
+        'max_attempts' => 3,
+        // A second request inside this window is refused with 429.
+        'resend_cooldown_minutes' => 2,
+        'rate_limit_window_minutes' => 15,
+
+        // Columns on the contact record holding the live code.
+        'columns' => [
+            'code' => 'otp_code',
+            'sent_at' => 'otp_sent_at',
+            'contact_method' => 'otp_contact_method',
+            'attempts' => 'otp_attempts',
+            'locked_until' => 'otp_locked_until',
+        ],
+
+        // Outside production the generated code is echoed back in `dev_otp` so
+        // a staging login is possible without a live SMS gateway.
+        'expose_code_outside_production' => true,
+
+        // Null = inherit auth.minimal_user.
+        'minimal_user' => null,
+
+        'messages' => [
+            'contact_not_found' =>
+                'Email or mobile number not found. Please contact the Throughlife team to verify your contact details.',
+            'no_portal_access' =>
+                'No portal access is set up for this contact. Please contact the Throughlife team to activate your portal access.',
+            'no_portal_access_login' =>
+                'No portal access available. Please contact the Throughlife team to activate your portal access.',
+            'rate_limited' =>
+                'Too many OTP requests. Please try again later or contact the Throughlife team for assistance.',
+            'invalid_code' =>
+                'Invalid or expired OTP. Please request a new code or contact the Throughlife team for assistance.',
+            'request_failed' =>
+                'An error occurred. Please contact the Throughlife team for assistance.',
+            'login_failed' =>
+                'An error occurred during login. Please contact the Throughlife team for assistance.',
+            'sent' => 'OTP sent successfully',
+            'generated' => 'OTP generated for testing',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Staff impersonation
+    |--------------------------------------------------------------------------
+    |
+    | Staff issue a short-lived Sanctum token for a client's own account and are
+    | redirected into the client-facing portal holding it. Off by default.
+    |
+    | The token is named "{token_prefix}:{actingStaffId}" so audit records can
+    | attribute impersonated writes to the real human -
+    | Visnsstudio\VisnsPackages\Support\ImpersonationActor::id() recovers it.
+    |
+    */
+    'impersonation' => [
+        'enabled' => false,
+
+        'uris' => [
+            // Issued from the CRM (session-authenticated, permission gated).
+            'issue' => 'ajax/impersonateClient',
+            // Consumed by the portal (unauthenticated, token only).
+            'validate' => 'validateImpersonationToken',
+        ],
+
+        'issue_middleware' => null, // null = the package's routes_middleware + auth
+        'validate_middleware' => null, // null = the package's api_middleware
+
+        'permission' => 'Impersonate Client',
+
+        'user_model' => null,
+        // Column on the user table holding the id posted as `id`.
+        'target_column' => 'company_contact_id',
+
+        'token_prefix' => 'impersonation-token',
+        'expires_minutes' => 60,
+
+        // Audit record. Set to false to write no log at all.
+        'log_model' => \Visnsstudio\VisnsPackages\Models\ImpersonationLog::class,
+
+        // Base URL of the portal. Null = config('portal.url').
+        'portal_url' => null,
+        'portal_path' => '/portal',
+        'redirect_path' => '/impersonate',
+
+        'user_relations' => ['company_contact', 'roles.permissions'],
+
+        // Null = inherit auth.minimal_user.
+        'minimal_user' => null,
+
+        'messages' => [
+            'no_portal_account' =>
+                'This client does not have a portal account yet. Please set a username and password for the client before accessing the portal.',
+            'invalid_token' => 'Invalid token',
+            'expired_token' => 'Token has expired',
+            'user_not_found' => 'User not found',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Zoom Phone call queue pop
+    |--------------------------------------------------------------------------
+    |
+    | Receives Zoom Phone events, keeps a table of what is ringing right now in
+    | the account's call queues, and broadcasts it to every monitoring browser.
+    | Off by default: enabling it publishes a webhook endpoint and expects the
+    | two state tables to exist.
+    |
+    | The webhook always answers 200 (bar a signature failure): Zoom retries and
+    | eventually disables endpoints that error or answer slowly.
+    |
+    */
+    'call_queue' => [
+        'enabled' => false,
+
+        'uris' => [
+            'webhook' => 'api/zoom/webhook',
+            'live' => 'ajax/call-queue/live',
+            'settings' => 'ajax/call-queue/settings',
+        ],
+
+        // The webhook is registered outside the api group so its URI is
+        // absolute; only the signature middleware guards it.
+        'webhook_middleware' => [],
+        // Null = the package's routes_middleware.
+        'routes_middleware' => null,
+
+        'permissions' => [
+            'monitor' => 'Call Queue Monitor',
+            'settings' => 'Call Queue Settings',
+        ],
+
+        // Zoom's webhook signing secret. While unset the endpoint 401s
+        // everything, so the feature is inert rather than open.
+        'webhook_secret_token' => env('ZOOM_WEBHOOK_SECRET_TOKEN'),
+        'max_clock_skew_seconds' => 300,
+
+        'tables' => [
+            'live_calls' => 'zoom_live_queue_calls',
+            'settings' => 'zoom_call_queue_settings',
+        ],
+
+        /*
+        | Broadcast channel. When `append_env_suffix` is true the current
+        | app environment is appended ("call-queue-monitor.production"), which
+        | is what any deployment sharing one Pusher app between environments
+        | needs - without it dev broadcasts land in production browsers.
+        */
+        'channel' => 'call-queue-monitor',
+        'append_env_suffix' => false,
+
+        /*
+        | Caller enrichment: an invokable implementing
+        | Visnsstudio\VisnsPackages\Contracts\CallerEnrichment, called once per
+        | ringing call with the caller's number and returning the client
+        | snapshot to ride along in the broadcast. Null = no enrichment.
+        | A throwing hook costs the pop its snapshot, never the pop itself.
+        */
+        'caller_enrichment' => null,
+
+        // Settings are read on every ringing webhook, and change a few times a
+        // year.
+        'settings_cache_ttl' => 60,
+
+        // A ringing row older than this is treated as abandoned: Zoom does not
+        // guarantee a closing event for every call.
+        'stale_after_minutes' => 15,
+
+        /*
+        | Zoom prefixes every call queue pickup code with a fixed *99, so the
+        | stored code 8781 is dialled *998781. Codes are stored bare.
+        */
+        'pickup_prefix' => '*99',
+
+        'api' => [
+            'account_id' => env('ZOOM_ACCOUNT_ID'),
+            'client_id' => env('ZOOM_CLIENT_ID'),
+            'client_secret' => env('ZOOM_CLIENT_SECRET'),
+            'base_url' => 'https://api.zoom.us/v2',
+            'token_url' => 'https://zoom.us/oauth/token',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Two-Factor Authentication App Name
     |--------------------------------------------------------------------------
     |
