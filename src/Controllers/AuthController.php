@@ -326,6 +326,7 @@ class AuthController extends \App\Http\Controllers\Controller
                             ),
                             'user' => '',
                             'requires_two_factor' => false,
+                            'csrf_token' => $this->csrfToken($request),
                         ]);
                     }
 
@@ -341,6 +342,7 @@ class AuthController extends \App\Http\Controllers\Controller
                         ),
                         'user' => null,
                         'requires_two_factor' => true,
+                        'csrf_token' => $this->csrfToken($request),
                     ]);
                 }
 
@@ -420,6 +422,7 @@ class AuthController extends \App\Http\Controllers\Controller
             'previous' => $this->filteredPrevious($request->input('location')),
             'user' => $payload,
             'requires_two_factor' => $requiresTwoFactor,
+            'csrf_token' => $this->csrfToken($request),
         ]);
     }
 
@@ -838,7 +841,14 @@ class AuthController extends \App\Http\Controllers\Controller
         Auth::login($user, $this->takeStashedRemember($user));
 
         session()->forget('auth.two_factor.user_id');
-        session()->regenerate();
+
+        // No session()->regenerate() here. Auth::login() has already called
+        // migrate(true), which rotates the session id - the fixation protection
+        // - without touching the CSRF token. regenerate() would additionally
+        // roll the token, and the SPA does not reload across the challenge: its
+        // <meta csrf-token> would go stale and its next burst of POSTs would all
+        // 419. See rotateSessionId().
+        $this->rotateSessionId();
 
         // Remember this DEVICE - a different feature that happens to share the
         // field name, and one the challenge request legitimately owns: it is
@@ -858,6 +868,7 @@ class AuthController extends \App\Http\Controllers\Controller
             'error' => '',
             'user' => $user->load('roles.permissions'),
             'previous' => $previous,
+            'csrf_token' => $this->csrfToken($request),
         ]);
     }
 
@@ -972,9 +983,51 @@ class AuthController extends \App\Http\Controllers\Controller
         // Note: We can't logout other devices here because we don't have the password
         // in the 2FA verification request. This is handled in the initial login step.
 
-        // Regenerate the session. Safe after the login: this rotates the session
-        // id but the recaller lives on the cookie jar, so it is untouched.
-        session()->regenerate();
+        $this->rotateSessionId();
+    }
+
+    /**
+     * Rotate the session id after a successful 2FA challenge - and only the id.
+     *
+     * Auth::login() has already done it (updateSession() calls
+     * session->migrate(true)); this is here to say so, and to be the one place
+     * that decides what "rotate" means at the end of a challenge.
+     *
+     * It must NOT be session()->regenerate(). regenerate() is migrate() plus
+     * regenerateToken(), and rolling the CSRF token is what broke real logins:
+     * the SPA no longer hard-reloads across the challenge, so the page keeps the
+     * <meta csrf-token> it rendered before 2FA. A rolled token leaves that meta
+     * tag stale and every POST from the still-open page 419s - a burst of error
+     * toasts until the user forces a reload. GETs are unaffected, which is what
+     * made it look intermittent.
+     *
+     * The trade is deliberate: session FIXATION is defended by the id rotation
+     * above, which is the attack that matters at a privilege change - an
+     * attacker who planted a session id does not get to keep it. The CSRF token
+     * is a different control with a different threat model, it is not a
+     * credential an attacker can have planted, and it survives so the page that
+     * asked for the challenge can keep working. Anything that does need a fresh
+     * token (logout) still calls regenerateToken() explicitly.
+     *
+     * Callers that want to resync anyway get the live token back in the response
+     * JSON - see csrfToken().
+     */
+    protected function rotateSessionId(): void
+    {
+        session()->migrate(true);
+    }
+
+    /**
+     * The session's live CSRF token, for a frontend to resync its meta tag.
+     *
+     * Returned alongside every successful login response. No secret is spent:
+     * the token is already rendered into the page this is answering. It is a
+     * standing safety net, so that any future change to how sessions rotate
+     * cannot silently strand an open SPA page again.
+     */
+    protected function csrfToken(Request $request): ?string
+    {
+        return $request->hasSession() ? $request->session()->token() : null;
     }
 
     /**

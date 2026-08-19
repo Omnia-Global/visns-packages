@@ -24,6 +24,7 @@ A comprehensive Laravel package that provides enhanced authentication, file mana
     -   [Auth Platform Modules](#auth-platform-modules)
         -   [Login extension points](#login-extension-points)
         -   [Password reset: resolver, link and hooks](#password-reset-resolver-link-and-hooks)
+        -   [Sessions and CSRF across a login](#sessions-and-csrf-across-a-login)
         -   [Remember me](#remember-me)
         -   [Two-factor: the code channel](#two-factor-the-code-channel)
         -   [Passwordless OTP login](#passwordless-otp-login)
@@ -654,6 +655,40 @@ resolves to an account now answers the same "token is no longer valid" message
 instead of dereferencing null and 500-ing; and the spent row is deleted by the
 **row's** address rather than the resolved account's, so a token cannot survive
 its own use when the two differ.
+
+### Sessions and CSRF across a login
+
+Every successful login response carries the live CSRF token, so a frontend can
+resync without a page reload:
+
+| Response | Carries |
+| --- | --- |
+| `POST /login/authenticate` (success, failure, and `requires_two_factor`) | `csrf_token` |
+| `POST /login/two-factor-challenge` (code driver) | `csrf_token` |
+
+What rotates at a login, and what does not:
+
+- **The session id rotates.** `Auth::login()` calls `session->migrate(true)`, at
+  the plain login and again when a 2FA challenge completes. That is the session
+  fixation defence: an id an attacker planted before the challenge does not
+  survive it.
+- **The CSRF token does not.** Completing a challenge deliberately does *not*
+  call `session()->regenerate()`, which is `migrate()` **plus**
+  `regenerateToken()`.
+
+That second point is a fix, not an oversight. A SPA that shows the 2FA prompt
+without reloading keeps the `<meta csrf-token>` it rendered before the challenge.
+Rolling the token left that tag stale, so the page's next burst of POSTs all
+returned **419 CSRF token mismatch** until the user forced a reload — while GETs
+carried on working, which is what made it look intermittent. Session fixation and
+CSRF are different controls with different threat models: the token is not
+something an attacker can have planted, so it survives the challenge and the open
+page keeps working. Anything that genuinely needs a fresh token — `logout()` —
+still calls `regenerateToken()` explicitly.
+
+The `csrf_token` field is a standing safety net on top of that, so a future
+change to session handling cannot silently strand an open page again. Nothing is
+disclosed by it: the token is already rendered into the page being answered.
 
 ### Remember me
 
