@@ -233,9 +233,7 @@ class CallQueueSettingsTest extends TestCase
         );
     }
 
-    /**
-     * @dataProvider invalidCodes
-     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('invalidCodes')]
     public function test_zooms_own_pickup_code_rules_are_enforced(string $code): void
     {
         $this->fakeZoom();

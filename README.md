@@ -658,37 +658,58 @@ its own use when the two differ.
 
 ### Sessions and CSRF across a login
 
-Every successful login response carries the live CSRF token, so a frontend can
-resync without a page reload:
+**Every stateful auth response carries the live, post-login CSRF token. Resync
+your meta tag from it — this is the contract, not a convenience.**
 
 | Response | Carries |
 | --- | --- |
-| `POST /login/authenticate` (success, failure, and `requires_two_factor`) | `csrf_token` |
-| `POST /login/two-factor-challenge` (code driver) | `csrf_token` |
+| `POST /login/authenticate` — success, failure, and `requires_two_factor` | `csrf_token` |
+| `POST /login/two-factor-challenge` — code driver | `csrf_token` |
 
-What rotates at a login, and what does not:
+The API endpoints do not: they are stateless and have no session.
 
-- **The session id rotates.** `Auth::login()` calls `session->migrate(true)`, at
-  the plain login and again when a 2FA challenge completes. That is the session
-  fixation defence: an id an attacker planted before the challenge does not
-  survive it.
-- **The CSRF token does not.** Completing a challenge deliberately does *not*
-  call `session()->regenerate()`, which is `migrate()` **plus**
-  `regenerateToken()`.
+**Why you have to.** Laravel rotates the session on login, and what it rotates
+changed between majors:
 
-That second point is a fix, not an oversight. A SPA that shows the 2FA prompt
-without reloading keeps the `<meta csrf-token>` it rendered before the challenge.
-Rolling the token left that tag stale, so the page's next burst of POSTs all
-returned **419 CSRF token mismatch** until the user forced a reload — while GETs
-carried on working, which is what made it look intermittent. Session fixation and
-CSRF are different controls with different threat models: the token is not
-something an attacker can have planted, so it survives the challenge and the open
-page keeps working. Anything that genuinely needs a fresh token — `logout()` —
-still calls `regenerateToken()` explicitly.
+| | `SessionGuard::updateSession()` | Rotates |
+| --- | --- | --- |
+| Laravel ≤ 11 | `session->migrate(true)` | session id |
+| Laravel ≥ 12 | `session->regenerate(true)` | session id **and CSRF token** |
 
-The `csrf_token` field is a standing safety net on top of that, so a future
-change to session handling cannot silently strand an open page again. Nothing is
-disclosed by it: the token is already rendered into the page being answered.
+This package supports `>=11` and fights neither. The Laravel 12 change is
+deliberate framework security — a privilege change should not leave the old CSRF
+token valid — so suppressing it would be trading a real protection for
+convenience.
+
+The consequence is real, and it is how this was first reported: a single-page app
+that shows the 2FA prompt **without reloading** still holds the
+`<meta csrf-token>` it rendered before the challenge. On Laravel 12 that token is
+dead the moment the challenge completes, so the page's next burst of POSTs all
+return **419 CSRF token mismatch** — while its GETs carry on working, which is
+what makes it look intermittent rather than broken.
+
+So the frontend must do one of:
+
+```js
+// after POST /login/authenticate and POST /login/two-factor-challenge
+if (data.csrf_token) {
+    document
+        .querySelector('meta[name="csrf-token"]')
+        ?.setAttribute('content', data.csrf_token);
+    // and whatever your HTTP client caches, e.g.
+    axios.defaults.headers.common['X-CSRF-TOKEN'] = data.csrf_token;
+}
+```
+
+…or hard-reload after login. Resyncing is cheaper and is what the field is for.
+Nothing is disclosed by returning it: the token is already rendered into the page
+being answered.
+
+**Session fixation is unaffected.** The session id rotates at every privilege
+change — the plain login, and again when a 2FA challenge completes — so an id an
+attacker planted beforehand never survives. This package adds no rotation of its
+own on top of the framework's, and `logout()` still calls `regenerateToken()`
+explicitly, because there a fresh token is the entire point.
 
 ### Remember me
 
@@ -1052,6 +1073,12 @@ composer test          # the package's own suite, on Testbench + SQLite
 The older tests under `tests/Unit` and `tests/Feature` extend `Tests\TestCase`
 and build `App\Models\User` factories — they only run from inside a consuming
 application, and are kept in an opt-in `Legacy` suite.
+
+The dev dependencies pin **Testbench 10 / Laravel 12**, deliberately: the package
+supports `>=11`, but session, guard and cookie behaviour differ between the two
+majors (see *Sessions and CSRF across a login*), and a suite that resolves the
+older major will happily green-light code that is broken for a consumer on the
+newer one. Test against the major your consumers run.
 
 ## File Management
 

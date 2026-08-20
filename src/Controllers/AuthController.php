@@ -842,13 +842,8 @@ class AuthController extends \App\Http\Controllers\Controller
 
         session()->forget('auth.two_factor.user_id');
 
-        // No session()->regenerate() here. Auth::login() has already called
-        // migrate(true), which rotates the session id - the fixation protection
-        // - without touching the CSRF token. regenerate() would additionally
-        // roll the token, and the SPA does not reload across the challenge: its
-        // <meta csrf-token> would go stale and its next burst of POSTs would all
-        // 419. See rotateSessionId().
-        $this->rotateSessionId();
+        // No session rotation of our own: Auth::login() has already done it.
+        // See csrfToken() for what that means for the page that called this.
 
         // Remember this DEVICE - a different feature that happens to share the
         // field name, and one the challenge request legitimately owns: it is
@@ -982,48 +977,41 @@ class AuthController extends \App\Http\Controllers\Controller
         // Handle multiple sessions if needed
         // Note: We can't logout other devices here because we don't have the password
         // in the 2FA verification request. This is handled in the initial login step.
-
-        $this->rotateSessionId();
+        //
+        // And no session rotation of our own: Auth::login() has already done it.
+        // See csrfToken().
     }
 
     /**
-     * Rotate the session id after a successful 2FA challenge - and only the id.
+     * The session's live CSRF token, returned with every stateful auth response.
      *
-     * Auth::login() has already done it (updateSession() calls
-     * session->migrate(true)); this is here to say so, and to be the one place
-     * that decides what "rotate" means at the end of a challenge.
+     * This is the contract, and it exists because the framework rotates the
+     * session out from under the page that called us.
      *
-     * It must NOT be session()->regenerate(). regenerate() is migrate() plus
-     * regenerateToken(), and rolling the CSRF token is what broke real logins:
-     * the SPA no longer hard-reloads across the challenge, so the page keeps the
-     * <meta csrf-token> it rendered before 2FA. A rolled token leaves that meta
-     * tag stale and every POST from the still-open page 419s - a burst of error
-     * toasts until the user forces a reload. GETs are unaffected, which is what
-     * made it look intermittent.
+     * Auth::login() -> updateSession() rotates the session, and WHAT it rotates
+     * depends on the framework version:
      *
-     * The trade is deliberate: session FIXATION is defended by the id rotation
-     * above, which is the attack that matters at a privilege change - an
-     * attacker who planted a session id does not get to keep it. The CSRF token
-     * is a different control with a different threat model, it is not a
-     * credential an attacker can have planted, and it survives so the page that
-     * asked for the challenge can keep working. Anything that does need a fresh
-     * token (logout) still calls regenerateToken() explicitly.
+     *   Laravel 11 and earlier   session->migrate(true)     id only
+     *   Laravel 12 and later     session->regenerate(true)  id AND CSRF token
      *
-     * Callers that want to resync anyway get the live token back in the response
-     * JSON - see csrfToken().
-     */
-    protected function rotateSessionId(): void
-    {
-        session()->migrate(true);
-    }
-
-    /**
-     * The session's live CSRF token, for a frontend to resync its meta tag.
+     * That change is deliberate framework security - a privilege change should
+     * not leave the old CSRF token valid - and this package does not fight it,
+     * on either version. It also means a single-page app that shows the 2FA
+     * prompt without reloading is left holding a stale <meta csrf-token>: on
+     * Laravel 12 its next POST gets 419 while its GETs carry on working, which
+     * is exactly how the bug was first reported.
      *
-     * Returned alongside every successful login response. No secret is spent:
-     * the token is already rendered into the page this is answering. It is a
-     * standing safety net, so that any future change to how sessions rotate
-     * cannot silently strand an open SPA page again.
+     * So the fix is not to suppress the rotation, it is to tell the caller: every
+     * successful login response - plain, requires_two_factor, and the challenge
+     * completion - carries the post-handling token here, and the frontend
+     * resyncs its meta tag from it. That works identically whether or not the
+     * framework rotated anything, which is what makes it safe across versions.
+     *
+     * Nothing is disclosed: the token is already rendered into the page being
+     * answered.
+     *
+     * (logout() is the one place that still rotates the token explicitly, via
+     * regenerateToken() - there a fresh token is the entire point.)
      */
     protected function csrfToken(Request $request): ?string
     {

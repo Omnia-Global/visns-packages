@@ -232,17 +232,26 @@ class RememberMeTest extends TestCase
 
         $this->assertNotNull($this->recaller($response));
 
-        // The recaller embeds a slice of the password hash. logoutOtherDevices()
-        // rewrites that hash, so a recaller issued before it and not re-queued
-        // after would be dead on the user's next visit - a "remember me" that
-        // silently forgets.
-        [, , $passwordHashSlice] = explode('|', $this->recallerPayload($response));
+        // The recaller's third segment is derived from the password hash.
+        // logoutOtherDevices() rewrites that hash, so a recaller issued before
+        // it and not re-queued afterwards would be dead on the user's next
+        // visit - a "remember me" that silently forgets.
+        [, , $passwordSegment] = explode('|', $this->recallerPayload($response));
 
-        $this->assertNotEmpty($passwordHashSlice);
-        $this->assertStringStartsWith(
-            $passwordHashSlice,
-            $user->fresh()->password
-        );
+        $this->assertNotEmpty($passwordSegment);
+
+        // Derived through the guard's own method rather than by reproducing the
+        // format here: Laravel 11 stored a 10-character slice of the hash,
+        // Laravel 12 stores an HMAC of it, and this assertion is about the
+        // segment matching the CURRENT password - not about which encoding the
+        // framework happens to use this year.
+        $guard = Auth::guard('web');
+
+        $expected = method_exists($guard, 'hashPasswordForCookie')
+            ? $guard->hashPasswordForCookie($user->fresh()->password)
+            : substr($user->fresh()->password, 0, 10);
+
+        $this->assertSame($expected, $passwordSegment);
     }
 
     /*

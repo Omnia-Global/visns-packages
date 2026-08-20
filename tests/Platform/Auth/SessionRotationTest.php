@@ -3,19 +3,36 @@
 namespace Visnsstudio\VisnsPackages\Tests\Platform\Auth;
 
 use App\Models\User;
+use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Hash;
 use Visnsstudio\VisnsPackages\Contracts\TwoFactorCodeSender;
 use Visnsstudio\VisnsPackages\Tests\Fixtures\Auth\CollectingCodeSender;
 use Visnsstudio\VisnsPackages\Tests\TestCase;
 
 /**
- * What a login is allowed to rotate, and what it must leave alone.
+ * What a login rotates, and how a single-page app is supposed to cope.
  *
- * The session ID must rotate at every privilege change — that is the fixation
- * defence. The CSRF token must NOT, because the SPA does not reload across a 2FA
- * challenge: it keeps the <meta csrf-token> it rendered before the challenge, so
- * rolling the token strands the open page and every POST it makes afterwards
- * 419s. GETs keep working, which is exactly what made the bug look intermittent.
+ * The framework rotates the session on login, and what it rotates depends on the
+ * version:
+ *
+ *   Laravel 11 and earlier   updateSession() -> session->migrate(true)     id only
+ *   Laravel 12 and later     updateSession() -> session->regenerate(true)  id AND CSRF token
+ *
+ * This package fights neither. The contract it offers instead is the
+ * `csrf_token` field on every stateful auth response: whatever the framework has
+ * just done to the session, that field is the token the caller should now be
+ * using. These tests pin THAT, because it is the only thing that holds on both
+ * versions - and, on a framework that rotates, they also pin that the stale
+ * pre-challenge token really is rejected, which is the failure a single-page app
+ * hits if it ignores the field.
+ *
+ * An earlier revision of this file asserted the opposite: that the token
+ * SURVIVES a challenge. It passed, because the suite then resolved Laravel 11.
+ * It was wrong anyway - it pinned one version's behaviour as though it were the
+ * contract, while the application consuming this package runs Laravel 12, where
+ * the token does rotate and real logins were 419-ing. The suite now resolves the
+ * same framework major the consumer runs; test_the_suite_runs_against... below
+ * is what keeps it that way.
  */
 class SessionRotationTest extends TestCase
 {
@@ -30,6 +47,11 @@ class SessionRotationTest extends TestCase
     private function store()
     {
         return $this->app['session.store'];
+    }
+
+    private function csrfMiddleware(): string
+    {
+        return \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class;
     }
 
     private function user(array $attributes = []): User
@@ -50,6 +72,14 @@ class SessionRotationTest extends TestCase
         ], $extra));
     }
 
+    /**
+     * Code-driver 2FA, in production.
+     *
+     * Production because the trigger is only ever evaluated there; CSRF stood
+     * down because pretending to be production also switches the check back on,
+     * and these requests are not the ones under test. The two tests that DO care
+     * about CSRF re-enable it for the single request that matters.
+     */
     private function useCodeDriver(): void
     {
         config()->set('visns-packages.auth.two_factor.driver', 'code');
@@ -60,158 +90,82 @@ class SessionRotationTest extends TestCase
         $this->app->bind(TwoFactorCodeSender::class, CollectingCodeSender::class);
 
         $this->app->detectEnvironment(fn() => 'production');
-        $this->withoutMiddleware(
-            \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class
-        );
+        $this->withoutMiddleware($this->csrfMiddleware());
     }
 
     /*
     |--------------------------------------------------------------------------
-    | The regression
+    | What the framework under test actually does
     |--------------------------------------------------------------------------
     */
 
-    public function test_completing_a_code_challenge_does_not_roll_the_csrf_token(): void
+    public function test_the_suite_runs_against_the_framework_major_the_consumer_runs(): void
     {
-        $this->useCodeDriver();
-        $this->user();
-
-        $this->login()->assertJsonPath('requires_two_factor', true);
-
-        // The token the SPA page is holding while it shows the code prompt.
-        $tokenAtChallenge = $this->store()->token();
-        $this->assertNotEmpty($tokenAtChallenge);
-
-        $this->postJson('/login/two-factor-challenge', [
-            'code' => CollectingCodeSender::lastCode(),
-        ])->assertJsonPath('error', '');
-
-        // THE regression: a rolled token here is what 419'd every subsequent
-        // POST from the still-open page.
-        $this->assertSame($tokenAtChallenge, $this->store()->token());
-    }
-
-    public function test_the_page_can_keep_posting_after_a_code_challenge(): void
-    {
-        $this->useCodeDriver();
-        $this->user();
-
-        $this->login();
-
-        // Same as above, but proving the consequence rather than the mechanism:
-        // a POST carrying the token the page rendered BEFORE the challenge must
-        // still be accepted afterwards.
-        $tokenAtChallenge = $this->store()->token();
-
-        $this->postJson('/login/two-factor-challenge', [
-            'code' => CollectingCodeSender::lastCode(),
-        ])->assertJsonPath('error', '');
-
-        // CSRF verification back on for the request that matters - without this
-        // the assertion below would pass no matter what the token did.
-        $this->withMiddleware(
-            \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class
+        // Guards the whole file. Every assertion below describes Laravel >= 12
+        // behaviour, so if the dev dependencies are ever resolved back onto
+        // Laravel 11 this is the line that fails first, and legibly.
+        $this->assertGreaterThanOrEqual(
+            12,
+            (int) explode('.', Application::VERSION)[0],
+            'these assertions describe Laravel >= 12 session behaviour'
         );
-
-        $this->post('/login/two-factor-resend', [
-            '_token' => $tokenAtChallenge,
-        ])->assertOk();
     }
 
-    public function test_completing_a_totp_challenge_does_not_roll_the_csrf_token(): void
-    {
-        config()->set('visns-packages.auth.two_factor.driver', 'totp');
-
-        $user = $this->user([
-            'two_factor_secret' => encrypt('SECRETSECRETSECR'),
-            'two_factor_confirmed_at' => now(),
-        ]);
-
-        $this->app->detectEnvironment(fn() => 'production');
-        $this->withoutMiddleware(
-            \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class
-        );
-
-        $this->login()->assertJsonPath('requires_two_factor', true);
-
-        $tokenAtChallenge = $this->store()->token();
-
-        // Outside production the TOTP endpoint completes without a code, which
-        // exercises completeLogin() without standing up an authenticator.
-        $this->app->detectEnvironment(fn() => 'testing');
-
-        $this->postJson('/login/two-factor-challenge', [])
-            ->assertJsonPath('user.id', $user->id);
-
-        $this->assertSame($tokenAtChallenge, $this->store()->token());
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | The fixation guarantee is intact
-    |--------------------------------------------------------------------------
-    */
-
-    public function test_the_session_id_still_rotates_on_a_plain_login(): void
+    public function test_login_rotates_the_csrf_token(): void
     {
         $this->user();
 
         $this->get('/logout');
-        $idBefore = $this->store()->getId();
+        $tokenBefore = $this->store()->token();
 
         $this->login()->assertJsonPath('error', '');
 
-        $this->assertNotSame(
-            $idBefore,
-            $this->store()->getId(),
-            'the session id did not rotate on login'
-        );
-        $this->assertAuthenticated();
+        // Laravel 12's SessionGuard::updateSession() calls regenerate(true).
+        // Deliberate framework security - a privilege change should not leave
+        // the old CSRF token valid - and not ours to suppress.
+        $this->assertNotSame($tokenBefore, $this->store()->token());
     }
 
-    public function test_the_session_id_still_rotates_when_a_challenge_completes(): void
+    public function test_completing_a_code_challenge_rotates_the_csrf_token(): void
     {
         $this->useCodeDriver();
         $this->user();
 
-        $this->login();
+        $this->login()->assertJsonPath('requires_two_factor', true);
 
-        // The id an attacker could have planted before the challenge.
-        $idAtChallenge = $this->store()->getId();
+        $tokenAtChallenge = $this->store()->token();
 
         $this->postJson('/login/two-factor-challenge', [
             'code' => CollectingCodeSender::lastCode(),
         ])->assertJsonPath('error', '');
 
-        // Dropping regenerate() must not have cost the fixation defence:
-        // Auth::login() rotates the id via migrate(true).
-        $this->assertNotSame(
-            $idAtChallenge,
-            $this->store()->getId(),
-            'the session id did not rotate when the challenge completed'
-        );
-        $this->assertAuthenticated();
+        // The challenge IS the privilege change here - the authenticate() call
+        // above it deliberately does not log anyone in - so the rotation lands
+        // at this point rather than at the password check.
+        $this->assertNotSame($tokenAtChallenge, $this->store()->token());
     }
 
     /*
     |--------------------------------------------------------------------------
-    | csrf_token in the responses
+    | The contract: csrf_token on every stateful auth response
     |--------------------------------------------------------------------------
     */
 
-    public function test_a_plain_login_returns_the_live_csrf_token(): void
+    public function test_a_plain_login_returns_the_post_login_token(): void
     {
         $this->user();
 
         $response = $this->login()->assertJsonPath('error', '');
 
+        // The post-handling token, not the one the request arrived with. That
+        // is the entire value of the field.
         $this->assertSame(
             $this->store()->token(),
             $response->json('csrf_token')
         );
     }
 
-    public function test_the_requires_two_factor_response_returns_the_token(): void
+    public function test_the_requires_two_factor_response_returns_the_live_token(): void
     {
         $this->useCodeDriver();
         $this->user();
@@ -225,7 +179,7 @@ class SessionRotationTest extends TestCase
         );
     }
 
-    public function test_the_challenge_completion_returns_the_token(): void
+    public function test_the_challenge_completion_returns_the_post_login_token(): void
     {
         $this->useCodeDriver();
         $this->user();
@@ -242,7 +196,7 @@ class SessionRotationTest extends TestCase
         );
     }
 
-    public function test_the_token_returned_across_the_challenge_is_the_same_one(): void
+    public function test_the_token_returned_across_the_challenge_is_the_new_one(): void
     {
         $this->useCodeDriver();
         $this->user();
@@ -253,20 +207,118 @@ class SessionRotationTest extends TestCase
             'code' => CollectingCodeSender::lastCode(),
         ])->json('csrf_token');
 
-        // A frontend that resyncs from this field sees no change - which is the
-        // point: there is nothing to resync, because nothing rotated.
-        $this->assertSame($atChallenge, $afterChallenge);
+        // A frontend resyncing from this field moves off the stale token; one
+        // that ignores it keeps the stale token and starts 419-ing.
+        $this->assertNotSame($atChallenge, $afterChallenge);
     }
 
-    public function test_a_failed_login_still_returns_a_token(): void
+    public function test_a_failed_login_still_returns_a_usable_token(): void
     {
         $this->user();
 
         // The login screen stays open on a bad password, so it still needs a
-        // usable token for the next attempt.
+        // token it can post the next attempt with.
         $response = $this->login(['password' => 'wrong'])
             ->assertJsonPath('error', 'Login unsuccessful, please try again.');
 
-        $this->assertNotEmpty($response->json('csrf_token'));
+        $this->assertSame(
+            $this->store()->token(),
+            $response->json('csrf_token')
+        );
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | End to end, with CSRF verification actually in the stack
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_a_post_with_the_response_provided_token_passes_csrf(): void
+    {
+        $this->useCodeDriver();
+        $this->user();
+
+        $this->login();
+
+        $token = $this->postJson('/login/two-factor-challenge', [
+            'code' => CollectingCodeSender::lastCode(),
+        ])->assertJsonPath('error', '')->json('csrf_token');
+
+        // CSRF back on for the request that matters. Without this the assertion
+        // would hold no matter what the token did.
+        $this->withMiddleware($this->csrfMiddleware());
+
+        // Only the CSRF verdict is under test; the body is beside the point
+        // (the challenge is over, so resend reports no session in flight).
+        $this->post('/login/two-factor-resend', ['_token' => $token])
+            ->assertOk();
+    }
+
+    public function test_a_post_with_the_stale_pre_challenge_token_is_rejected(): void
+    {
+        $this->useCodeDriver();
+        $this->user();
+
+        $this->login();
+
+        // What the SPA page is still holding in its <meta csrf-token>, having
+        // rendered before the challenge and never reloaded since.
+        $staleToken = $this->store()->token();
+
+        $this->postJson('/login/two-factor-challenge', [
+            'code' => CollectingCodeSender::lastCode(),
+        ])->assertJsonPath('error', '');
+
+        $this->withMiddleware($this->csrfMiddleware());
+
+        // The reported bug, reproduced as a guarantee: 419 on every POST until
+        // the page reloads or resyncs from `csrf_token`.
+        $this->post('/login/two-factor-resend', ['_token' => $staleToken])
+            ->assertStatus(419);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Session fixation
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_the_session_id_rotates_on_a_plain_login(): void
+    {
+        $this->user();
+
+        $this->get('/logout');
+        $idBefore = $this->store()->getId();
+
+        $this->login()->assertJsonPath('error', '');
+
+        $this->assertNotSame(
+            $idBefore,
+            $this->store()->getId(),
+            'the session id did not rotate on login'
+        );
+        $this->assertAuthenticated();
+    }
+
+    public function test_the_session_id_rotates_when_a_challenge_completes(): void
+    {
+        $this->useCodeDriver();
+        $this->user();
+
+        $this->login();
+
+        // The id an attacker could have planted before the challenge.
+        $idAtChallenge = $this->store()->getId();
+
+        $this->postJson('/login/two-factor-challenge', [
+            'code' => CollectingCodeSender::lastCode(),
+        ])->assertJsonPath('error', '');
+
+        $this->assertNotSame(
+            $idAtChallenge,
+            $this->store()->getId(),
+            'the session id did not rotate when the challenge completed'
+        );
+        $this->assertAuthenticated();
     }
 }
