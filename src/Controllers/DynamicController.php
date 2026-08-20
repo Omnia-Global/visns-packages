@@ -2603,6 +2603,10 @@ class DynamicController extends \App\Http\Controllers\Controller
                         $relation instanceof
                             \Illuminate\Database\Eloquent\Relations\BelongsTo
                     ) {
+                        $related = $relation->getRelated();
+                        $keyName = $related->getKeyName();
+                        $nestedKey = $value[$keyName] ?? null;
+
                         // Get the related model (or create a new one if it doesn't exist)
                         if (
                             $relation instanceof
@@ -2610,18 +2614,40 @@ class DynamicController extends \App\Http\Controllers\Controller
                         ) {
                             // For BelongsTo, we need to get the related model first
                             $relatedModel = $resource->$key;
+
+                            // If the nested object names a *different* row than the
+                            // one currently attached (e.g. a job form echoing back a
+                            // stale `job_stage` object after the stage moved on), the
+                            // caller wants to point the parent at that row — not
+                            // rewrite the currently attached row's primary key, which
+                            // throws a duplicate-key error on the lookup table.
+                            if (
+                                $nestedKey !== null &&
+                                (!$relatedModel ||
+                                    (string) $relatedModel->getKey() !==
+                                        (string) $nestedKey)
+                            ) {
+                                $relatedModel = $related
+                                    ->newQuery()
+                                    ->find($nestedKey);
+                            }
+
                             if (!$relatedModel) {
                                 // Create a new instance of the related model
-                                $relatedModel = $relation->getRelated();
+                                $relatedModel = $related;
                             }
                         } else {
                             // For HasOne, we can use the relation directly
-                            $relatedModel =
-                                $resource->$key ?? $relation->getRelated();
+                            $relatedModel = $resource->$key ?? $related;
                         }
 
-                        // Update the related model with the nested object data
+                        // Update the related model with the nested object data.
+                        // The primary key is never writable here: it identifies
+                        // the row, it is not an attribute to copy across.
                         foreach ($value as $attr => $attrValue) {
+                            if ($attr === $keyName) {
+                                continue;
+                            }
                             $relatedModel->$attr = $attrValue;
                         }
 

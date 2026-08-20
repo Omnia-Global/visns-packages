@@ -185,6 +185,63 @@ class Opportunity extends Model
     }
 
     /** @test */
+    public function it_switches_a_belongs_to_to_another_existing_row_when_the_nested_object_carries_a_different_key()
+    {
+        // Regression: a job form echoing back a stale `job_stage` object
+        // ({id: 2, label: Production}) while the job had already moved to
+        // stage 3 used to run `update job_stages set id = 2 where id = 3`,
+        // tripping the primary-key constraint. The nested key names the row
+        // the parent should point at; it is never written onto another row.
+        $user = User::factory()->create();
+        $this->actingAs($user);
+
+        $john = DB::table('clients')->insertGetId([
+            'firstname' => 'John',
+            'surname' => 'Doe',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $jane = DB::table('clients')->insertGetId([
+            'firstname' => 'Jane',
+            'surname' => 'Roe',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $opportunity = DB::table('opportunities')->insertGetId([
+            'client_id' => $jane,
+            'user_id' => $user->id,
+            'opportunity_type_id' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->json('POST', '/ajax/opportunities/' . $opportunity, [
+            'id' => $opportunity,
+            'user_id' => $user->id,
+            'opportunity_type_id' => 1,
+            'client' => [
+                'id' => $john,
+                'firstname' => 'John',
+                'surname' => 'Doe',
+            ],
+            '_method' => 'PUT',
+        ]);
+
+        $response->assertStatus(200);
+
+        // Parent now points at the row named by the nested key...
+        $this->assertDatabaseHas('opportunities', [
+            'id' => $opportunity,
+            'client_id' => $john,
+        ]);
+        // ...and both client rows survive untouched.
+        $this->assertDatabaseHas('clients', ['id' => $john, 'firstname' => 'John']);
+        $this->assertDatabaseHas('clients', ['id' => $jane, 'firstname' => 'Jane']);
+        $this->assertSame(2, DB::table('clients')->count());
+    }
+
+    /** @test */
     public function it_can_create_a_model_with_nested_object_for_belongs_to_relationship()
     {
         // Create a user for authentication
