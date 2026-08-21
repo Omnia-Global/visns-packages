@@ -89,6 +89,21 @@ class VaultSecretsTest extends VaultTestCase
         $this->assertSame(0, VaultAccessLog::where('action', 'reveal_password')->count());
     }
 
+    public function test_reveal_skips_the_confirmation_when_the_consumer_turns_it_off(): void
+    {
+        config(['visns-packages.vault.require_password_confirmation' => false]);
+
+        $admin = $this->admin();
+        $entry = $this->entryFor($admin, ['password' => 'hunter2']);
+
+        $this->actingAs($admin)
+            ->postJson('/ajax/vault/' . $entry->id . '/reveal')
+            ->assertOk()
+            ->assertJsonPath('password', 'hunter2');
+
+        $this->assertSame(1, VaultAccessLog::where('action', 'reveal_password')->count());
+    }
+
     public function test_reveal_returns_the_password_once_confirmed(): void
     {
         $admin = $this->admin();

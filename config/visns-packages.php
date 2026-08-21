@@ -968,6 +968,13 @@ return [
             'manage' => 'Vault Manage',
         ],
 
+        /*
+        | Whether revealing a password first asks the signed-in user to type
+        | their own CRM password again (POST {base}/confirm-password). Off
+        | means being logged in is enough; every reveal is still logged.
+        */
+        'require_password_confirmation' => true,
+
         // How long a password confirmation keeps revealing passwords unlocked.
         'confirmation_ttl_minutes' => 10,
 

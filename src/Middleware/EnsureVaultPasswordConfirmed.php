@@ -27,6 +27,12 @@ class EnsureVaultPasswordConfirmed
 {
     public function handle(Request $request, Closure $next)
     {
+        // Consumers may decide a live session is enough. Reveals stay logged
+        // either way; only the second prompt goes.
+        if (! ModuleConfig::get('vault.require_password_confirmation', true)) {
+            return $next($request);
+        }
+
         $ttl = (int) ModuleConfig::get('vault.confirmation_ttl_minutes', 10);
 
         $confirmedAt = $request->session()->get('visns.vault.confirmed_at');

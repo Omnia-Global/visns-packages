@@ -1078,6 +1078,7 @@ log recording who read what.
     'uris' => ['base' => 'ajax/vault'],
     'routes_middleware' => ['web', 'auth'],
     'permissions' => ['access' => 'Vault Access', 'manage' => 'Vault Manage'],
+    'require_password_confirmation' => true,   // false: a live session is enough to reveal
     'confirmation_ttl_minutes' => 10,
     'throttle' => ['reveal' => '60,1', 'confirm' => '5,1'],
     'tables' => ['entries' => 'vault_entries', 'access_logs' => 'vault_access_logs'],
