@@ -33,7 +33,11 @@ return new class extends Migration {
             $t->id();
 
             $t->unsignedBigInteger('vault_entry_id')->nullable()->index();
-            $t->unsignedBigInteger('user_id')->index();
+            // Same width as users.id (see the entries migration); no FK, the
+            // log must outlive the account.
+            $big = ! Schema::hasTable('users')
+                || ! in_array(strtolower((string) Schema::getColumnType('users', 'id')), ['int', 'integer', 'int unsigned', 'mediumint', 'smallint'], true);
+            ($big ? $t->unsignedBigInteger('user_id') : $t->unsignedInteger('user_id'))->index();
 
             $t->string('action', 32)->index();
 

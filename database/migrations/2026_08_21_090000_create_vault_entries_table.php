@@ -67,8 +67,12 @@ return new class extends Migration {
             // owner has since been deleted is orphaned deliberately, and a
             // private orphan is then visible to nobody rather than to
             // everybody.
-            $t->unsignedBigInteger('owner_user_id')->nullable()->index();
-            $t->unsignedBigInteger('updated_by_user_id')->nullable();
+            // Sized to match users.id: legacy schemas carry an `int unsigned`
+            // key, newer ones `bigint unsigned`, and MySQL refuses a foreign
+            // key between the two (errno 150) - leaving the table created,
+            // the FK missing and the migration unrecorded.
+            $this->userKey($t, 'owner_user_id')->nullable()->index();
+            $this->userKey($t, 'updated_by_user_id')->nullable();
 
             // Rotation reporting: set whenever the password itself changes, not
             // when the row is touched.
@@ -109,5 +113,26 @@ return new class extends Migration {
             'visns-packages.vault.tables.entries',
             'vault_entries'
         );
+    }
+    /**
+     * A column able to reference users.id whatever width the consumer's users
+     * table uses.
+     */
+    private function userKey(Blueprint $t, string $column): \Illuminate\Database\Schema\ColumnDefinition
+    {
+        return $this->usersKeyIsBig()
+            ? $t->unsignedBigInteger($column)
+            : $t->unsignedInteger($column);
+    }
+
+    private function usersKeyIsBig(): bool
+    {
+        if (! Schema::hasTable('users')) {
+            return true;
+        }
+
+        $type = strtolower((string) Schema::getColumnType('users', 'id'));
+
+        return ! in_array($type, ['int', 'integer', 'int unsigned', 'mediumint', 'smallint'], true);
     }
 };
