@@ -31,6 +31,7 @@ A comprehensive Laravel package that provides enhanced authentication, file mana
         -   [Staff impersonation](#staff-impersonation)
         -   [Zoom Phone call queue pop](#zoom-phone-call-queue-pop)
         -   [Vault (staff password manager)](#vault-staff-password-manager)
+        -   [Messaging (SMS)](#messaging-sms)
         -   [Middleware aliases](#middleware-aliases)
         -   [Testing](#testing)
     -   [File Management](#file-management)
@@ -181,6 +182,13 @@ php artisan migrate
     -   Shared and private entries, gated by two permissions
     -   Password re-confirmation before any secret is revealed
     -   Access log, plus key-rotation and log-prune commands
+
+-   **Messaging (SMS)** (opt-in, 4.5.0)
+
+    -   Virtual SMS inbox/outbox on the practice's own numbers ("lines")
+    -   Pluggable transport: null (inert), log (dev, replies to itself), Zoom
+    -   Threads with per-user unread counts, search, archiving and templates
+    -   Live per-line broadcast, client matching through the same hook as the call pop
 
 -   **File Management**
 
@@ -1184,6 +1192,258 @@ owns should subclass it, add the `Auditable` interface and trait, and set
 `$auditExclude = ['password', 'totp_secret', 'notes']` — the audit table is not
 encrypted, and an unexcluded change event writes the old and new secret into it
 in the clear.
+
+### Messaging (SMS)
+
+Added in 4.5.0. A virtual SMS inbox and outbox for staff, hanging off the
+practice's own phone numbers ("lines"): threads, per-user unread counts, canned
+templates, a live push when a text arrives, and manual client linking for the
+numbers the CRM does not recognise.
+
+> **The transport is pluggable, and that is the point.** This module was built
+> before the provider was available — the practice is waiting on an SMS-capable
+> mobile number for its Zoom Phone account. So it ships **fully usable today**
+> with a dev transport, **inert and safe** in production with the null
+> transport, and **ready for Zoom** the day the number exists: one config key.
+
+> **Nothing here ever deletes a message.** SMS to and from clients is a client
+> communication under an AFSL record-keeping obligation. `sms:prune` archives
+> quiet threads; deleting a line is a soft delete and its history stays. If your
+> retention policy requires destruction, that is a deliberate act you write
+> yourself — this module will not do it for you by accident.
+
+```php
+'messaging' => [
+    'enabled' => true,
+    'uris' => ['base' => 'ajax/sms'],
+    'routes_middleware' => ['web', 'auth'],
+    'permissions' => ['access' => 'Messaging Access', 'manage' => 'Messaging Manage'],
+    'tables' => [
+        'lines' => 'sms_lines',
+        'line_user' => 'sms_line_user',
+        'threads' => 'sms_threads',
+        'messages' => 'sms_messages',
+        'thread_reads' => 'sms_thread_reads',
+        'templates' => 'sms_templates',
+    ],
+    'transport' => 'null',          // 'zoom' | 'log' | 'null' | a class-string
+    'default_country' => 'AU',      // 04xx -> +614xx
+    'channel' => 'sms-line',        // private "sms-line.{lineId}"
+    'append_env_suffix' => false,
+    'register_broadcast_channel' => false,
+    'events' => [
+        'received' => \Visnsstudio\VisnsPackages\Events\SmsReceived::class,
+        'updated' => \Visnsstudio\VisnsPackages\Events\SmsMessageUpdated::class,
+    ],
+    'client_resolver' => null,      // (string $e164) => ['id'=>..,'name'=>..]|null
+    'client_search' => null,        // (string $q) => [['id'=>..,'name'=>..,'numbers'=>[...]]]
+    'page_size' => 50,
+    'max_body_length' => 1600,
+    'zoom' => ['api' => null, 'send_path' => '/phone/sms/messages'],
+    'user_model' => null,
+],
+```
+
+Then publish and run the migrations — the module needs six tables:
+
+```bash
+php artisan vendor:publish --tag=visns-packages-migrations
+php artisan migrate
+```
+
+**Naming.** Everything is prefixed `sms_` / `Sms` on purpose. Consuming
+applications already have a `Message` model, a `messages` table and a `/messages`
+route of their own; a module that collided with those would be unadoptable.
+
+**Permissions are not seeded here.** The application owns its permission table,
+so create the two names in your own seeder:
+
+| Permission | Grants |
+| --- | --- |
+| `Messaging Access` | Use messaging at all: the lines you are attached to, their threads, sending, reading, archiving, templates. |
+| `Messaging Manage` | The administrative grant: **every** line whether attached or not, line settings and the staff pivot, template writes, and the inbound simulator. |
+
+Setting either name to `null` removes that gate — which for `manage` means every
+user with access administers, so do it only if something else is enforcing it.
+
+#### Visibility, in one sentence
+
+A user sees a line when they are attached to it in `sms_line_user`, or when they
+hold `Messaging Manage` — and a line you cannot see does not exist: its threads,
+messages and unread counts all 404 rather than 403, because a 403 on a thread id
+would answer *"is this client texting the practice"* for anyone who cared to
+enumerate.
+
+#### Transports, and how to switch to Zoom
+
+| `transport` | What a send does | Where it belongs |
+| --- | --- | --- |
+| `'null'` | Nothing leaves. The message is stored with status `not_connected` and shown greyed out in the thread, so the practice can see what it *tried* to send. | Production, until the SMS-capable number exists. **The default.** |
+| `'log'` | Writes the SMS to the log, reports `sent`, and **texts back** — an inbound auto-reply lands on the same thread a second or two later. Exercises unread counts, broadcasts, ordering and read marks with no Zoom account, no tunnel and no phone. | Development only. `sent` here means "written to `storage/logs`". |
+| `'zoom'` | The real thing: `POST /phone/sms/messages`. | Once the number is live. |
+| a class-string | Your own `Visnsstudio\VisnsPackages\Contracts\SmsTransport`, built through the container. | Another provider. |
+
+To go live with Zoom:
+
+1. Set `'transport' => 'zoom'`.
+2. In the Zoom marketplace app, add the three event subscriptions
+   `phone.sms_received`, `phone.sms_sent`, `phone.sms_sent_failed` **to the
+   existing webhook URL** — Zoom subscribes one URL per app, so SMS events arrive
+   on the call queue's endpoint already carrying its signature. Nothing else
+   about the webhook changes.
+3. Grant the app the SMS scopes. At time of writing these are `phone:read:sms`
+   and `phone:write:sms`, or their granular equivalents
+   (`phone:read:list_sms_sessions:admin`, `phone:write:sms_message:admin`) —
+   **confirm these against the current Zoom scope list**, which has been
+   reorganised more than once.
+4. `php artisan sms:sync-lines` to stamp each line with the Zoom user that
+   actually holds its number.
+
+> **What has and has not been proved.** The Zoom transport is written against
+> Zoom's published "Send SMS" and `phone.sms_*` references and has **never been
+> run against a live SMS-enabled account**. The request body lives alone in
+> `Services\Zoom\ZoomSmsClient::sendBody()` with a docblock saying so, and every
+> field of every webhook payload is read defensively with `raw_payload` kept
+> verbatim. When the live account confirms the field names, that method and the
+> test that pins its shape are what change.
+
+By default the messaging module reuses the call queue's `call_queue.api`
+credentials, which is right whenever both features live in the same Zoom
+Server-to-Server app. Set `messaging.zoom.api` (same keys) only when they do not.
+
+#### Endpoints
+
+All relative to `messaging.uris.base` (default `ajax/sms`); all carry
+`permission:Messaging Access` on top of `routes_middleware`. "manage" in the
+guard column is checked inside the controller and answers 403, so a user without
+it keeps a working inbox.
+
+| Method | URI | Guard | What it does |
+| --- | --- | --- | --- |
+| GET | `{base}/status` | — | `{transport, connected, lines_count, unread_total}`. `connected` is true only under the Zoom transport. |
+| GET | `{base}/lines` | — | `{data: [{id, label, phone_number, display_number, active, unread_count}]}` — the lines this user may work. |
+| GET | `{base}/unread` | — | `{total, by_line: {}, by_thread: {}}`. Deliberately cheap: one grouped query. Poll it every 30s as a backstop to the broadcast. |
+| GET | `{base}/threads` | — | Paginated. `line_id`, `search`, `unread_only`, `archived`, `page`, `per_page` (≤100). Ordered by `last_message_at` desc. |
+| POST | `{base}/threads` | — | `{line_id, to, body?}` → find-or-create the thread for the normalised `to`, optionally send `body`. 201 `{thread, message\|null}`. 422 on a number that cannot be read. |
+| GET | `{base}/threads/{id}` | — | `{thread, messages[], has_more}`, oldest→newest. `before=<message id>`, `limit` (≤200). **Marks the thread read for this user.** |
+| POST | `{base}/threads/{id}/messages` | — | `{body}` (≤ `max_body_length`) → 201 `{message, thread}`. Sends synchronously and reports the real status. |
+| POST | `{base}/threads/{id}/read` | — | 204. |
+| POST | `{base}/threads/{id}/archive` · `/unarchive` | — | 204. |
+| PUT | `{base}/threads/{id}` | — | `{client_id?, client_name?, contact_name?}` → link, unlink or label. |
+| GET | `{base}/clients/search?q=` | — | Proxies `client_search`. `{data: []}` when unset. |
+| GET | `{base}/templates` | — | Active templates in `sort` order. `include_inactive=1` for administrators. |
+| POST · PUT · DELETE | `{base}/templates[/{id}]` | manage | `{id, name, body, active, sort}`. DELETE is a soft delete. |
+| GET | `{base}/settings/lines` | manage | Every line incl. `deleted`, its `users[]`, `zoom_connected`, and `zoom_users[]` when Zoom answers. |
+| POST · PUT · DELETE | `{base}/settings/lines[/{id}]` | manage | `{label, phone_number, zoom_user_id?, zoom_user_email?, active?, user_ids[]}`. Number is normalised to E.164 and unique. |
+| POST | `{base}/threads/{id}/simulate-inbound` | manage, non-Zoom transports only | `{body}` → records an inbound message as if from the external number. **422 while Zoom is connected.** |
+
+The webhook is **not** registered by this module — see the Zoom step above.
+
+#### Events and the broadcast channel
+
+Two events, both `ShouldBroadcastNow`, both on the **line's own** private channel
+`sms-line.{lineId}` (plus `.{env}` when `append_env_suffix` is true — which any
+deployment sharing one Pusher app between environments needs).
+
+| Event | `broadcastAs` | When |
+| --- | --- | --- |
+| `Events\SmsReceived` | `sms.received` | An inbound text arrived. |
+| `Events\SmsMessageUpdated` | `sms.updated` | A message was sent from here, confirmed, or failed. |
+
+Both carry the same payload:
+
+```json
+{
+  "thread":  { "id": 12, "line_id": 3, "external_number": "+61412345678",
+               "display_number": "0412 345 678",
+               "client": { "id": 7, "name": "Cleo Client" }, "contact_name": null,
+               "last_message": { "body": "...", "direction": "in",
+                                 "status": "received", "at": "..." },
+               "unread_count": null, "archived_at": null, "updated_at": "..." },
+  "message": { "id": 88, "thread_id": 12, "direction": "in", "body": "...",
+               "status": "received", "error": null, "user": null,
+               "attachments": [], "created_at": "...", "sent_at": null,
+               "delivered_at": null, "received_at": "..." }
+}
+```
+
+`unread_count` is **null on a broadcast** and only that. It is a per-user number
+and a broadcast goes to everybody on the line, so the front end recounts (it
+knows whether the thread is open) or re-polls `{base}/unread`. Every HTTP payload
+carries the real number.
+
+Set `register_broadcast_channel => true` to have the package authorise the
+channel — admitting the staff attached to that line plus anyone holding manage,
+which is exactly the HTTP rule. Leave it false and authorise it yourself in
+`routes/channels.php`.
+
+The two event **classes** are configurable for the same reason the call queue's
+are: `Event::fake()` keys listeners by exact class name, so an application whose
+listeners are written against its own `App\Events\Sms*` classes can only be
+reached by dispatching those. A replacement is constructed as
+`__construct(SmsThread $thread, SmsMessage $message)` with the **package's**
+models, so it must widen or drop those type hints.
+
+#### Hooks the application provides
+
+```php
+'client_resolver' => \App\Helpers\CallerClientPreview::class,
+'client_search'   => \App\Helpers\ClientNumberSearch::class,
+```
+
+`client_resolver` is deliberately the **same contract as the call queue's caller
+enrichment** (`Contracts\CallerEnrichment`): one invokable, called with an E.164
+number, returning `['id' => .., 'name' => .., ...]` or null. Pass the same
+implementation to both and a number that pops a client card on an incoming call
+also names the client on an incoming text. It is called once, when a thread is
+first created — re-resolving per message would put an application query on the
+webhook's hot path — and a throwing hook costs the thread its client name, never
+the message.
+
+`client_search` takes the typed term and returns
+`[['id' => .., 'name' => .., 'numbers' => [['label' => 'Mobile', 'number' => '+61...']]]]`.
+Unset means the composer simply has no search; the number box still works.
+
+#### Numbers
+
+Everything — a webhook payload, a typed number, a client record — is normalised
+to E.164 by `Support\PhoneNumber` before it is stored or compared, because the
+module's whole routing rule is an equality check between a stored line number and
+a number the provider sent. `0412 345 678`, `+61 412 345 678`, `61412345678` and
+`(08) 9375 2549` all canonicalise; `9375 2549` (a local number with no area code)
+is **refused with a 422**, because texting the wrong person is worse than being
+asked to retype it.
+
+#### Commands
+
+```bash
+php artisan sms:simulate-inbound "+61893752549" "0412 345 678" "Running late"
+php artisan sms:prune --days=180 [--dry-run]   # ARCHIVES threads; deletes nothing
+php artisan sms:sync-lines [--dry-run]         # no-op unless transport is zoom
+```
+
+`sms:simulate-inbound` takes the line as an id or as its number and goes through
+the same service a webhook does, so the thread, client match, unread count and
+broadcast all behave identically. It refuses to run while the Zoom transport is
+connected — on a live system it would write a message into a client's
+conversation that the client never sent.
+
+#### Things a front end has to know
+
+- **Status first.** `GET {base}/status` says whether anything is actually
+  connected. Under the null transport a send still succeeds (201) and comes back
+  with `status: "not_connected"` and an `error` string — render it greyed out
+  with the reason, do not treat it as a failure to retry.
+- **Message statuses** are `queued`, `sent`, `delivered`, `failed`, `received`,
+  `not_connected`. Only `failed` carries something worth showing as an error
+  badge; `not_connected` is an explanation, not a fault.
+- **Threads page backwards**, by `before=<message id>`, not by page number — a
+  conversation grows at the end and a page number would shift under the reader.
+- **Opening a thread marks it read.** There is no separate call to make unless
+  you are marking it read without opening it.
+- **`unread_count` is null in a broadcast payload and a number everywhere else.**
+- **A thread you cannot see is a 404**, never a 403 — including on PUT and on the
+  message endpoints.
 
 ### Middleware aliases
 

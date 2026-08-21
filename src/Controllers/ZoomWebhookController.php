@@ -11,6 +11,7 @@ use Visnsstudio\VisnsPackages\Events\CallQueueEnded;
 use Visnsstudio\VisnsPackages\Events\CallQueueRinging;
 use Visnsstudio\VisnsPackages\Models\ZoomCallQueueSetting;
 use Visnsstudio\VisnsPackages\Models\ZoomLiveQueueCall;
+use Visnsstudio\VisnsPackages\Services\Sms\SmsWebhookHandler;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 
 /**
@@ -49,6 +50,24 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
         'phone.callee_missed',
     ];
 
+    /**
+     * SMS events, handled by the messaging module.
+     *
+     * They arrive here rather than on an endpoint of their own because Zoom
+     * subscribes ONE URL per marketplace app: the call queue events and the SMS
+     * events are delivered to the same place, already carrying the same
+     * signature. Splitting them would have meant a second app, a second secret
+     * and a second thing to keep enabled.
+     *
+     * The work is delegated to SmsWebhookHandler; this controller stays a
+     * dispatcher.
+     */
+    private const SMS_EVENTS = [
+        'phone.sms_received',
+        'phone.sms_sent',
+        'phone.sms_sent_failed',
+    ];
+
     public function handle(Request $request)
     {
         $body = $request->json()->all();
@@ -76,6 +95,10 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
 
             if (in_array($event, self::ENDED_EVENTS, true)) {
                 return $this->handleClosingEvent($event, $body, 'ended');
+            }
+
+            if (in_array($event, self::SMS_EVENTS, true)) {
+                return $this->handleSms($event, $body);
             }
 
             $this->logUnhandled($event, $body, 'event not handled');
@@ -175,6 +198,26 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
         event(new $ringing($call));
 
         return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * An SMS event.
+     *
+     * Answered 200 whatever happens, like everything else here. When the
+     * messaging module is switched off the event is acknowledged and dropped -
+     * an application running the call queue alone still has the SMS
+     * subscriptions pointed at this URL if somebody ticked them in the Zoom
+     * marketplace app, and that must not become an error.
+     */
+    private function handleSms(string $event, array $body)
+    {
+        if (! ModuleConfig::get('messaging.enabled', false)) {
+            return response()->json(['status' => 'ignored']);
+        }
+
+        $status = app(SmsWebhookHandler::class)->handle($event, $body);
+
+        return response()->json(['status' => $status]);
     }
 
     /**

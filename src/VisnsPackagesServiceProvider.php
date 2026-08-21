@@ -7,6 +7,9 @@ use Illuminate\Support\Facades\Route;
 use Visnsstudio\VisnsPackages\Commands\PublishMigrationsCommand;
 use Visnsstudio\VisnsPackages\Commands\VaultPruneLogCommand;
 use Visnsstudio\VisnsPackages\Commands\VaultReencryptCommand;
+use Visnsstudio\VisnsPackages\Commands\SmsPruneCommand;
+use Visnsstudio\VisnsPackages\Commands\SmsSimulateInboundCommand;
+use Visnsstudio\VisnsPackages\Commands\SmsSyncLinesCommand;
 use Visnsstudio\VisnsPackages\Commands\InstallChromiumCommand;
 use Visnsstudio\VisnsPackages\Commands\MeilisearchConfigureCommand;
 use Visnsstudio\VisnsPackages\Commands\MeilisearchDebugCommand;
@@ -37,6 +40,9 @@ use Visnsstudio\VisnsPackages\Controllers\ZoomWebhookController;
 use Visnsstudio\VisnsPackages\Controllers\CallQueueController;
 use Visnsstudio\VisnsPackages\Controllers\CallQueueSettingsController;
 use Visnsstudio\VisnsPackages\Controllers\VaultController;
+use Visnsstudio\VisnsPackages\Controllers\SmsController;
+use Visnsstudio\VisnsPackages\Controllers\SmsLineSettingsController;
+use Visnsstudio\VisnsPackages\Controllers\SmsTemplateController;
 use Visnsstudio\VisnsPackages\Services\FilePathResolver;
 use Visnsstudio\VisnsPackages\Services\OAuthManager;
 
@@ -61,6 +67,13 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             // not asked about.
             VaultReencryptCommand::class,
             VaultPruneLogCommand::class,
+
+            // Messaging maintenance and dev aids. Registered unconditionally
+            // for the same reason: each one checks the module's own state and
+            // says so plainly rather than not existing.
+            SmsSimulateInboundCommand::class,
+            SmsPruneCommand::class,
+            SmsSyncLinesCommand::class,
         ];
 
         // Only register MeiliSearch commands if dependencies are available
@@ -227,6 +240,9 @@ class VisnsPackagesServiceProvider extends ServiceProvider
 
         // Broadcast channel authorization for the call queue pop.
         $this->registerCallQueueChannel();
+
+        // ... and for the per-line messaging channels.
+        $this->registerMessagingChannel();
     }
 
     /**
@@ -662,6 +678,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             );
             $this->registerCallQueueRoutes($middleware, $prefix);
             $this->registerVaultRoutes($middleware, $prefix);
+            $this->registerMessagingRoutes($middleware, $prefix);
 
             // Register dynamic entity routes first (they will be more general)
             $this->registerDynamicEntityRoutes();
@@ -949,6 +966,145 @@ class VisnsPackagesServiceProvider extends ServiceProvider
     }
 
     /**
+     * Messaging: the SMS inbox.
+     *
+     * Everything hangs off one configurable base (`ajax/sms` by default) and
+     * carries the access permission; the administrative endpoints check `manage`
+     * inside the controller rather than in middleware, so that a user without it
+     * gets a 403 on the settings call and still keeps a working inbox.
+     *
+     * Two details are load bearing:
+     *
+     *  - `{id}` is constrained to digits, and the literal routes are registered
+     *    first anyway. Without that, `GET {base}/threads` would be swallowed by
+     *    nothing here today - but `GET {base}/templates` and a future
+     *    `{base}/{id}` would collide silently, which is the failure mode worth
+     *    spending two lines to prevent.
+     *
+     *  - The webhook is NOT registered here. Zoom subscribes one URL per
+     *    marketplace app, so SMS events arrive on the call queue's existing
+     *    endpoint (ZoomWebhookController) already carrying its signature.
+     *    Messaging can therefore be enabled with no change to the Zoom app
+     *    beyond ticking the three phone.sms_* subscriptions.
+     *
+     * @return void
+     */
+    protected function registerMessagingRoutes(array $middleware, string $prefix)
+    {
+        if (!config('visns-packages.messaging.enabled', false)) {
+            return;
+        }
+
+        $base = trim(
+            (string) config('visns-packages.messaging.uris.base', 'ajax/sms'),
+            '/'
+        );
+
+        if ($base === '') {
+            $base = 'ajax/sms';
+        }
+
+        $routeMiddleware =
+            config('visns-packages.messaging.routes_middleware') ?: $middleware;
+
+        $access = config(
+            'visns-packages.messaging.permissions.access',
+            'Messaging Access'
+        );
+
+        $accessMiddleware = $this->withPermission($routeMiddleware, $access);
+
+        Route::middleware($accessMiddleware)
+            ->prefix($prefix)
+            ->group(function () use ($base) {
+                Route::get($base . '/status', [SmsController::class, 'status']);
+                Route::get($base . '/lines', [SmsController::class, 'lines']);
+                Route::get($base . '/unread', [SmsController::class, 'unread']);
+                Route::get($base . '/clients/search', [
+                    SmsController::class,
+                    'clientSearch',
+                ]);
+
+                // Templates. Reading is part of composing; writing checks
+                // `manage` in the controller.
+                Route::get($base . '/templates', [
+                    SmsTemplateController::class,
+                    'index',
+                ]);
+                Route::post($base . '/templates', [
+                    SmsTemplateController::class,
+                    'store',
+                ]);
+                Route::put($base . '/templates/{id}', [
+                    SmsTemplateController::class,
+                    'update',
+                ])->whereNumber('id');
+                Route::delete($base . '/templates/{id}', [
+                    SmsTemplateController::class,
+                    'destroy',
+                ])->whereNumber('id');
+
+                // Line administration, all of it manage-only.
+                Route::get($base . '/settings/lines', [
+                    SmsLineSettingsController::class,
+                    'index',
+                ]);
+                Route::post($base . '/settings/lines', [
+                    SmsLineSettingsController::class,
+                    'store',
+                ]);
+                Route::put($base . '/settings/lines/{id}', [
+                    SmsLineSettingsController::class,
+                    'update',
+                ])->whereNumber('id');
+                Route::delete($base . '/settings/lines/{id}', [
+                    SmsLineSettingsController::class,
+                    'destroy',
+                ])->whereNumber('id');
+
+                // Threads and messages.
+                Route::get($base . '/threads', [SmsController::class, 'threads']);
+                Route::post($base . '/threads', [
+                    SmsController::class,
+                    'storeThread',
+                ]);
+
+                Route::get($base . '/threads/{id}', [
+                    SmsController::class,
+                    'showThread',
+                ])->whereNumber('id');
+                Route::put($base . '/threads/{id}', [
+                    SmsController::class,
+                    'updateThread',
+                ])->whereNumber('id');
+
+                Route::post($base . '/threads/{id}/messages', [
+                    SmsController::class,
+                    'storeMessage',
+                ])->whereNumber('id');
+                Route::post($base . '/threads/{id}/read', [
+                    SmsController::class,
+                    'read',
+                ])->whereNumber('id');
+                Route::post($base . '/threads/{id}/archive', [
+                    SmsController::class,
+                    'archive',
+                ])->whereNumber('id');
+                Route::post($base . '/threads/{id}/unarchive', [
+                    SmsController::class,
+                    'unarchive',
+                ])->whereNumber('id');
+
+                // The dev aid. Manage-only, and refused outright when the Zoom
+                // transport is connected - see the controller.
+                Route::post($base . '/threads/{id}/simulate-inbound', [
+                    SmsController::class,
+                    'simulateInbound',
+                ])->whereNumber('id');
+            });
+    }
+
+    /**
      * Append Laravel's throttle middleware to a stack, unless the limit has been
      * configured away.
      *
@@ -995,6 +1151,49 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             function ($user) use ($permission) {
                 try {
                     return $user->hasPermissionTo($permission);
+                } catch (\Throwable $e) {
+                    return false;
+                }
+            }
+        );
+    }
+
+    /**
+     * Authorize the messaging module's private per-line channels.
+     *
+     * One registration covers every line: the channel name carries the line id,
+     * and the callback is handed it. Admitted are the staff attached to that
+     * line in the pivot, plus anyone holding the manage permission - the same
+     * rule the HTTP endpoints apply, because a channel that was more generous
+     * than the API would be the way client conversations leaked.
+     *
+     * The permission row may not exist yet on an environment that has not seeded
+     * it, and a lookup that throws here would take the whole broadcasting auth
+     * route down - so a failure denies rather than escapes.
+     *
+     * @return void
+     */
+    protected function registerMessagingChannel(): void
+    {
+        if (
+            !config('visns-packages.messaging.enabled', false) ||
+            !config('visns-packages.messaging.register_broadcast_channel', false)
+        ) {
+            return;
+        }
+
+        \Illuminate\Support\Facades\Broadcast::channel(
+            \Visnsstudio\VisnsPackages\Support\SmsChannel::pattern(),
+            function ($user, $lineId) {
+                try {
+                    if (\Visnsstudio\VisnsPackages\Support\SmsAccess::manages($user)) {
+                        return true;
+                    }
+
+                    return \Visnsstudio\VisnsPackages\Models\SmsLine::query()
+                        ->visibleTo($user, false)
+                        ->whereKey((int) $lineId)
+                        ->exists();
                 } catch (\Throwable $e) {
                     return false;
                 }

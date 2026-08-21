@@ -1008,6 +1008,189 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Messaging (SMS)
+    |--------------------------------------------------------------------------
+    |
+    | A virtual SMS inbox and outbox for staff, hanging off the practice's own
+    | phone numbers ("lines"). Threads, per-user unread counts, canned
+    | templates, and a live push when a text arrives.
+    |
+    | THE TRANSPORT IS PLUGGABLE, AND THAT IS THE POINT. This module was built
+    | before the provider was available: the practice is waiting on an
+    | SMS-capable mobile number for its Zoom Phone account. So it ships fully
+    | usable with a dev transport, inert with the null transport, and ready for
+    | Zoom the day the number exists - see the README's "Messaging (SMS)".
+    |
+    |   'null'  nothing leaves; the message is stored `not_connected` and shown
+    |           greyed out in the thread. The safe production setting until Zoom
+    |           is connected.
+    |   'log'   development: logs the send, reports success, and texts back so
+    |           the whole loop can be exercised on a laptop. NEVER in production.
+    |   'zoom'  the real thing.
+    |   or a class-string implementing Contracts\SmsTransport.
+    |
+    | Ships disabled - no routes, no tables read, nothing published - so
+    | upgrading without touching config changes nothing.
+    |
+    | NAMING: everything here is prefixed `sms_` / `Sms` on purpose. Consuming
+    | applications already have a Message model and a /messages route of their
+    | own, and a module that collided with those would be unadoptable.
+    |
+    | Permissions are NOT seeded here - the application owns its permission
+    | table; create the two names below in your own seeder.
+    |
+    */
+    'messaging' => [
+        'enabled' => false,
+
+        // Every endpoint hangs off this one base, so an application can move the
+        // whole module with a single key.
+        'uris' => [
+            'base' => 'ajax/sms',
+        ],
+
+        // An inbox of client conversations is not something an anonymous session
+        // may reach, so 'auth' is part of the default rather than left to the
+        // package-wide stack.
+        'routes_middleware' => ['web', 'auth'],
+
+        /*
+        | `access` is the permission to use messaging at all; `manage` is the
+        | administrative grant - every line, the line settings, the templates and
+        | the inbound simulator. Set either to null to gate it some other way.
+        |
+        | Visibility for a non-manager is the `sms_line_user` pivot: they see the
+        | lines they are attached to and nothing else, and everything else 404s.
+        */
+        'permissions' => [
+            'access' => 'Messaging Access',
+            'manage' => 'Messaging Manage',
+        ],
+
+        'tables' => [
+            'lines' => 'sms_lines',
+            'line_user' => 'sms_line_user',
+            'threads' => 'sms_threads',
+            'messages' => 'sms_messages',
+            'thread_reads' => 'sms_thread_reads',
+            'templates' => 'sms_templates',
+        ],
+
+        /*
+        | 'zoom' | 'log' | 'null' | a class-string implementing
+        | Visnsstudio\VisnsPackages\Contracts\SmsTransport.
+        |
+        | A class-string is built through the container, so an application's
+        | own binding (or a test's fake) is honoured.
+        */
+        'transport' => 'null',
+
+        /*
+        | How a number with no country code is read. Everything - a webhook
+        | payload, a typed number, a client record - is normalised to E.164
+        | before it is stored or compared, because the module's whole routing
+        | rule is an equality check between a stored line number and a number
+        | the provider sent.
+        */
+        'default_country' => 'AU',
+
+        /*
+        | Broadcast channel. Private, and PER LINE: "sms-line.{lineId}", plus
+        | ".{env}" when `append_env_suffix` is true - which is what any
+        | deployment sharing one Pusher app between environments needs, or dev
+        | broadcasts land in production browsers.
+        */
+        'channel' => 'sms-line',
+        'append_env_suffix' => false,
+
+        /*
+        | Authorize the private channel here, admitting anyone attached to the
+        | line or holding the manage permission. Set false when the application
+        | authorizes the channel itself in routes/channels.php - the package
+        | registration is a convenience, not a policy.
+        */
+        'register_broadcast_channel' => false,
+
+        /*
+        | The event classes the module dispatches.
+        |
+        | Configurable for the same reason the call queue's are: Laravel's
+        | Event::fake() keys listeners by EXACT class name, so an application
+        | whose listeners and tests are written against its own App\Events\Sms*
+        | classes cannot be reached by dispatching the package's.
+        |
+        | REQUIRED CONSTRUCTOR CONTRACT - a configured class is constructed with
+        | exactly the same arguments as the package class it replaces:
+        |
+        |   received / updated   __construct(SmsThread $thread, SmsMessage $message)
+        |
+        | Both models are the PACKAGE's (Visnsstudio\VisnsPackages\Models\Sms*),
+        | NOT an application's own classes of the same name, so a replacement
+        | class must widen or drop those type hints or PHP will refuse the call.
+        */
+        'events' => [
+            'received' => \Visnsstudio\VisnsPackages\Events\SmsReceived::class,
+            'updated' => \Visnsstudio\VisnsPackages\Events\SmsMessageUpdated::class,
+        ],
+
+        /*
+        | Number -> client. An invokable (class name, object or closure) called
+        | once, when a thread is first created, with the outside number in E.164
+        | and returning ['id' => .., 'name' => .., ...] or null.
+        |
+        | Deliberately the same contract as the call queue's caller enrichment
+        | (Contracts\CallerEnrichment), so an application can pass the SAME
+        | implementation to both and a number that pops a client card on an
+        | incoming call also names the client on an incoming text.
+        |
+        | A throwing hook costs the thread its client name, never the message.
+        */
+        'client_resolver' => null,
+
+        /*
+        | Client search, for the "text somebody" box: an invokable taking the
+        | typed term and returning
+        |
+        |   [['id' => 1, 'name' => 'Cleo Client',
+        |     'numbers' => [['label' => 'Mobile', 'number' => '+61412345678']]]]
+        |
+        | Null means the composer simply has no search; the number box still
+        | works.
+        */
+        'client_search' => null,
+
+        // Threads per page in the inbox list.
+        'page_size' => 50,
+
+        /*
+        | The longest body the API accepts. 1600 is ten concatenated SMS
+        | segments, which is where every carrier stops being reliable.
+        */
+        'max_body_length' => 1600,
+
+        'zoom' => [
+            /*
+            | Null = reuse the call queue's `call_queue.api` credentials, which
+            | is right whenever both features live in the same Zoom
+            | Server-to-Server app (so far, always). Set an array with the same
+            | keys for a messaging-specific app.
+            */
+            'api' => null,
+
+            /*
+            | Zoom's "Send SMS" endpoint. Configurable because it is the one
+            | thing in this module that has never been run against a live
+            | SMS-enabled account - see Services\Zoom\ZoomSmsClient::sendBody().
+            */
+            'send_path' => '/phone/sms/messages',
+        ],
+
+        // Null = the package-wide `user_model`.
+        'user_model' => null,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Two-Factor Authentication App Name
     |--------------------------------------------------------------------------
     |
