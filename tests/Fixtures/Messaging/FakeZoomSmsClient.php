@@ -41,7 +41,7 @@ class FakeZoomSmsClient extends ZoomSmsClient
         self::$shouldThrow = false;
     }
 
-    public function sendSms(string $from, string $to, string $body): array
+    public function sendSms(string $from, string $to, string $body, ?string $userId = null): array
     {
         if (self::$shouldThrow) {
             throw new \RuntimeException('zoom is on fire');
@@ -51,9 +51,10 @@ class FakeZoomSmsClient extends ZoomSmsClient
             'from' => $from,
             'to' => $to,
             'body' => $body,
+            'user_id' => $userId,
             // The real body builder, not a copy of it - so the test pins the
             // shape that would actually go to Zoom.
-            'request' => $this->sendBody($from, $to, $body),
+            'request' => $this->sendBody($from, $to, $body, $userId),
         ];
 
         return self::$response;

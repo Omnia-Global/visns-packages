@@ -18,11 +18,13 @@ use Visnsstudio\VisnsPackages\Support\ModuleConfig;
  * features live in the same Zoom Server-to-Server app. Setting `messaging.zoom.api`
  * is for the case where they do not.
  *
- * NOTHING HERE HAS BEEN RUN AGAINST A LIVE SMS-ENABLED ACCOUNT. The practice is
- * still waiting on an SMS-capable number, so the request and response shapes
- * below follow Zoom's published "Send SMS" / "List phone users" references and
- * are the one place to adjust when the live account confirms field names. Every
- * response read is defensive for that reason.
+ * Exercised against the live tenant on 21 Aug 2026 with a Server-to-Server
+ * OAuth app: `POST /phone/sms/messages` answered 201 with
+ * `{session_id, message_id, date_time}` when the sender carried both the Zoom
+ * user id and the number. The older forum guidance that S2S apps cannot send
+ * on behalf of a user did not apply. Every response read is still defensive:
+ * Zoom's shapes drift and a wrong guess must degrade to a logged failure, not
+ * an exception.
  */
 class ZoomSmsClient extends ZoomApiClient
 {
@@ -55,13 +57,17 @@ class ZoomSmsClient extends ZoomApiClient
     /**
      * Send one SMS.
      *
-     * @param  string  $from  The line's number, E.164.
-     * @param  string  $to    The recipient, E.164.
+     * @param  string       $from    The line's number, E.164.
+     * @param  string       $to      The recipient, E.164.
+     * @param  string|null  $userId  The Zoom user the line's number is assigned to
+     *                               (SmsLine::zoom_user_id). Zoom rejects a send
+     *                               without it ("User does not exist due to
+     *                               missing required params").
      * @return array{success: bool, http_code: int, data: mixed}
      */
-    public function sendSms(string $from, string $to, string $body): array
+    public function sendSms(string $from, string $to, string $body, ?string $userId = null): array
     {
-        return $this->request('POST', $this->sendPath(), $this->sendBody($from, $to, $body));
+        return $this->request('POST', $this->sendPath(), $this->sendBody($from, $to, $body, $userId));
     }
 
     /**
@@ -71,13 +77,19 @@ class ZoomSmsClient extends ZoomApiClient
      * account is connected and a field name turns out to be wrong, the fix is
      * one function and the tests that pin this shape say so plainly.
      *
-     * Per Zoom's reference, POST /phone/sms/messages takes:
+     * Confirmed against the live tenant on 21 Aug 2026: POST /phone/sms/messages
+     * takes
      *
      *   {
-     *     "sender":     {"phone_number": "+61812345678"},
+     *     "sender":     {"user_id": "<zoom user id>", "phone_number": "+61812345678"},
      *     "to_members": [{"phone_number": "+61412345678"}],
      *     "message":    "..."
      *   }
+     *
+     * `sender.user_id` is the Zoom user the number is assigned to - it is what
+     * `sms:sync-lines` (or the settings page) stamps on SmsLine::zoom_user_id.
+     * It is left out of the body when unknown so Zoom's own error says what is
+     * missing, rather than an empty string being sent as an id.
      *
      * `to_members` is a list because Zoom models an SMS as a session with
      * members; this module always sends to exactly one, because a thread is one
@@ -85,10 +97,16 @@ class ZoomSmsClient extends ZoomApiClient
      *
      * @return array<string, mixed>
      */
-    public function sendBody(string $from, string $to, string $body): array
+    public function sendBody(string $from, string $to, string $body, ?string $userId = null): array
     {
+        $sender = ['phone_number' => $from];
+
+        if ($userId !== null && trim($userId) !== '') {
+            $sender = ['user_id' => trim($userId)] + $sender;
+        }
+
         return [
-            'sender' => ['phone_number' => $from],
+            'sender' => $sender,
             'to_members' => [['phone_number' => $to]],
             'message' => $body,
         ];

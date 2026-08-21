@@ -11,10 +11,10 @@ use Visnsstudio\VisnsPackages\Services\Zoom\ZoomSmsClient;
 /**
  * The real transport: Zoom Phone SMS.
  *
- * Written against Zoom's published API and NOT yet exercised against a live
- * SMS-enabled account - the practice is waiting on an SMS-capable number. Every
- * response read here is therefore defensive, and the request body lives in one
- * documented method on ZoomSmsClient so a wrong field name is a one-line fix.
+ * Sends went live against the practice's tenant on 21 Aug 2026 (see
+ * ZoomSmsClient for what the live account confirmed). Every response read here
+ * is still defensive, and the request body lives in one documented method on
+ * ZoomSmsClient so a field rename on Zoom's side is a one-line fix.
  *
  * The client is resolved from the container per send rather than injected, for
  * the same reason CallQueueSettingsController resolves its Zoom service that
@@ -47,7 +47,8 @@ class ZoomSmsTransport implements SmsTransport
             $result = $client->sendSms(
                 (string) $line->phone_number,
                 (string) $thread->external_number,
-                (string) $message->body
+                (string) $message->body,
+                $line->zoom_user_id !== null ? (string) $line->zoom_user_id : null
             );
         } catch (\Throwable $e) {
             // A transport must not throw: the message row already exists and

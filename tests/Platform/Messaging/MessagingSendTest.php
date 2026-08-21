@@ -171,7 +171,7 @@ class MessagingSendTest extends MessagingTestCase
         $this->useZoom();
 
         $member = $this->member();
-        $line = $this->line([$member], ['phone_number' => '+61893752549']);
+        $line = $this->line([$member], ['phone_number' => '+61893752549', 'zoom_user_id' => 'zoom-user-1']);
         $thread = $this->thread($line, '+61412345678');
 
         $this->actingAs($member)
@@ -190,10 +190,27 @@ class MessagingSendTest extends MessagingTestCase
         // out to disagree, this assertion and ZoomSmsClient::sendBody() are what
         // change.
         $this->assertSame([
-            'sender' => ['phone_number' => '+61893752549'],
+            'sender' => ['user_id' => 'zoom-user-1', 'phone_number' => '+61893752549'],
             'to_members' => [['phone_number' => '+61412345678']],
             'message' => 'On my way',
         ], $send['request']);
+    }
+
+    public function test_a_line_with_no_zoom_user_sends_without_a_user_id(): void
+    {
+        $this->useZoom();
+
+        $member = $this->member();
+        $line = $this->line([$member], ['phone_number' => '+61893752549']);
+        $thread = $this->thread($line, '+61412345678');
+
+        $this->actingAs($member)
+            ->postJson(self::BASE . '/threads/' . $thread->id . '/messages', ['body' => 'On my way'])
+            ->assertStatus(201);
+
+        // Omitted, not sent as an empty string: Zoom's own error then says
+        // which field is missing.
+        $this->assertSame(['phone_number' => '+61893752549'], FakeZoomSmsClient::$sends[0]['request']['sender']);
     }
 
     public function test_zooms_message_id_is_stored_so_a_later_webhook_can_find_the_row(): void
