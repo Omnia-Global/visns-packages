@@ -197,11 +197,17 @@ class SmsSystemSender
 
     private function finishSent(SmsSystemMessage $record, ?string $providerMessageId): SmsSystemResult
     {
+        // The webhook may already have claimed the row (see
+        // SmsWebhookHandler::systemMessage()); its id and status win.
+        $record->refresh();
+
         $record->forceFill([
-            'status' => SmsSystemMessage::STATUS_SENT,
-            'provider_message_id' => $providerMessageId,
-            'error' => null,
-            'sent_at' => now(),
+            'status' => $record->status === SmsSystemMessage::STATUS_QUEUED
+                ? SmsSystemMessage::STATUS_SENT
+                : $record->status,
+            'provider_message_id' => $record->provider_message_id ?? $providerMessageId,
+            'error' => $record->status === SmsSystemMessage::STATUS_FAILED ? $record->error : null,
+            'sent_at' => $record->sent_at ?? now(),
         ])->save();
 
         return SmsSystemResult::sent($providerMessageId, $record);

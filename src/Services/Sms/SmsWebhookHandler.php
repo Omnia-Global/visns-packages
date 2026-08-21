@@ -229,7 +229,42 @@ class SmsWebhookHandler
      */
     private function systemMessage(array $object): ?SmsSystemMessage
     {
-        return SmsSystemMessage::findByProviderId($this->messageId($object));
+        $byId = SmsSystemMessage::findByProviderId($this->messageId($object));
+
+        if ($byId !== null) {
+            return $byId;
+        }
+
+        // The race: Zoom can deliver phone.sms_sent before SmsSystemSender has
+        // written the provider id onto its row (the HTTP response and the
+        // webhook are independent). The row is queued, on this line, to this
+        // recipient, and seconds old - that is enough to claim the event, and
+        // claiming wrongly costs one missed inbox receipt where missing it would
+        // put a login code into a thread.
+        $line = $this->lineFrom($object, 'sender');
+        $to = $this->firstNumber(Arr::get($object, 'to_members'));
+
+        if ($line === null || $to === null) {
+            return null;
+        }
+
+        $queued = SmsSystemMessage::query()
+            ->where('line_id', $line->id)
+            ->where('to_number', $to)
+            ->where('status', SmsSystemMessage::STATUS_QUEUED)
+            ->where('created_at', '>=', Carbon::now()->subMinutes(2))
+            ->orderByDesc('id')
+            ->first();
+
+        if ($queued !== null) {
+            $id = $this->messageId($object);
+
+            if ($id !== null && $queued->provider_message_id === null) {
+                $queued->forceFill(['provider_message_id' => $id])->save();
+            }
+        }
+
+        return $queued;
     }
 
     /**

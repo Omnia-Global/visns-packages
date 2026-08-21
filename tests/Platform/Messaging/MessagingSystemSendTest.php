@@ -436,4 +436,35 @@ class MessagingSystemSendTest extends MessagingTestCase
 
         $this->assertSame('+61412345678', FakeZoomSmsClient::$sends[0]['to']);
     }
+
+    public function test_a_sent_receipt_that_beats_the_provider_id_still_never_threads_the_code(): void
+    {
+        $this->useZoom();
+        $line = $this->line([], ['phone_number' => '+61893752549', 'zoom_user_id' => 'zoom-user-1']);
+
+        // A row as SmsSystemSender leaves it between the create and the Zoom
+        // response: queued, no provider id yet.
+        $record = SmsSystemMessage::create([
+            'line_id' => $line->id,
+            'purpose' => SmsSystemMessage::PURPOSE_TWO_FACTOR,
+            'to_number' => '+61412345678',
+            'status' => SmsSystemMessage::STATUS_QUEUED,
+        ]);
+
+        $outcome = app(SmsWebhookHandler::class)->handle('phone.sms_sent', [
+            'payload' => ['object' => [
+                'message_id' => 'early-receipt-1',
+                'sender' => ['phone_number' => '+61893752549'],
+                'to_members' => [['phone_number' => '+61412345678']],
+                'message' => 'Your code is 123456',
+                'date_time' => '2026-08-21T06:00:00Z',
+            ]],
+        ]);
+
+        $this->assertSame('ok', $outcome);
+        $this->assertSame(SmsSystemMessage::STATUS_SENT, $record->fresh()->status);
+        $this->assertSame('early-receipt-1', $record->fresh()->provider_message_id);
+        $this->assertSame(0, SmsThread::query()->count());
+        $this->assertSame(0, SmsMessage::query()->count());
+    }
 }
