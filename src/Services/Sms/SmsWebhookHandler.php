@@ -7,6 +7,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
 use Visnsstudio\VisnsPackages\Models\SmsLine;
 use Visnsstudio\VisnsPackages\Models\SmsMessage;
+use Visnsstudio\VisnsPackages\Models\SmsSystemMessage;
 use Visnsstudio\VisnsPackages\Models\SmsThread;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 use Visnsstudio\VisnsPackages\Support\PhoneNumber;
@@ -120,6 +121,23 @@ class SmsWebhookHandler
      */
     private function sent(array $object): string
     {
+        // Before anything else: was this one of ours but NOT an inbox message?
+        // A two-factor code produces a phone.sms_sent like any other send, and
+        // without this the block below would thread it as "an outbound from the
+        // Zoom app" - publishing somebody's login code to every colleague
+        // attached to the line.
+        $system = $this->systemMessage($object);
+
+        if ($system !== null) {
+            $system->forceFill([
+                'status' => SmsSystemMessage::STATUS_SENT,
+                'error' => null,
+                'sent_at' => $system->sent_at ?? $this->dateTime($object),
+            ])->save();
+
+            return 'ok';
+        }
+
         $message = $this->existingMessage($object);
 
         if ($message !== null) {
@@ -170,6 +188,19 @@ class SmsWebhookHandler
      */
     private function failed(array $object): string
     {
+        // Same guard as sent(): a failed login code is recorded against its own
+        // row and never becomes a message in a thread.
+        $system = $this->systemMessage($object);
+
+        if ($system !== null) {
+            $system->forceFill([
+                'status' => SmsSystemMessage::STATUS_FAILED,
+                'error' => $this->failureReason($object),
+            ])->save();
+
+            return 'ok';
+        }
+
         $message = $this->existingMessage($object);
 
         if ($message === null) {
@@ -188,6 +219,18 @@ class SmsWebhookHandler
     /* ---------------------------------------------------------------------
      | Payload reading
      | ------------------------------------------------------------------- */
+
+    /**
+     * The application-originated text this event refers back to, if it is one.
+     *
+     * Checked before every other lookup on a sent/failed event: these are the
+     * messages that must never reach the inbox, so they must be recognised
+     * before any code that could create a thread runs.
+     */
+    private function systemMessage(array $object): ?SmsSystemMessage
+    {
+        return SmsSystemMessage::findByProviderId($this->messageId($object));
+    }
 
     /**
      * The message this event refers back to, by Zoom's message id.

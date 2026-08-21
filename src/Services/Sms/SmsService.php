@@ -6,9 +6,11 @@ use Illuminate\Support\Facades\Log;
 use Visnsstudio\VisnsPackages\Contracts\SmsTransport;
 use Visnsstudio\VisnsPackages\Events\SmsMessageUpdated;
 use Visnsstudio\VisnsPackages\Events\SmsReceived;
+use Visnsstudio\VisnsPackages\Models\SmsLine;
 use Visnsstudio\VisnsPackages\Models\SmsMessage;
 use Visnsstudio\VisnsPackages\Models\SmsThread;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
+use Visnsstudio\VisnsPackages\Support\PhoneNumber;
 
 /**
  * Everything that happens to a message between "somebody pressed send" and "the
@@ -142,6 +144,57 @@ class SmsService
         $this->dispatch('updated', SmsMessageUpdated::class, $thread, $message);
 
         return $message;
+    }
+
+    /**
+     * Send to a bare number, threading it into the inbox.
+     *
+     * For CLIENT-FACING messages the application originates - an appointment
+     * reminder, a "your review pack is ready" - where there is no thread in hand
+     * and no staff member pressing send. The message SHOULD be in the inbox:
+     * the client can reply to it, and the reply has to land somewhere a human
+     * will see.
+     *
+     * This is the opposite decision from SmsSystemSender, which exists for
+     * texts that must NOT be in the inbox (login codes). If the body contains a
+     * credential, this is the wrong method.
+     *
+     * The line is resolved by SmsLineResolver - the same order the system sender
+     * uses, so a reminder and a code come from the same number - unless the
+     * caller names one.
+     *
+     * Returns null rather than throwing when there is no line or the number
+     * cannot be read: the caller is a reminder job, and a whole run must not die
+     * because one client's mobile is "n/a".
+     *
+     * @param  mixed  $user  The staff member to attribute it to, when the
+     *                       application has one in mind. Null reads as "the
+     *                       system sent this".
+     */
+    public function sendToNumber(string $to, string $body, $user = null, ?SmsLine $line = null): ?SmsMessage
+    {
+        $e164 = PhoneNumber::toE164(
+            $to,
+            (string) ModuleConfig::get('messaging.default_country', 'AU')
+        );
+
+        if ($e164 === null) {
+            Log::warning('sms.sendToNumber has an unusable number');
+
+            return null;
+        }
+
+        $line = $line ?? SmsLineResolver::resolve();
+
+        if ($line === null) {
+            Log::warning('sms.sendToNumber has no line to send from', ['to' => $e164]);
+
+            return null;
+        }
+
+        $thread = SmsThread::findOrCreateFor($line, $e164, $this->clientResolver());
+
+        return $this->send($thread, $body, $user);
     }
 
     /**

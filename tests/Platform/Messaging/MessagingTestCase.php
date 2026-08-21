@@ -10,7 +10,7 @@ use Visnsstudio\VisnsPackages\Models\SmsThread;
 use Visnsstudio\VisnsPackages\Tests\TestCase;
 
 /**
- * Shared harness for the messaging suite: the module turned on, its six tables
+ * Shared harness for the messaging suite: the module turned on, its seven tables
  * built from the shipped migrations, and a way to mint staff, lines and threads.
  *
  * The migrations are run rather than restated because they ARE the schema this
@@ -43,6 +43,7 @@ abstract class MessagingTestCase extends TestCase
             '2026_08_21_120030_create_sms_messages_table.php',
             '2026_08_21_120040_create_sms_thread_reads_table.php',
             '2026_08_21_120050_create_sms_templates_table.php',
+            '2026_08_21_120060_create_sms_system_messages_table.php',
         ] as $migration) {
             $this->runPackageMigration($migration);
         }

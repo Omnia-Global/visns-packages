@@ -1225,9 +1225,11 @@ numbers the CRM does not recognise.
         'messages' => 'sms_messages',
         'thread_reads' => 'sms_thread_reads',
         'templates' => 'sms_templates',
+        'system_messages' => 'sms_system_messages',
     ],
     'transport' => 'null',          // 'zoom' | 'log' | 'null' | a class-string
     'default_country' => 'AU',      // 04xx -> +614xx
+    'system_line' => null,          // E.164 of the line codes/OTPs go out on
     'channel' => 'sms-line',        // private "sms-line.{lineId}"
     'append_env_suffix' => false,
     'register_broadcast_channel' => false,
@@ -1244,7 +1246,7 @@ numbers the CRM does not recognise.
 ],
 ```
 
-Then publish and run the migrations — the module needs six tables:
+Then publish and run the migrations — the module needs seven tables:
 
 ```bash
 php artisan vendor:publish --tag=visns-packages-migrations
@@ -1403,6 +1405,64 @@ the message.
 `client_search` takes the typed term and returns
 `[['id' => .., 'name' => .., 'numbers' => [['label' => 'Mobile', 'number' => '+61...']]]]`.
 Unset means the composer simply has no search; the number box still works.
+
+#### Transactional SMS: login codes and OTPs
+
+The same Zoom line can carry the application's **own** texts — a staff login's
+second factor, a portal OTP — and those must **never** appear in the shared
+inbox. A thread is readable by everyone attached to its line, so a code routed
+through `SmsService::send()` would publish one person's second factor to their
+colleagues.
+
+`Services\Sms\SmsSystemSender` is the separate path:
+
+```php
+$result = app(SmsSystemSender::class)->send('0412 345 678', $message, 'two_factor');
+
+$result->ok;                 // bool
+$result->error;              // string|null - 'unusable number', 'SMS is not connected', ...
+$result->providerMessageId;  // string|null
+$result->record;             // SmsSystemMessage|null
+```
+
+No thread, no broadcast, no unread count — and **the body is never stored**.
+There is no `body` column on `sms_system_messages` at all: what is kept is the
+line, the purpose, the recipient, the status, the provider id and the time, which
+is what an incident review needs and nothing that would let a reader of the
+database use somebody's code. It never throws; the caller decides what a failure
+means.
+
+The line is `messaging.system_line` when set, else the first active line with a
+`zoom_user_id` (Zoom refuses a send without one), else any active line —
+`Services\Sms\SmsLineResolver`, shared with `sendToNumber()` so a code and a
+reminder come from the same number.
+
+`SmsWebhookHandler` recognises these on `phone.sms_sent` / `phone.sms_sent_failed`
+by provider id **before** any other lookup, updates the row and returns — without
+that guard it would thread the login code's own confirmation as "an outbound sent
+from the Zoom app".
+
+To use the line for staff two-factor, point the code channel's sender at it:
+
+```php
+'auth' => [
+    'two_factor' => [
+        'driver' => 'code',
+        'sender' => \Visnsstudio\VisnsPackages\Auth\ZoomSmsTwoFactorCodeSender::class,
+        'mobile_column' => 'mobile',   // where the user's number lives
+    ],
+],
+```
+
+It **throws** when there is no mobile on file or the send did not reach the
+provider, which is the `TwoFactorCodeSender` contract: the login is refused
+rather than allowed through with no code delivered.
+
+For a client-facing message the application originates — an appointment
+reminder — use `SmsService::sendToNumber($to, $body, $user = null, $line = null)`
+instead. That one **does** thread it (the client can reply, and the reply has to
+land somewhere a human will see) and returns null rather than throwing when there
+is no line or the number cannot be read.
 
 #### Numbers
 

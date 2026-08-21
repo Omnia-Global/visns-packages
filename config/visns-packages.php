@@ -591,6 +591,9 @@ return [
             'ip_column' => 'last_logged_ip_address',
             'code_column' => 'two_factor_token',
             'code_sent_at_column' => 'two_factor_token_sent_at',
+            // Where the user's mobile lives, for the SMS senders that read it
+            // (Auth\ZoomSmsTwoFactorCodeSender).
+            'mobile_column' => 'mobile',
             'expiry_minutes' => 15,
             'sender' => null,
             'message_template' => 'Your verification code is: {code}',
@@ -1074,6 +1077,7 @@ return [
             'messages' => 'sms_messages',
             'thread_reads' => 'sms_thread_reads',
             'templates' => 'sms_templates',
+            'system_messages' => 'sms_system_messages',
         ],
 
         /*
@@ -1093,6 +1097,20 @@ return [
         | the provider sent.
         */
         'default_country' => 'AU',
+
+        /*
+        | The E.164 number of the line used for APPLICATION-originated texts -
+        | login codes, portal OTPs, reminders. Those never appear in the shared
+        | inbox (a staff member with Messaging Access could otherwise read
+        | somebody else's login code), so they are sent by
+        | Services\Sms\SmsSystemSender and recorded, without their body, in the
+        | `system_messages` table.
+        |
+        | Null = the first active line that has a zoom_user_id, which is the
+        | right answer in every deployment with one SMS number. Set it when the
+        | practice has several and codes must come from a particular one.
+        */
+        'system_line' => null,
 
         /*
         | Broadcast channel. Private, and PER LINE: "sms-line.{lineId}", plus
