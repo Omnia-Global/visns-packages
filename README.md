@@ -30,6 +30,7 @@ A comprehensive Laravel package that provides enhanced authentication, file mana
         -   [Passwordless OTP login](#passwordless-otp-login)
         -   [Staff impersonation](#staff-impersonation)
         -   [Zoom Phone call queue pop](#zoom-phone-call-queue-pop)
+        -   [Vault (staff password manager)](#vault-staff-password-manager)
         -   [Middleware aliases](#middleware-aliases)
         -   [Testing](#testing)
     -   [File Management](#file-management)
@@ -173,6 +174,13 @@ php artisan migrate
     -   Passwordless OTP login
     -   Staff impersonation of a client account, with an audit log
     -   Zoom Phone call queue pop (webhook, live state, broadcast, settings)
+
+-   **Vault** (opt-in, 4.4.0)
+
+    -   Staff password manager: encrypted passwords, TOTP seeds and notes
+    -   Shared and private entries, gated by two permissions
+    -   Password re-confirmation before any secret is revealed
+    -   Access log, plus key-rotation and log-prune commands
 
 -   **File Management**
 
@@ -1049,6 +1057,132 @@ Two tables are needed; publish and run the migrations
 (`vendor:publish --tag=visns-packages-migrations`). Both no-op if the table
 already exists, so an application that already has them can adopt the module
 without a clash.
+
+### Vault (staff password manager)
+
+Added in 4.4.0. A shared credential store for staff: title, username, URL, an
+encrypted password, an encrypted TOTP seed and encrypted notes, with an access
+log recording who read what.
+
+> **Threat model, stated plainly.** Anyone with `APP_KEY` plus a database dump
+> can read the vault. The three secret columns are encrypted with the application
+> key, which means the key *is* the protection — keep it out of the repository,
+> keep it out of anything that ships to a browser, and rotate it via
+> `APP_PREVIOUS_KEYS` + `php artisan vault:reencrypt`. This module raises the bar
+> against a stolen database; it does not defend against a compromised
+> application server.
+
+```php
+'vault' => [
+    'enabled' => true,
+    'uris' => ['base' => 'ajax/vault'],
+    'routes_middleware' => ['web', 'auth'],
+    'permissions' => ['access' => 'Vault Access', 'manage' => 'Vault Manage'],
+    'confirmation_ttl_minutes' => 10,
+    'throttle' => ['reveal' => '60,1', 'confirm' => '5,1'],
+    'tables' => ['entries' => 'vault_entries', 'access_logs' => 'vault_access_logs'],
+    'user_model' => null,           // null = the package-wide user_model
+    'search_columns' => ['title', 'username', 'url'],
+],
+```
+
+Then publish and run the migrations — the module needs `vault_entries` and
+`vault_access_logs`:
+
+```bash
+php artisan vendor:publish --tag=visns-packages-migrations
+php artisan migrate
+```
+
+**Permissions are not seeded here.** The application owns its permission table,
+so create the two names in your own seeder:
+
+| Permission | Grants |
+| --- | --- |
+| `Vault Access` | Use the vault at all: list, open, create private entries, reveal and copy. |
+| `Vault Manage` | The administrative grant: create and edit **shared** entries, edit or delete anybody's entry, restore, and read the access log. |
+
+Setting either name to `null` in config removes that gate — which for `manage`
+means every user with access is treated as an administrator, so do it only if
+something else is enforcing it.
+
+#### Endpoints
+
+All relative to `vault.uris.base` (default `ajax/vault`); all carry
+`permission:Vault Access` on top of `routes_middleware`.
+
+| Method | URI | Extra guard | What it does |
+| --- | --- | --- | --- |
+| GET | `{base}` | — | Paginated list. `search`, `page`, `per_page` (≤100), `sort` (`title`\|`username`\|`updated_at`), `direction`, `include_deleted` (manage only). |
+| POST | `{base}` | manage, for a **shared** entry | Create. 201 with the detail payload. |
+| GET | `{base}/{id}` | — | Detail, including decrypted `notes`. Logs `view`. |
+| PUT | `{base}/{id}` | owner or manage; manage for anything **shared** | Update. |
+| DELETE | `{base}/{id}` | owner or manage | Soft delete. 204. |
+| POST | `{base}/{id}/restore` | manage | Undelete. 200 detail payload. |
+| POST | `{base}/confirm-password` | `throttle:5,1` | Re-check the caller's own password. 204, or 422 + a `confirm_failed` log row. |
+| POST | `{base}/{id}/reveal` | `vault.confirmed`, `throttle:60,1` | `{ "password": ... }`, `Cache-Control: no-store`. Logs `reveal_password`. |
+| GET | `{base}/{id}/otp` | `throttle:60,1` | `{ code, expires_in, period }`, `no-store`. 404 with no seed. Logs `otp`. |
+| POST | `{base}/{id}/log` | — | Body `{ "action": "copy_username" }`. 204. |
+| GET | `{base}/{id}/log` | manage | That entry's access log, newest first. |
+| GET | `{base}/log` | manage | The whole log; filters `user_id`, `action`. |
+
+#### Things a front end has to know
+
+- **No list or detail payload ever contains a password or a TOTP seed.** They are
+  absent, not null. `has_totp` tells you whether the OTP endpoint will answer.
+- **Reveal answers 423, not 401 or 403**, when the password confirmation has
+  lapsed: `{ message, reason: "password_confirmation_required", ttl_minutes }`.
+  Match on `reason`, not the message. A 401 would send most SPA interceptors into
+  a logout that is not wanted here.
+- **An entry you cannot see is a 404**, never a 403 — including on PUT and
+  DELETE. A 403 would answer "does an entry with this id exist" for anyone who
+  cared to ask.
+- **`password` and `totp_secret` are three-state on PUT**: key **absent** leaves
+  the stored secret alone, **null or empty** clears it, a **value** replaces it.
+  A form that (correctly) never received the current password must omit the key,
+  not send an empty string. Every other field is an ordinary partial update, bar
+  `title`, which is required.
+- `password_rotated_at` moves only when the password itself changes — not on a
+  rename, and not on `vault:reencrypt`.
+- `expires_in` counts down to the TOTP period boundary, not a full period. Re-ask
+  for a code when it hits zero.
+
+#### TOTP seeds
+
+Paste the whole `otpauth://totp/...` URI, not just the secret: it is the only
+form that carries `digits`, `period` and `algorithm`, and an 8-digit or
+60-second entry stored without them generates confidently wrong codes forever. A
+bare base32 secret is accepted too and takes the defaults (6 digits, 30 seconds,
+SHA-1). Secrets are proved by generating a code before anything is stored, so a
+bad seed is a 422 at save time rather than a failed login weeks later.
+
+#### Rotating the application key
+
+```bash
+# 1. New key in APP_KEY, old key still in APP_PREVIOUS_KEYS.
+# 2. While the old key is still listed:
+php artisan vault:reencrypt
+# 3. Only now remove the old key from APP_PREVIOUS_KEYS.
+```
+
+Order matters and the command cannot check it: remove the old key first and the
+rows are unreadable to everybody. The rewrite goes through the query builder with
+values encrypted by hand — Eloquent's dirty check considers an encrypted
+attribute unchanged when it decrypts to the same plaintext, which is exactly the
+case a rotation has to write — and it deliberately leaves `updated_at` alone.
+
+```bash
+php artisan vault:prune-log --days=365   # trim the access log; schedule it
+```
+
+#### Auditing
+
+This package does not depend on `owen-it/laravel-auditing`, so `VaultEntry`
+implements no auditing contract. An application that audits everything else it
+owns should subclass it, add the `Auditable` interface and trait, and set
+`$auditExclude = ['password', 'totp_secret', 'notes']` — the audit table is not
+encrypted, and an unexcluded change event writes the old and new secret into it
+in the clear.
 
 ### Middleware aliases
 
