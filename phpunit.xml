@@ -2,18 +2,36 @@
 <phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:noNamespaceSchemaLocation="./vendor/phpunit/phpunit/phpunit.xsd"
          bootstrap="vendor/autoload.php"
+         defaultTestSuite="Platform"
          colors="true">
     <testsuites>
-        <testsuite name="Unit">
-            <directory suffix="Test.php">./tests/Unit</directory>
+        <!--
+            The package's own suite: runs standalone on Testbench against an
+            in-memory SQLite database and needs nothing from a host application.
+            This is the suite to run - "composer test".
+        -->
+        <testsuite name="Platform">
+            <directory suffix="Test.php">./tests/Platform</directory>
         </testsuite>
-        <testsuite name="Feature">
+
+        <!--
+            Legacy suites, predating the package having a harness of its own.
+            They extend Tests\TestCase and build App\Models\User factories, i.e.
+            they only ever ran from inside a consuming Laravel application and
+            have not been runnable here (the class does not exist). Kept because
+            they still document behaviour; excluded from the default run so that
+            a green result means something. Run explicitly with
+            the Legacy testsuite explicitly, from inside an application that
+            provides those classes.
+        -->
+        <testsuite name="Legacy">
+            <directory suffix="Test.php">./tests/Unit</directory>
             <directory suffix="Test.php">./tests/Feature</directory>
         </testsuite>
     </testsuites>
-    <coverage>
+    <source>
         <include>
             <directory suffix=".php">./src</directory>
         </include>
-    </coverage>
+    </source>
 </phpunit>

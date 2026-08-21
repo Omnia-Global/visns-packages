@@ -353,6 +353,577 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Authentication
+    |--------------------------------------------------------------------------
+    |
+    | Everything the auth controller used to read straight out of env() lives
+    | here, plus the extension points an application needs to bend the login
+    | flow to its own rules without forking the controller.
+    |
+    | EVERY default in this section reproduces the behaviour the package had
+    | before the section existed, so an application that publishes nothing keeps
+    | working exactly as it did.
+    |
+    */
+    'auth' => [
+        // Falls back to visns-packages.user_model when null. Every auth code
+        // path resolves the model through this - nothing hardcodes App\Models\User.
+        'user_model' => null,
+
+        // Values the controller used to read with env(), which returns null
+        // once `php artisan config:cache` has run.
+        'app_name' => env('APP_NAME'),
+        'app_url' => env('APP_URL'),
+        'front_end_url' => env('FRONT_END_URL'),
+        'mail_to_dev' => env('MAIL_TO_DEV'),
+        'mail_from_address' => env('MAIL_FROM_ADDRESS'),
+        'allow_multiple_sessions' => env('ALLOW_MULTIPLE_SESSIONS', false),
+        'default_user_role' => env('DEFAULT_USER_ROLE'),
+
+        /*
+        | Does "remember me" actually remember?
+        |
+        | The login screens have always sent `remember` and these endpoints have
+        | always accepted it - and then dropped it on the floor. Nothing was
+        | passed to the session guard, so no recaller cookie was ever issued and
+        | the tick box did nothing at all.
+        |
+        | True wires it up: a login that asked to be remembered is made with
+        | Auth::login($user, true), and Laravel issues the long-lived recaller
+        | cookie. It defaults to FALSE because switching it on lengthens how
+        | long a session survives on every machine a user ticks the box on -
+        | that is a security posture decision, not a bug fix, and it must not
+        | happen to an application merely because it upgraded.
+        |
+        | The users table needs the standard `remember_token` column. A model
+        | without it degrades to the old behaviour (no recaller) with a warning
+        | in the log, rather than failing the login on a missing column.
+        |
+        | Note this is unrelated to `two_factor.remember_device`, which is about
+        | skipping the 2FA challenge on a known device and is stored in the
+        | package's own table. The two features share the `remember` request
+        | field but nothing else - see the AuthController for how the two are
+        | told apart.
+        */
+        'remember_enabled' => false,
+
+        // Socialite redirects. FRONTEND_URL is a different variable from the
+        // FRONT_END_URL above; both exist in the wild, so both are honoured.
+        'socialite' => [
+            'frontend_url' => env('FRONTEND_URL', '/'),
+            'default_role' => env('SOCIALITE_DEFAULT_ROLE'),
+        ],
+
+        /*
+        | Password reset mail.
+        |
+        | Resolution order:
+        |   1. `reset_mail_factory` - any callable/invokable class:
+        |          fn (string $content, string $subject): Mailable
+        |      Use this when the application's mailable has a signature of its
+        |      own; nothing else here has to match.
+        |   2. `reset_mailable` - built as `new $mailable($content, $subject, [])`.
+        |   3. Neither set - the historical call is preserved verbatim:
+        |          new \App\Mail\GenericMail($content, $mailFromAddress, $subject)
+        |      (yes, the second argument is the from-address; that is what this
+        |      package has always sent, and applications relying on it must not
+        |      break on upgrade.)
+        |
+        | `reset_subject` defaults to "{app_name} - Password Reset Request".
+        */
+        'reset_mail_factory' => null,
+        'reset_mailable' => null,
+        'reset_subject' => null,
+
+        /*
+        | Password reset extension points.
+        |
+        | 'reset_user_resolver' - invokable ($email, $request): ?User, used by
+        | BOTH forgot() (which account is this address for?) and reset() (which
+        | account does this token's stored address belong to?). Null keeps the
+        | built-in lookup: a straight match on the `email` column. An
+        | application whose accounts can be reached by more than one address -
+        | the Throughlife CRM resolves a client's contact email to the login
+        | account behind it - supplies its own.
+        |
+        | 'reset_key_by_resolved_email' - which address the password_resets row
+        | is keyed on. False (the default, and what this package has always
+        | done) stores the address the user TYPED; true stores the resolved
+        | account's own email. The two differ exactly when the resolver looked
+        | past the typed address - and when they differ, `false` writes a row
+        | that reset() can never match an account back to. Any application
+        | setting a resolver almost certainly wants this true.
+        |
+        | 'reset_url_builder' - invokable ($user, $token, $request): string,
+        | returning the whole link. Null reproduces the historical build:
+        | front_end_url when the request carries frontend=true, app_url
+        | otherwise, plus '/verify/{token}'. Applications needing another shape
+        | (a query-string token, a portal host, a per-user path) build it
+        | themselves.
+        |
+        | 'after_reset_hooks' - invokables ($user, $plainPassword) run once the
+        | new password is saved, for mirroring it onto a second record (the CRM
+        | keeps a copy on the client's contact row). They are handed the
+        | PLAINTEXT password, because a mirror generally has to hash it itself -
+        | so a hook must never log, transmit or persist it unhashed.
+        */
+        'reset_user_resolver' => null,
+        'reset_key_by_resolved_email' => false,
+        'reset_url_builder' => null,
+        'after_reset_hooks' => [],
+
+        /*
+        | Shape of the JSON body returned by logout_api(). The historical shape
+        | is kept as the default; an application wanting the CRM's `{"error":""}`
+        | sets it here.
+        */
+        'logout_response' => ['message' => 'Successfully logged out'],
+
+        /*
+        | Pluggable user lookup. An invokable class (or callable) receiving the
+        | login identifier and the request, returning a user model or null.
+        |
+        |     'user_resolver' => \App\Auth\PortalUserResolver::class,
+        |
+        | Null keeps the built-in resolver: an identifier that validates as an
+        | email address is looked up on `email`, anything else on `username`.
+        */
+        'user_resolver' => null,
+
+        /*
+        | Login lifecycle hooks.
+        |
+        | `pre_login_gates`: invokable classes run once the account has been
+        | found, each called as ($user, $request) and returning either null
+        | ("carry on") or a Response, which is returned to the client as-is.
+        | Use for things like an inactive-client 403 or a role lockout.
+        |
+        | `post_login_hooks`: invokable classes run as ($user, $request) after a
+        | successful login - stamping last-login columns, purging tokens, etc.
+        |
+        | `run_gates_before_credential_check`: by default gates run AFTER the
+        | password has been verified, so a gate can never be used to probe which
+        | accounts exist. Applications that must reject (say) an inactive
+        | account before the password is even checked - which is what the
+        | Throughlife CRM's portal login does - set this true.
+        */
+        'pre_login_gates' => [],
+        'post_login_hooks' => [],
+        'run_gates_before_credential_check' => false,
+
+        /*
+        | authenticate() has always blanked a `location` of '/' or '/login' in
+        | the `previous` field it echoes back. Set false to echo the location
+        | untouched.
+        */
+        'filter_previous' => true,
+
+        /*
+        | Every user-facing string the auth controller can emit. Defaults are
+        | the strings the package has always returned.
+        */
+        'messages' => [
+            'account_disabled' =>
+                'Your account has been disabled. Please contact the administrator.',
+            'login_failed' => 'Login unsuccessful, please try again.',
+            'email_not_found' =>
+                'The email address is not found, please try again.',
+            'invalid_reset_token' =>
+                'The token is no longer valid, please start the password request process again.',
+            'unauthenticated' => 'Unauthenticated',
+            'registration_failed' => 'An error occurred during registration.',
+            'invalid_data' => 'The given data was invalid.',
+            'invalid_two_factor_session' =>
+                'Invalid two-factor authentication session.',
+            'user_not_found' => 'User not found.',
+            'invalid_two_factor_code' =>
+                'The provided two-factor authentication code was invalid.',
+            'two_factor_code_expired' =>
+                'The verification code has expired, please request a new one.',
+            'two_factor_code_missing' =>
+                'No verification code has been sent, please start again.',
+            'two_factor_send_failed' =>
+                'The verification code could not be sent, please try again.',
+        ],
+
+        /*
+        |----------------------------------------------------------------------
+        | Two-factor authentication
+        |----------------------------------------------------------------------
+        |
+        | 'driver':
+        |   'totp' (default) - the existing authenticator-app flow, unchanged.
+        |   'code'           - a one-time numeric code the application delivers
+        |                      itself (SMS, email, whatever) through a
+        |                      TwoFactorCodeSender binding.
+        |
+        | 'trigger' decides WHEN 2FA is demanded, and is only ever evaluated in
+        | the production environment - outside production 2FA is skipped, which
+        | is what both the package's TOTP flow and the CRM's code flow have
+        | always done:
+        |   'always'    (default) - every login that has 2FA available
+        |   'ip_change'           - only when the request IP differs from the
+        |                           value in `ip_column`, which is why the
+        |                           post-login IP hook matters
+        |   'never'               - 2FA is never demanded
+        |
+        | The code driver stores the live code in `code_column` and the time it
+        | was sent in `code_sent_at_column`; both are nulled the moment a code
+        | is used, so a code is good for exactly one login.
+        |
+        | 'sender' names a class implementing
+        | Visnsstudio\VisnsPackages\Contracts\TwoFactorCodeSender. When null the
+        | container binding for that interface is used, and when nothing is
+        | bound the package's logging sender takes it (so a misconfigured
+        | application fails loudly in the log rather than silently letting
+        | people in).
+        |
+        | 'message_template' is rendered with `{code}` replaced by the code. When
+        | 'append_autofill_suffix' is true the SMS autofill trailer
+        | "\n\n@{host} #{code}" is appended, host coming from config('app.url').
+        */
+        'two_factor' => [
+            'driver' => 'totp',
+            'trigger' => 'always',
+            // Environments in which a second factor is ever demanded. The
+            // production-only default matches every flow this module replaced.
+            'environments' => ['production'],
+            'ip_column' => 'last_logged_ip_address',
+            'code_column' => 'two_factor_token',
+            'code_sent_at_column' => 'two_factor_token_sent_at',
+            'expiry_minutes' => 15,
+            'sender' => null,
+            'message_template' => 'Your verification code is: {code}',
+            'append_autofill_suffix' => true,
+            // Remember-this-device is a TOTP feature; the code driver only
+            // honours it when this is switched on.
+            'remember_device' => false,
+        ],
+
+        /*
+        | The whitelisted user payload returned by endpoints that must not
+        | serialize a whole user model (impersonation validation, OTP login with
+        | minimal_response). Relations are loaded and reduced to the named
+        | fields; a missing relation becomes null.
+        */
+        'minimal_user' => [
+            'fields' => [
+                'id',
+                'firstname',
+                'surname',
+                'email',
+                'company_contact_id',
+                'dateLastLogged',
+            ],
+            'relations' => [
+                'company_contact' => [
+                    'fields' => ['id', 'company_id', 'firstname', 'surname'],
+                ],
+            ],
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Passwordless OTP login
+    |--------------------------------------------------------------------------
+    |
+    | A contact (email address or mobile number) is exchanged for a one-time
+    | code, and the code for an API token. Off by default: enabling it publishes
+    | two unauthenticated endpoints.
+    |
+    | 'contact_resolver' is how a raw contact string becomes the record the code
+    | is stored against - an invokable class implementing
+    | Visnsstudio\VisnsPackages\Contracts\OtpContactResolver. The bundled
+    | default searches the user table; an application with its own contact table
+    | (the CRM searches company_contact) registers its own.
+    |
+    | 'sender' names a Visnsstudio\VisnsPackages\Contracts\OtpSender
+    | implementation; when null the container binding is used, falling back to
+    | the package's logging sender.
+    |
+    */
+    'otp' => [
+        'enabled' => false,
+
+        'uris' => [
+            'request' => 'auth/request-otp',
+            'login' => 'auth/login-otp',
+        ],
+
+        // Null = the package's api_middleware.
+        'middleware' => null,
+
+        'contact_resolver' => null,
+        'sender' => null,
+
+        // How the resolved contact record is joined to a user account.
+        'user_model' => null,
+        'user_foreign_key' => 'company_contact_id',
+        'user_relations' => ['company_contact', 'roles.permissions'],
+
+        // Name given to the Sanctum token minted on a successful OTP login.
+        'token_name' => 'auth_token',
+
+        'code_length' => 6,
+        'expiry_minutes' => 5,
+        'max_attempts' => 3,
+        // A second request inside this window is refused with 429.
+        'resend_cooldown_minutes' => 2,
+        'rate_limit_window_minutes' => 15,
+
+        // Columns on the contact record holding the live code.
+        'columns' => [
+            'code' => 'otp_code',
+            'sent_at' => 'otp_sent_at',
+            'contact_method' => 'otp_contact_method',
+            'attempts' => 'otp_attempts',
+            'locked_until' => 'otp_locked_until',
+        ],
+
+        // Outside production the generated code is echoed back in `dev_otp` so
+        // a staging login is possible without a live SMS gateway.
+        'expose_code_outside_production' => true,
+
+        /*
+        | Clear the stored code the moment it is spent.
+        |
+        | False (the default) is what the controller this was ported from does:
+        | a used code keeps working until it expires, so anyone who saw it -
+        | over the shoulder, in an SMS preview on a lock screen, in a mail
+        | client's notification - can log in again inside that window.
+        |
+        | True closes the window: one code, one login. It is the right setting
+        | for any new adopter; it defaults to false only so that adopting this
+        | module cannot silently change how an existing deployment behaves.
+        */
+        'consume_on_success' => false,
+
+        // Null = inherit auth.minimal_user.
+        'minimal_user' => null,
+
+        'messages' => [
+            'contact_not_found' =>
+                'Email or mobile number not found. Please contact the Throughlife team to verify your contact details.',
+            'no_portal_access' =>
+                'No portal access is set up for this contact. Please contact the Throughlife team to activate your portal access.',
+            'no_portal_access_login' =>
+                'No portal access available. Please contact the Throughlife team to activate your portal access.',
+            'rate_limited' =>
+                'Too many OTP requests. Please try again later or contact the Throughlife team for assistance.',
+            'invalid_code' =>
+                'Invalid or expired OTP. Please request a new code or contact the Throughlife team for assistance.',
+            'request_failed' =>
+                'An error occurred. Please contact the Throughlife team for assistance.',
+            'login_failed' =>
+                'An error occurred during login. Please contact the Throughlife team for assistance.',
+            'sent' => 'OTP sent successfully',
+            'generated' => 'OTP generated for testing',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Staff impersonation
+    |--------------------------------------------------------------------------
+    |
+    | Staff issue a short-lived Sanctum token for a client's own account and are
+    | redirected into the client-facing portal holding it. Off by default.
+    |
+    | The token is named "{token_prefix}:{actingStaffId}" so audit records can
+    | attribute impersonated writes to the real human -
+    | Visnsstudio\VisnsPackages\Support\ImpersonationActor::id() recovers it.
+    |
+    */
+    'impersonation' => [
+        'enabled' => false,
+
+        'uris' => [
+            // Issued from the CRM (session-authenticated, permission gated).
+            'issue' => 'ajax/impersonateClient',
+            // Consumed by the portal (unauthenticated, token only).
+            'validate' => 'validateImpersonationToken',
+        ],
+
+        'issue_middleware' => null, // null = the package's routes_middleware + auth
+        'validate_middleware' => null, // null = the package's api_middleware
+
+        'permission' => 'Impersonate Client',
+
+        'user_model' => null,
+        // Column on the user table holding the id posted as `id`.
+        'target_column' => 'company_contact_id',
+
+        'token_prefix' => 'impersonation-token',
+        'expires_minutes' => 60,
+
+        // Audit record. Set to false to write no log at all.
+        'log_model' => \Visnsstudio\VisnsPackages\Models\ImpersonationLog::class,
+
+        // Base URL of the portal. Null = config('portal.url').
+        'portal_url' => null,
+        'portal_path' => '/portal',
+        'redirect_path' => '/impersonate',
+
+        'user_relations' => ['company_contact', 'roles.permissions'],
+
+        // Null = inherit auth.minimal_user.
+        'minimal_user' => null,
+
+        'messages' => [
+            'no_portal_account' =>
+                'This client does not have a portal account yet. Please set a username and password for the client before accessing the portal.',
+            'invalid_token' => 'Invalid token',
+            'expired_token' => 'Token has expired',
+            'user_not_found' => 'User not found',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Zoom Phone call queue pop
+    |--------------------------------------------------------------------------
+    |
+    | Receives Zoom Phone events, keeps a table of what is ringing right now in
+    | the account's call queues, and broadcasts it to every monitoring browser.
+    | Off by default: enabling it publishes a webhook endpoint and expects the
+    | two state tables to exist.
+    |
+    | The webhook always answers 200 (bar a signature failure): Zoom retries and
+    | eventually disables endpoints that error or answer slowly.
+    |
+    */
+    'call_queue' => [
+        'enabled' => false,
+
+        'uris' => [
+            'webhook' => 'api/zoom/webhook',
+            'live' => 'ajax/call-queue/live',
+            'settings' => 'ajax/call-queue/settings',
+        ],
+
+        // The webhook is registered outside the api group so its URI is
+        // absolute; only the signature middleware guards it.
+        'webhook_middleware' => [],
+        // Null = the package's routes_middleware.
+        'routes_middleware' => null,
+
+        'permissions' => [
+            'monitor' => 'Call Queue Monitor',
+            'settings' => 'Call Queue Settings',
+        ],
+
+        // Zoom's webhook signing secret. While unset the endpoint 401s
+        // everything, so the feature is inert rather than open.
+        'webhook_secret_token' => env('ZOOM_WEBHOOK_SECRET_TOKEN'),
+        'max_clock_skew_seconds' => 300,
+
+        'tables' => [
+            'live_calls' => 'zoom_live_queue_calls',
+            'settings' => 'zoom_call_queue_settings',
+        ],
+
+        /*
+        | The event classes the webhook dispatches.
+        |
+        | Configurable because Laravel's Event::fake() keys listeners by EXACT
+        | class name: a subclass, a container alias or a class_alias() of the
+        | package event is a different key, so an application whose listeners
+        | and tests are written against its own App\Events\CallQueue* classes
+        | cannot be reached by dispatching the package's. Naming them here lets
+        | the module drive an application's existing event classes verbatim.
+        |
+        | REQUIRED CONSTRUCTOR CONTRACT - a configured class is constructed with
+        | exactly the same arguments as the package class it replaces:
+        |
+        |   ringing            __construct(ZoomLiveQueueCall $call)
+        |   answered / ended   __construct(string $callId)
+        |
+        | The model passed to `ringing` is
+        | Visnsstudio\VisnsPackages\Models\ZoomLiveQueueCall, NOT the
+        | application's own model of the same name. A replacement class must
+        | therefore widen or drop that parameter's type hint, or PHP will refuse
+        | the call - see the README.
+        */
+        'events' => [
+            'ringing' => \Visnsstudio\VisnsPackages\Events\CallQueueRinging::class,
+            'answered' => \Visnsstudio\VisnsPackages\Events\CallQueueAnswered::class,
+            'ended' => \Visnsstudio\VisnsPackages\Events\CallQueueEnded::class,
+        ],
+
+        /*
+        | Broadcast channel. When `append_env_suffix` is true the current
+        | app environment is appended ("call-queue-monitor.production"), which
+        | is what any deployment sharing one Pusher app between environments
+        | needs - without it dev broadcasts land in production browsers.
+        */
+        'channel' => 'call-queue-monitor',
+        'append_env_suffix' => false,
+
+        /*
+        | Authorize the private channel here, admitting anyone holding the
+        | monitor permission. Set false when the application authorizes the
+        | channel itself in routes/channels.php - the package registration is a
+        | convenience, not a policy.
+        */
+        'register_broadcast_channel' => true,
+
+        /*
+        | Caller enrichment: an invokable implementing
+        | Visnsstudio\VisnsPackages\Contracts\CallerEnrichment, called once per
+        | ringing call with the caller's number and returning the client
+        | snapshot to ride along in the broadcast. Null = no enrichment.
+        | A throwing hook costs the pop its snapshot, never the pop itself.
+        */
+        'caller_enrichment' => null,
+
+        // Settings are read on every ringing webhook, and change a few times a
+        // year.
+        'settings_cache_ttl' => 60,
+
+        // A ringing row older than this is treated as abandoned: Zoom does not
+        // guarantee a closing event for every call.
+        'stale_after_minutes' => 15,
+
+        /*
+        | Zoom prefixes every call queue pickup code with a fixed *99, so the
+        | stored code 8781 is dialled *998781. Codes are stored bare.
+        */
+        'pickup_prefix' => '*99',
+
+        /*
+        | The Zoom client the settings page talks to.
+        |
+        | A class STRING, resolved through the container - never a closure, so
+        | this file survives `php artisan config:cache`. Because the container
+        | is asked for whatever class is named here, an application's
+        | `instance()` or `bind()` double for that class is honoured: a test
+        | suite can substitute a fake and be certain no save reaches the live
+        | Zoom tenant.
+        |
+        | Point it at your own client when you already have one - its own
+        | credentials, base service or retry policy. It must satisfy the public
+        | contract in the README ("Substituting your own Zoom client"): the
+        | settings page calls listQueues(), setPickupCode() and
+        | disablePickupCode(); getQueue() and getPolicies() round out the
+        | package's own class but are not called from here.
+        |
+        | The `api` credentials below are read by the PACKAGE's client only. A
+        | replacement is constructed by the container and reads its own.
+        */
+        'zoom_service' => \Visnsstudio\VisnsPackages\Services\Zoom\ZoomCallQueueService::class,
+
+        'api' => [
+            'account_id' => env('ZOOM_ACCOUNT_ID'),
+            'client_id' => env('ZOOM_CLIENT_ID'),
+            'client_secret' => env('ZOOM_CLIENT_SECRET'),
+            'base_url' => 'https://api.zoom.us/v2',
+            'token_url' => 'https://zoom.us/oauth/token',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Two-Factor Authentication App Name
     |--------------------------------------------------------------------------
     |

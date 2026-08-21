@@ -24,7 +24,7 @@ class SocialiteController extends \App\Http\Controllers\Controller
         // Validate the provider
         if (!in_array($provider, ['google', 'azure', 'facebook', 'apple'])) {
             return redirect(
-                env('FRONTEND_URL', '/') . '/login?error=Invalid provider'
+                config('visns-packages.auth.socialite.frontend_url', '/') . '/login?error=Invalid provider'
             );
         }
 
@@ -67,8 +67,8 @@ class SocialiteController extends \App\Http\Controllers\Controller
                     ]);
 
                     // Assign default role if configured
-                    if (env('SOCIALITE_DEFAULT_ROLE')) {
-                        $user->syncRoles([env('SOCIALITE_DEFAULT_ROLE')]);
+                    if (config('visns-packages.auth.socialite.default_role')) {
+                        $user->syncRoles([config('visns-packages.auth.socialite.default_role')]);
                     }
                 } else {
                     // Update existing user with provider details
@@ -93,7 +93,7 @@ class SocialiteController extends \App\Http\Controllers\Controller
             $token = $user->createToken('auth-token')->plainTextToken;
 
             // Redirect to the frontend with the token
-            $frontendUrl = env('FRONTEND_URL', '/');
+            $frontendUrl = config('visns-packages.auth.socialite.frontend_url', '/');
             $redirectUrl = "{$frontendUrl}/auth/callback?token={$token}&provider={$provider}";
 
             return redirect($redirectUrl);
@@ -102,7 +102,7 @@ class SocialiteController extends \App\Http\Controllers\Controller
             \Log::error('OAuth error: ' . $e->getMessage());
 
             // Redirect to login with error message
-            $frontendUrl = env('FRONTEND_URL', '/');
+            $frontendUrl = config('visns-packages.auth.socialite.frontend_url', '/');
             return redirect(
                 "{$frontendUrl}/login?error=Authentication failed with {$provider}"
             );

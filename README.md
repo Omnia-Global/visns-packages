@@ -21,6 +21,17 @@ A comprehensive Laravel package that provides enhanced authentication, file mana
             -   [Managing 2FA](#managing-2fa)
         -   [Social Authentication](#social-authentication)
         -   [API Authentication](#api-authentication)
+    -   [Auth Platform Modules](#auth-platform-modules)
+        -   [Login extension points](#login-extension-points)
+        -   [Password reset: resolver, link and hooks](#password-reset-resolver-link-and-hooks)
+        -   [Sessions and CSRF across a login](#sessions-and-csrf-across-a-login)
+        -   [Remember me](#remember-me)
+        -   [Two-factor: the code channel](#two-factor-the-code-channel)
+        -   [Passwordless OTP login](#passwordless-otp-login)
+        -   [Staff impersonation](#staff-impersonation)
+        -   [Zoom Phone call queue pop](#zoom-phone-call-queue-pop)
+        -   [Middleware aliases](#middleware-aliases)
+        -   [Testing](#testing)
     -   [File Management](#file-management)
     -   [User Model](#user-model)
         -   [Using the Package User Model](#using-the-package-user-model)
@@ -154,6 +165,14 @@ php artisan migrate
     -   Social authentication integration with Laravel Socialite
     -   Two-factor authentication (2FA)
     -   API token authentication
+
+-   **Auth Platform Modules** (opt-in, 4.3.0)
+
+    -   Pluggable user resolver, pre-login gates and post-login hooks
+    -   Second two-factor driver: single-use numeric codes over your own channel
+    -   Passwordless OTP login
+    -   Staff impersonation of a client account, with an audit log
+    -   Zoom Phone call queue pop (webhook, live state, broadcast, settings)
 
 -   **File Management**
 
@@ -495,6 +514,571 @@ axios.post('/api/two-factor-challenge', {
 ```
 
 The `device_identifier` parameter is optional. If not provided, the system will generate one based on the user agent and IP address.
+
+## Auth Platform Modules
+
+Four modules added in 4.3.0. **Everything here is opt-in.** The authentication
+changes default to exactly what the package did before, and the three new
+modules ship disabled — upgrading without touching your config changes nothing.
+
+All of it is driven from `config/visns-packages.php`; publish it with
+
+```bash
+php artisan vendor:publish --tag=visns-packages-config
+```
+
+A note that applies to every module: nothing in this package reads `env()` at
+runtime any more. `env()` returns `null` once `php artisan config:cache` has
+run, which is the state production runs in — so a value read that way works in
+development and silently evaporates on deploy. Everything comes from config,
+which reads env once, at load. If you have been setting `FRONT_END_URL`,
+`MAIL_TO_DEV`, `ALLOW_MULTIPLE_SESSIONS`, `DEFAULT_USER_ROLE` or `FRONTEND_URL`
+in `.env`, they still work; they are now read through `visns-packages.auth.*`.
+
+### Login extension points
+
+The login flow can be bent to an application's rules without forking the
+controller.
+
+| Config key | What it takes | Default |
+| --- | --- | --- |
+| `auth.user_resolver` | invokable `($identifier, $request): ?User` | email-or-username lookup |
+| `auth.pre_login_gates` | array of invokables `($user, $request): ?Response` | none |
+| `auth.post_login_hooks` | array of invokables `($user, $request): void` | none |
+| `auth.run_gates_before_credential_check` | bool | `false` |
+| `auth.filter_previous` | bool | `true` |
+| `auth.messages.*` | string map | the package's current strings |
+| `auth.logout_response` | array | `['message' => 'Successfully logged out']` |
+| `auth.user_model` | class name | `visns-packages.user_model` |
+
+A **gate** runs once the account has been found and returns either `null` ("carry
+on") or a Response, which goes to the client untouched — status code, body and
+all. Gates run *after* the password check by default, so a gate cannot be used
+to probe which accounts exist; set `run_gates_before_credential_check` if your
+rule has to apply before the password is looked at.
+
+```php
+// config/visns-packages.php
+'auth' => [
+    'user_resolver' => \App\Auth\PortalUserResolver::class,
+    'pre_login_gates' => [\App\Auth\RejectInactiveClients::class],
+    'post_login_hooks' => [\App\Auth\StampLastLogin::class],
+],
+```
+
+```php
+class RejectInactiveClients
+{
+    public function __invoke($user, Request $request)
+    {
+        return $user->contact?->isInactive
+            ? response()->json(['error' => 'Your account is currently inactive.'], 403)
+            : null;
+    }
+}
+```
+
+**Password reset mail.** `forgot()` has always built the application's
+`GenericMail` as `($content, $fromAddress, $subject)` — the from-address in the
+title slot. That call is preserved as the default, because applications have
+built their mailable around it. To use a sane signature, configure either:
+
+```php
+'auth' => [
+    // new $mailable($content, $subject, [])
+    'reset_mailable' => \App\Mail\GenericMail::class,
+    'reset_subject'  => 'Acme - Password Reset Request',
+
+    // or, for any signature at all:
+    'reset_mail_factory' => fn ($content, $subject) => new \App\Mail\Reset($subject, $content),
+],
+```
+
+### Password reset: resolver, link and hooks
+
+`forgot()` and `reset()` originally assumed one account, one address, one link
+shape. Four keys lift each of those assumptions; all four default to exactly what
+the endpoints did before.
+
+| Config key | What it takes | Default |
+| --- | --- | --- |
+| `auth.reset_user_resolver` | invokable `($email, $request): ?User` | match on the `email` column |
+| `auth.reset_key_by_resolved_email` | bool | `false` (store the typed address) |
+| `auth.reset_url_builder` | invokable `($user, $token, $request): string` | `{app_url\|front_end_url}/verify/{token}` |
+| `auth.after_reset_hooks` | array of invokables `($user, $plainPassword)` | none |
+
+The **resolver** is used by *both* halves: `forgot()` asks it which account a
+typed address belongs to, and `reset()` asks it which account the address stored
+on the token row belongs to. Using one resolver for both is what stops the two
+halves of a single reset disagreeing about whose password is being changed.
+
+> **If you set a resolver, set `reset_key_by_resolved_email` too.** The row is
+> keyed on the typed address by default. That is only correct while the typed
+> address *is* the account's address — the moment a resolver looks past it, the
+> row records something `reset()` cannot match an account back to, and every
+> token it issues is dead on arrival. The default stays `false` purely so
+> existing installs are untouched.
+
+The **URL builder** owns the whole link, so a token can be a query parameter, a
+different host, anything:
+
+```php
+'auth' => [
+    'reset_user_resolver' => \App\Auth\ContactEmailResolver::class,
+    'reset_key_by_resolved_email' => true,
+    'reset_url_builder' => \App\Auth\PortalResetUrl::class,
+    'after_reset_hooks' => [\App\Auth\MirrorPasswordToContact::class],
+],
+```
+
+```php
+class PortalResetUrl
+{
+    public function __invoke($user, string $token, Request $request): string
+    {
+        $base = rtrim(config('portal.url'), '/') . '/verify/';
+
+        return $request->input('portal') === 'true'
+            ? $base . '?code=' . $token   // portal reads it from the query string
+            : $base . $token;             // CRM reads it from the path
+    }
+}
+```
+
+**After-reset hooks** run once the new password is saved, for mirroring it onto a
+second record. They are handed the **plaintext** password, because a mirror
+usually has to hash it its own way — which makes a hook one of the few places a
+plaintext credential exists. Never log, return or persist it unhashed.
+
+Two related fixes while you are here: a token row whose stored address no longer
+resolves to an account now answers the same "token is no longer valid" message
+instead of dereferencing null and 500-ing; and the spent row is deleted by the
+**row's** address rather than the resolved account's, so a token cannot survive
+its own use when the two differ.
+
+### Sessions and CSRF across a login
+
+**Every stateful auth response carries the live, post-login CSRF token. Resync
+your meta tag from it — this is the contract, not a convenience.**
+
+| Response | Carries |
+| --- | --- |
+| `POST /login/authenticate` — success, failure, and `requires_two_factor` | `csrf_token` |
+| `POST /login/two-factor-challenge` — code driver | `csrf_token` |
+
+The API endpoints do not: they are stateless and have no session.
+
+**Why you have to.** Laravel rotates the session on login, and what it rotates
+changed between majors:
+
+| | `SessionGuard::updateSession()` | Rotates |
+| --- | --- | --- |
+| Laravel ≤ 11 | `session->migrate(true)` | session id |
+| Laravel ≥ 12 | `session->regenerate(true)` | session id **and CSRF token** |
+
+This package supports `>=11` and fights neither. The Laravel 12 change is
+deliberate framework security — a privilege change should not leave the old CSRF
+token valid — so suppressing it would be trading a real protection for
+convenience.
+
+The consequence is real, and it is how this was first reported: a single-page app
+that shows the 2FA prompt **without reloading** still holds the
+`<meta csrf-token>` it rendered before the challenge. On Laravel 12 that token is
+dead the moment the challenge completes, so the page's next burst of POSTs all
+return **419 CSRF token mismatch** — while its GETs carry on working, which is
+what makes it look intermittent rather than broken.
+
+So the frontend must do one of:
+
+```js
+// after POST /login/authenticate and POST /login/two-factor-challenge
+if (data.csrf_token) {
+    document
+        .querySelector('meta[name="csrf-token"]')
+        ?.setAttribute('content', data.csrf_token);
+    // and whatever your HTTP client caches, e.g.
+    axios.defaults.headers.common['X-CSRF-TOKEN'] = data.csrf_token;
+}
+```
+
+…or hard-reload after login. Resyncing is cheaper and is what the field is for.
+Nothing is disclosed by returning it: the token is already rendered into the page
+being answered.
+
+**Session fixation is unaffected.** The session id rotates at every privilege
+change — the plain login, and again when a 2FA challenge completes — so an id an
+attacker planted beforehand never survives. This package adds no rotation of its
+own on top of the framework's, and `logout()` still calls `regenerateToken()`
+explicitly, because there a fresh token is the entire point.
+
+### Remember me
+
+The login screens have always sent `remember`, and these endpoints have always
+accepted it — and then dropped it. Nothing reached the session guard, so no
+recaller cookie was ever issued and the tick box did nothing at all.
+
+```php
+'auth' => ['remember_enabled' => true],
+```
+
+Off by default. Switching it on lengthens how long a session survives on every
+machine a user ticks the box on — a security posture decision, not a bug fix,
+and not something that should happen to an application merely because it
+upgraded. Needs the standard Laravel `remember_token` column on the users table.
+
+**One source of truth: the original login.** The choice is read from the request
+that proved the password, stashed in the session under
+`auth.two_factor.remember`, and applied when the login actually completes:
+
+| Path | Where `remember` is read |
+| --- | --- |
+| plain login (no 2FA) | the `authenticate()` request |
+| code-driver challenge | the session stash from `authenticate()` |
+| TOTP challenge | the session stash from `authenticate()` |
+| API login / API challenge | not applied — token clients have no recaller |
+
+A challenge request's own `remember` field is **ignored** for this. By the time
+the challenge is answered the caller is only half authenticated, so its body must
+not be able to extend the session's lifetime; the stash is what makes a tampered
+challenge POST unable to widen it. The stash is consumed on use and dropped if
+the challenge is abandoned.
+
+> **`remember` means two different things on the challenge endpoint.** This
+> feature (recaller cookie, `remember_enabled`) reads the *session*.
+> Remember-this-device (skipping the 2FA challenge next time,
+> `two_factor.remember_device`, stored in the package's own table) reads the
+> *challenge request*, and always has — that one is legitimately about the
+> browser answering the challenge, so it can only be decided there. Turning on
+> `remember_enabled` does not change it.
+
+Interplay handled, with tests pinning each:
+
+- **`logoutOtherDevices()`** rehashes the password, and the recaller embeds a
+  slice of that hash. The login happens first so the recaller is queued, then the
+  rehash re-queues it off the new hash — otherwise "remember me" would silently
+  stop working on the next visit.
+- **`session()->regenerate()`** in the 2FA completion rotates the session id; the
+  recaller lives on the cookie jar and is unaffected.
+- **`logout()`** clears it — Laravel queues a forget-cookie *and* cycles the
+  stored token, so a copy taken off the wire is worthless too.
+- **A model that cannot store a remember token** (missing migration, or an
+  `Authenticatable` opting out) logs a warning and logs in without a recaller. A
+  missing column costs the tick box, not the login.
+
+### Two-factor: the code channel
+
+Alongside the existing authenticator-app flow there is now a driver that sends a
+one-time numeric code through a channel your application owns.
+
+```php
+'auth' => ['two_factor' => [
+    'driver'  => 'code',            // 'totp' (default) | 'code'
+    'trigger' => 'ip_change',       // 'always' (default) | 'ip_change' | 'never'
+    'expiry_minutes' => 15,
+    'message_template' => 'Your Acme verification code is: {code}',
+    'sender' => \App\Auth\SmsCodeSender::class,
+]],
+```
+
+`trigger` is **only ever evaluated in production** — outside it 2FA is skipped,
+which is what both the TOTP flow and the SMS flow it replaces have always done.
+`ip_change` compares the request IP to `two_factor.ip_column`
+(`last_logged_ip_address` by default), which is why the post-login IP hook
+matters: without something writing that column, every login looks like a new
+address.
+
+Bind a sender — the package generates, stores, verifies and expires the code;
+how it reaches the human is yours:
+
+```php
+use Visnsstudio\VisnsPackages\Contracts\TwoFactorCodeSender;
+
+class SmsCodeSender implements TwoFactorCodeSender
+{
+    public function send(object $user, string $code, string $message): void
+    {
+        // $message is the rendered template plus the "\n\n@host #code"
+        // autofill trailer that lets iOS/Android offer the code.
+        $this->gateway->send($user->mobile, $message);
+    }
+}
+```
+
+Flow:
+
+| Step | Endpoint | Body |
+| --- | --- | --- |
+| 1 | `POST /login/authenticate` | answers `{error:'', user:null, requires_two_factor:true}` and sends the code; **does not log in** |
+| 2 | `POST /login/two-factor-challenge` | `{code, previous_url, remember}` → completes the login |
+| 3 | `POST /login/two-factor-resend` | re-issues and re-sends, invalidating the previous code |
+
+The code is **consumed on use** — nulled the moment it works — so an intercepted
+SMS cannot be replayed. A code that could not be delivered refuses the login
+rather than letting it through. Remember-this-device is off for this driver
+unless `two_factor.remember_device` is set: an SMS code is tied to the phone,
+not the browser.
+
+The TOTP path, including `TwoFactorRememberToken`, is untouched.
+
+### Passwordless OTP login
+
+A contact detail is exchanged for a one-time code, and the code for a Sanctum
+token. Two unauthenticated endpoints, so the module is off until you ask:
+
+```php
+'otp' => [
+    'enabled' => true,
+    'contact_resolver' => \App\Auth\CompanyContactResolver::class,
+    'sender' => \App\Auth\PortalOtpSender::class,
+    'token_name' => 'portal-token',
+    'user_foreign_key' => 'company_contact_id',
+],
+```
+
+Endpoints (URIs configurable): `POST /api/auth/request-otp` and
+`POST /api/auth/login-otp`.
+
+Rules, all configurable: 6 digits from the CSPRNG, stored bcrypt-hashed, 5-minute
+expiry, 3 attempts per code, 2-minute resend cooldown. Outside production the
+code comes back in the response as `dev_otp` so staging needs no SMS gateway —
+turn that off with `otp.expose_code_outside_production`.
+
+Two things you supply. A **contact resolver**, because which record a contact
+string maps to is application knowledge (`Visnsstudio\VisnsPackages\Contracts\OtpContactResolver`
+— `__invoke`, `matchedMethod`, `maskedContact`); the bundled default searches the
+user table on email/username/mobile. And an **OtpSender** (`send($contact,
+$method, $code)`), which decides from the matched method whether that means an
+email or an SMS.
+
+`minimal_response: true` on the login call returns the whitelisted payload from
+`auth.minimal_user` instead of the model — for callers keeping the user in a
+cookie, which has a 4KB limit the full model does not fit inside.
+
+> **Set `otp.consume_on_success => true` unless you have a reason not to.**
+> With the default `false` — which is what the controller this was ported from
+> does — a code keeps working until it expires, *including after it has already
+> logged someone in*. Anyone who saw it in the meantime, over a shoulder or in a
+> lock-screen SMS preview, can log in behind the user for the rest of the
+> window. `true` clears the code the moment it is spent: one code, one login.
+> It ships `false` only so that adopting this module cannot silently change how
+> an existing deployment behaves. The attempt counter and any lock are reset on
+> success either way.
+
+> **Wart, faithfully preserved.** `login-otp` validates inside its own
+> catch-all, so a wrong-length code answers **500 with the generic failure
+> message**, not Laravel's 422 field error. That is what the front end this was
+> ported from reads in production today. If you are adopting fresh and do not
+> need that, override `otp.messages.login_failed` — or fix it upstream and
+> retest both sides together.
+
+### Staff impersonation
+
+Issue a short-lived token for a client's own account and redirect into the
+portal holding it.
+
+```php
+'impersonation' => [
+    'enabled' => true,
+    'permission' => 'Impersonate Client',
+    'target_column' => 'company_contact_id',
+    'expires_minutes' => 60,
+    'log_model' => \App\Models\ImpersonationLog::class, // or false to log nothing
+],
+```
+
+- `POST /ajax/impersonateClient` `{id}` → `{url}` (session + permission gated)
+- `POST /api/validateImpersonationToken` `{token}` → the whitelisted user payload
+
+The redirect URL is built from `config('portal.url')` (override with
+`impersonation.portal_url`), guarding against a doubled `/portal` segment.
+
+The security shape is the point:
+
+- only tokens named `impersonation-token%` are revoked when a new one is issued —
+  the client's own login tokens survive, or staff opening an account would sign
+  the client out of their portal;
+- the validate endpoint verifies the plaintext against the stored hash
+  (`PersonalAccessToken::findToken`) rather than trusting an id, and rejects any
+  token that is not an impersonation token, so a stolen portal token cannot be
+  laundered into a session through it;
+- it answers with a **whitelisted** payload only. It is unauthenticated and its
+  token travels in a URL; serializing the model would hand whoever holds that URL
+  the client's live OTP hash and portal data.
+
+The acting staff id is encoded in the token name, because `Auth::user()` during
+an impersonated request is the *client*:
+
+```php
+use Visnsstudio\VisnsPackages\Support\ImpersonationActor;
+
+ImpersonationActor::id();              // the real human, or null
+ImpersonationActor::isImpersonating(); // bool
+```
+
+Publish and run the audit-log migration
+(`vendor:publish --tag=visns-packages-migrations`), or point `log_model` at your
+own class. The migration no-ops if the table already exists.
+
+### Zoom Phone call queue pop
+
+Receives Zoom Phone events, keeps a table of what is ringing right now, and
+broadcasts it to every monitoring browser.
+
+```php
+'call_queue' => [
+    'enabled' => true,
+    'webhook_secret_token' => env('ZOOM_WEBHOOK_SECRET_TOKEN'),
+    'append_env_suffix' => true,     // dev and prod sharing one Pusher app
+    'caller_enrichment' => \App\Helpers\CallerClientPreview::class,
+    'api' => [/* ZOOM_ACCOUNT_ID, ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET */],
+],
+```
+
+| Method | URI | Guard |
+| --- | --- | --- |
+| POST | `/api/zoom/webhook` | signature only |
+| GET | `/ajax/call-queue/live` | `permission:Call Queue Monitor` |
+| GET | `/ajax/call-queue/settings` | `permission:Call Queue Settings` |
+| PUT | `/ajax/call-queue/settings/{queueId}` | `permission:Call Queue Settings` |
+
+Broadcasts `CallQueueRinging` / `Answered` / `Ended` as `ShouldBroadcastNow` on
+the private channel `call_queue.channel` (default `call-queue-monitor`). Set
+`append_env_suffix` when environments share one Pusher app, or dev broadcasts
+land in production browsers. The package authorizes the channel itself against
+the monitor permission; set `register_broadcast_channel => false` to do it
+yourself in `routes/channels.php`. The front end should read the channel name
+from `/ajax/call-queue/live` rather than hardcoding it.
+
+**Dispatching your own event classes.** An application that already has
+`App\Events\CallQueue*` — with listeners and tests written against them — cannot
+be reached by dispatching the package's classes. Laravel's `Event::fake()` and
+its listener registry key on the **exact** class name, so a subclass, a
+`class_alias()` or a container binding is a different key and simply never
+matches. Name your classes instead:
+
+```php
+'call_queue' => ['events' => [
+    'ringing'  => \App\Events\CallQueueRinging::class,
+    'answered' => \App\Events\CallQueueAnswered::class,
+    'ended'    => \App\Events\CallQueueEnded::class,
+]],
+```
+
+**Required constructor contract** — a replacement is constructed with exactly the
+arguments the package class it replaces takes:
+
+| Key | Constructor |
+| --- | --- |
+| `ringing` | `__construct(ZoomLiveQueueCall $call)` |
+| `answered` | `__construct(string $callId)` |
+| `ended` | `__construct(string $callId)` |
+
+> The model handed to `ringing` is
+> **`Visnsstudio\VisnsPackages\Models\ZoomLiveQueueCall`**, not your application's
+> own model of the same name. If your event type-hints `App\Models\ZoomLiveQueueCall`
+> the call is a `TypeError` — widen the hint to the package model, or drop it.
+> This is the one edit adopting the module requires in an existing event class.
+
+Each key is independent; anything left unset keeps the package's own event. A
+class name that does not load falls back to the package event and logs a warning
+— a typo in config should cost the pop its custom listener, not stop the webhook
+recording calls at all.
+
+Behaviour worth knowing before you point Zoom at it:
+
+- The webhook answers **200 to everything** bar a bad signature. Zoom retries and
+  eventually *disables* endpoints that error or answer slowly.
+- An unset `webhook_secret_token` rejects every delivery. The endpoint is inert
+  rather than open while the Zoom app does not exist yet.
+- Zoom's queue events arrive in two shapes — sometimes the callee *is* the queue,
+  sometimes the queue only appears under `forwarded_by`. Both match.
+- Caller enrichment runs once, on the webhook thread, not in each watching
+  browser. Implement `Visnsstudio\VisnsPackages\Contracts\CallerEnrichment`; a
+  hook that throws costs the pop its client block, never the pop.
+- Per-queue pickup codes and pop exclusions live in `zoom_call_queue_settings`,
+  read through a 60-second cache that is busted on save. Codes are stored bare;
+  Zoom fixes a `*99` prefix, so `8781` is dialled `*998781`.
+
+> **Zoom API limit, proven and documented.** Saving a pickup code pushes the
+> policy to Zoom first and only stores the code if Zoom took it — but Zoom
+> applies the *enable* half and silently drops the digits. The digits still have
+> to be typed into the Zoom admin UI; this package's table is the source of truth
+> for what the pop dials. The payload carries the code anyway, so the day Zoom
+> honours it this starts working with no code change. The full write-up is in
+> `src/Services/Zoom/ZoomCallQueueService.php` — read it before re-investigating.
+
+**Substituting your own Zoom client.** The settings page's client is named in
+config and resolved through the container:
+
+```php
+'call_queue' => [
+    'zoom_service' => \App\Helpers\ZoomCallQueueService::class,
+],
+```
+
+A class **string**, never a closure, so the file survives `config:cache`. Because
+the container is asked for whatever class is named, an `instance()` or `bind()`
+double for *that* class is honoured — which is how a test suite guarantees no
+save reaches the live Zoom tenant:
+
+```php
+$this->app->instance(\App\Helpers\ZoomCallQueueService::class, $fake);
+```
+
+Required public contract. Your class need not extend anything here — it only has
+to answer these:
+
+| Method | Called by | Must return |
+| --- | --- | --- |
+| `listQueues(): array` | settings page load | `['success' => bool, 'queues' => array<int, array>, 'error' => string?]` — each queue keyed `id`, `name`, `extension_number`, `status`, `phone_numbers[0].number` |
+| `setPickupCode(string $queueId, string $code): array` | saving a code | `['success' => bool, 'http_code' => int?, 'error' => string?]`; `$code` is bare digits, no `*` |
+| `disablePickupCode(string $queueId): array` | clearing a code | same shape as above |
+| `getQueue(string $queueId): array` | — | not called by this package; present on its own client |
+| `getPolicies(string $queueId): array` | — | not called by this package; present on its own client |
+
+Only the first three are on the request path. `success => false` on either write
+returns 422 with your `error` as the message and stores nothing, so the pop can
+never advertise a code your client refused. A `zoom_service` naming a class that
+does not load falls back to the package's own client rather than 500-ing the
+settings page.
+
+The `call_queue.api.*` credentials are read by the **package's** client only; a
+replacement is built by the container and reads its own configuration.
+
+Two tables are needed; publish and run the migrations
+(`vendor:publish --tag=visns-packages-migrations`). Both no-op if the table
+already exists, so an application that already has them can adopt the module
+without a clash.
+
+### Middleware aliases
+
+The package fills in the aliases its own routes need — `zoom-webhook` and
+`zoom_webhook` (both spellings, so route definitions move across untouched) and,
+when Spatie is installed, `permission`. Each is only registered **if the
+application has not already claimed that name**: service providers boot after an
+application's own middleware registration, so a package that registered
+unconditionally would always win and silently change what every route carrying
+that name does.
+
+`accept-json` is the exception and is still registered unconditionally — it
+predates this rule, and changing it would alter which class an existing
+consumer's routes resolve to.
+
+### Testing
+
+```bash
+composer test          # the package's own suite, on Testbench + SQLite
+```
+
+The older tests under `tests/Unit` and `tests/Feature` extend `Tests\TestCase`
+and build `App\Models\User` factories — they only run from inside a consuming
+application, and are kept in an opt-in `Legacy` suite.
+
+The dev dependencies pin **Testbench 10 / Laravel 12**, deliberately: the package
+supports `>=11`, but session, guard and cookie behaviour differ between the two
+majors (see *Sessions and CSRF across a login*), and a suite that resolves the
+older major will happily green-light code that is broken for a consumer on the
+newer one. Test against the major your consumers run.
 
 ## File Management
 
