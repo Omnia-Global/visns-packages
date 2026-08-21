@@ -91,4 +91,54 @@ class PhoneNumberTest extends TestCase
         $this->assertTrue(PhoneNumber::matches('304', '#304'));
         $this->assertFalse(PhoneNumber::matches('304', '305'));
     }
+
+    /**
+     * @return array<string, array{0: string, 1: bool}>
+     */
+    public static function mobileOrNot(): array
+    {
+        return [
+            'an Australian mobile' => ['+61412345678', true],
+            'an Australian mobile on 045' => ['+61455123456', true],
+            'a Perth landline' => ['+61893752549', false],
+            'a Sydney landline' => ['+61298765432', false],
+            'an Australian 1300 number' => ['+611300123456', false],
+            'a US number, country unknown' => ['+14155552671', true],
+            'a New Zealand mobile' => ['+64211234567', true],
+            'not E.164 at all' => ['0412 345 678', false],
+            'too short for E.164' => ['+123456', false],
+            'too long for E.164' => ['+1234567890123456', false],
+            'empty' => ['', false],
+        ];
+    }
+
+    /**
+     * Which numbers an SMS can actually reach.
+     *
+     * The landline row is the one with a cost attached: it normalises cleanly,
+     * so nothing upstream refuses it, and a message sent to it is billed and
+     * recorded against the client without ever being read.
+     */
+    #[DataProvider('mobileOrNot')]
+    public function test_it_knows_which_numbers_can_receive_a_text(string $e164, bool $expected): void
+    {
+        $this->assertSame($expected, PhoneNumber::isMobile($e164));
+    }
+
+    public function test_an_unknown_number_outside_australia_is_taken_on_trust(): void
+    {
+        // Telling a French mobile from a French landline needs metadata this
+        // package does not carry; refusing every overseas number outright
+        // would be the worse of the two mistakes.
+        $this->assertTrue(PhoneNumber::isMobile('+33612345678'));
+        $this->assertTrue(PhoneNumber::isMobile('+33145678901'));
+
+        // Australia is the one plan it does know, so it is held to it.
+        $this->assertFalse(PhoneNumber::isMobile('+61393752549'));
+    }
+
+    public function test_a_null_is_not_a_mobile(): void
+    {
+        $this->assertFalse(PhoneNumber::isMobile(null));
+    }
 }

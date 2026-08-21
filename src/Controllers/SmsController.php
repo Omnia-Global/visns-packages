@@ -208,6 +208,19 @@ class SmsController extends \App\Http\Controllers\Controller
             ], 422);
         }
 
+        if (! PhoneNumber::isMobile($e164)) {
+            // A landline parses perfectly and is still the wrong number: the
+            // message would be billed, recorded against the client, and never
+            // read. The wording is the compose box's own, so a person who got
+            // past the field's warning is not told a second, different story.
+            $landline = 'That looks like a landline; SMS needs a mobile number.';
+
+            return response()->json([
+                'message' => $landline,
+                'errors' => ['to' => [$landline]],
+            ], 422);
+        }
+
         $thread = SmsThread::findOrCreateFor($line, $e164, $this->sms->clientResolver());
 
         $message = null;

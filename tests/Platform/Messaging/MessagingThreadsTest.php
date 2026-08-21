@@ -93,6 +93,35 @@ class MessagingThreadsTest extends MessagingTestCase
         $this->assertSame(0, SmsThread::count());
     }
 
+    public function test_a_landline_is_refused_because_an_sms_cannot_reach_one(): void
+    {
+        $member = $this->member();
+        $line = $this->line([$member]);
+
+        // It parses - that is the problem. Nothing else in the chain would
+        // stop it, and the client would never see the message.
+        $this->actingAs($member)
+            ->postJson(self::BASE . '/threads', ['line_id' => $line->id, 'to' => '08 9375 2549'])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'That looks like a landline; SMS needs a mobile number.')
+            ->assertJsonPath('errors.to.0', 'That looks like a landline; SMS needs a mobile number.');
+
+        $this->assertSame(0, SmsThread::count());
+    }
+
+    public function test_an_overseas_number_is_still_allowed_through(): void
+    {
+        $member = $this->member();
+        $line = $this->line([$member]);
+
+        // Only Australia has a numbering plan this module knows; refusing
+        // every number outside it would be the worse mistake.
+        $this->actingAs($member)
+            ->postJson(self::BASE . '/threads', ['line_id' => $line->id, 'to' => '+14155552671'])
+            ->assertStatus(201)
+            ->assertJsonPath('thread.external_number', '+14155552671');
+    }
+
     public function test_a_thread_cannot_be_started_on_a_line_the_user_cannot_see(): void
     {
         $member = $this->member();

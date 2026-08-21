@@ -131,6 +131,39 @@ class PhoneNumber
     }
 
     /**
+     * Can this E.164 number receive a text message?
+     *
+     * Only Australia is answered properly, because Australia is the only
+     * country whose numbering plan this class carries: +614 followed by eight
+     * digits is a mobile, and everything else in +61 is not. A landline is the
+     * case that matters - some carriers turn an SMS to one into a synthesised
+     * voice call at the sender's expense, most drop it silently, and either way
+     * the client never sees the message.
+     *
+     * Outside +61 the honest answer is "unknown", and unknown is returned as
+     * true: refusing every overseas number would be a worse lie than accepting
+     * one that turns out to be a landline, and telling a French mobile from a
+     * French landline needs the metadata blob this package deliberately does
+     * not carry. Anything that is not E.164 at all is false - callers are
+     * expected to have run toE164() first, and a null from that is already a
+     * 422.
+     */
+    public static function isMobile(?string $e164): bool
+    {
+        $e164 = trim((string) $e164);
+
+        if (! preg_match('/^\+[1-9]\d{7,14}$/', $e164)) {
+            return false;
+        }
+
+        if (str_starts_with($e164, '+61')) {
+            return (bool) preg_match('/^\+614\d{8}$/', $e164);
+        }
+
+        return true;
+    }
+
+    /**
      * The readable form, for a UI that would otherwise show every Australian
      * number as +61.
      *
