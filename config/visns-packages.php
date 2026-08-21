@@ -924,6 +924,83 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Vault (staff password manager)
+    |--------------------------------------------------------------------------
+    |
+    | A shared credential store for staff: a title, a username, a URL, an
+    | encrypted password, an encrypted TOTP seed and encrypted notes. Ships
+    | disabled - no routes, no tables read, nothing to publish - so upgrading
+    | without touching config changes nothing.
+    |
+    | THREAT MODEL, in one sentence: anyone holding APP_KEY plus a database dump
+    | can read the vault. The three secret columns are encrypted with the
+    | application key, which means the key is the whole of the protection - keep
+    | it out of the repository, rotate it through APP_PREVIOUS_KEYS and
+    | `php artisan vault:reencrypt`, and treat the "Vault Manage" permission as
+    | the administrative grant it is.
+    |
+    | Two tables are needed (published with the package's migrations):
+    | `vault_entries` and `vault_access_logs`. Permissions are NOT seeded here -
+    | the application owns its permission table; create the two names below in
+    | your own seeder.
+    |
+    */
+    'vault' => [
+        'enabled' => false,
+
+        // Every endpoint hangs off this one base, so an application can move
+        // the whole module with a single key.
+        'uris' => [
+            'base' => 'ajax/vault',
+        ],
+
+        // The vault is not something an anonymous session may reach, so 'auth'
+        // is part of the default rather than left to the package-wide stack.
+        'routes_middleware' => ['web', 'auth'],
+
+        /*
+        | `access` is the permission to use the vault at all; `manage` is the
+        | administrative grant - shared entries, other people's entries, restore
+        | and the access log. Set either to null to gate it some other way.
+        */
+        'permissions' => [
+            'access' => 'Vault Access',
+            'manage' => 'Vault Manage',
+        ],
+
+        // How long a password confirmation keeps revealing passwords unlocked.
+        'confirmation_ttl_minutes' => 10,
+
+        /*
+        | Laravel throttle strings, "<max>,<minutes>". `reveal` covers the
+        | password reveal and the TOTP code (a code is re-fetched every period,
+        | so it has to be generous); `confirm` is deliberately tight - it guards
+        | a password check.
+        */
+        'throttle' => [
+            'reveal' => '60,1',
+            'confirm' => '5,1',
+        ],
+
+        'tables' => [
+            'entries' => 'vault_entries',
+            'access_logs' => 'vault_access_logs',
+        ],
+
+        // Null = the package-wide `user_model`.
+        'user_model' => null,
+
+        /*
+        | Columns the list search runs a LIKE over. Whitelisted against the
+        | entry table's own non-secret columns at query time, so an unknown or
+        | secret column name here is dropped rather than trusted. The tags
+        | column is always searched as text in addition to these.
+        */
+        'search_columns' => ['title', 'username', 'url'],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Two-Factor Authentication App Name
     |--------------------------------------------------------------------------
     |
