@@ -5,6 +5,8 @@ namespace Visnsstudio\VisnsPackages;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Route;
 use Visnsstudio\VisnsPackages\Commands\PublishMigrationsCommand;
+use Visnsstudio\VisnsPackages\Commands\VaultPruneLogCommand;
+use Visnsstudio\VisnsPackages\Commands\VaultReencryptCommand;
 use Visnsstudio\VisnsPackages\Commands\InstallChromiumCommand;
 use Visnsstudio\VisnsPackages\Commands\MeilisearchConfigureCommand;
 use Visnsstudio\VisnsPackages\Commands\MeilisearchDebugCommand;
@@ -27,12 +29,14 @@ use Visnsstudio\VisnsPackages\Controllers\ProposalTemplateController;
 use Visnsstudio\VisnsPackages\Controllers\BrandingProfileController;
 use Visnsstudio\VisnsPackages\Controllers\OAuthController;
 use Visnsstudio\VisnsPackages\Middleware\AcceptJson;
+use Visnsstudio\VisnsPackages\Middleware\EnsureVaultPasswordConfirmed;
 use Visnsstudio\VisnsPackages\Middleware\VerifyZoomWebhookSignature;
 use Visnsstudio\VisnsPackages\Controllers\OtpController;
 use Visnsstudio\VisnsPackages\Controllers\ImpersonationController;
 use Visnsstudio\VisnsPackages\Controllers\ZoomWebhookController;
 use Visnsstudio\VisnsPackages\Controllers\CallQueueController;
 use Visnsstudio\VisnsPackages\Controllers\CallQueueSettingsController;
+use Visnsstudio\VisnsPackages\Controllers\VaultController;
 use Visnsstudio\VisnsPackages\Services\FilePathResolver;
 use Visnsstudio\VisnsPackages\Services\OAuthManager;
 
@@ -50,6 +54,13 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             PublishMigrationsCommand::class,
             InstallChromiumCommand::class,
             UpdateModelsWithRelationshipSorting::class,
+
+            // Vault maintenance. Registered unconditionally: a key rotation or
+            // a log prune has to be runnable on an application that has just
+            // turned the module off, and neither command touches a table it was
+            // not asked about.
+            VaultReencryptCommand::class,
+            VaultPruneLogCommand::class,
         ];
 
         // Only register MeiliSearch commands if dependencies are available
@@ -190,6 +201,15 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             $router,
             'zoom_webhook',
             VerifyZoomWebhookSignature::class
+        );
+
+        // The vault's "confirm your password again" gate. Named rather than
+        // referenced by class so an application can point the name at its own
+        // stricter implementation.
+        $this->aliasMiddlewareUnlessClaimed(
+            $router,
+            'vault.confirmed',
+            EnsureVaultPasswordConfirmed::class
         );
 
         // The opt-in modules gate their routes with `permission:...`, an alias
@@ -641,6 +661,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                 $apiPrefix
             );
             $this->registerCallQueueRoutes($middleware, $prefix);
+            $this->registerVaultRoutes($middleware, $prefix);
 
             // Register dynamic entity routes first (they will be more general)
             $this->registerDynamicEntityRoutes();
@@ -818,6 +839,132 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                     'update',
                 ]);
             });
+    }
+
+
+    /**
+     * Vault: staff password manager.
+     *
+     * Everything hangs off one configurable base (`ajax/vault` by default), and
+     * everything carries the access permission. Three details in here are load
+     * bearing:
+     *
+     *  - `{id}` is constrained to digits. Without that, `GET {base}/log` is
+     *    swallowed by `GET {base}/{id}` and the administrator's log endpoint
+     *    quietly becomes "show me the entry called log", 404ing forever.
+     *
+     *  - The literal routes are registered BEFORE the `{id}` ones anyway. The
+     *    constraint alone is enough, but relying on a single guard for a routing
+     *    collision that fails silently is not worth the saving.
+     *
+     *  - Reveal is the only route carrying `vault.confirmed`. The access
+     *    permission gets a session as far as titles and usernames; getting a
+     *    plaintext password out needs the user to prove, again and recently,
+     *    that they are the person the session belongs to.
+     *
+     * @return void
+     */
+    protected function registerVaultRoutes(array $middleware, string $prefix)
+    {
+        if (!config('visns-packages.vault.enabled', false)) {
+            return;
+        }
+
+        $base = trim(
+            (string) config('visns-packages.vault.uris.base', 'ajax/vault'),
+            '/'
+        );
+
+        if ($base === '') {
+            $base = 'ajax/vault';
+        }
+
+        $routeMiddleware =
+            config('visns-packages.vault.routes_middleware') ?: $middleware;
+
+        $access = config(
+            'visns-packages.vault.permissions.access',
+            'Vault Access'
+        );
+
+
+        $accessMiddleware = $this->withPermission($routeMiddleware, $access);
+
+        $reveal = $this->withThrottle(
+            $accessMiddleware,
+            config('visns-packages.vault.throttle.reveal')
+        );
+
+        $confirm = $this->withThrottle(
+            $accessMiddleware,
+            config('visns-packages.vault.throttle.confirm')
+        );
+
+        Route::middleware($accessMiddleware)
+            ->prefix($prefix)
+            ->group(function () use ($base, $reveal, $confirm) {
+                // Literal segments first; see the docblock.
+                Route::get($base . '/log', [VaultController::class, 'logIndex']);
+
+                Route::middleware($confirm)->post(
+                    $base . '/confirm-password',
+                    [VaultController::class, 'confirmPassword']
+                );
+
+                Route::get($base, [VaultController::class, 'index']);
+                Route::post($base, [VaultController::class, 'store']);
+
+                Route::get($base . '/{id}', [VaultController::class, 'show'])
+                    ->whereNumber('id');
+                Route::put($base . '/{id}', [VaultController::class, 'update'])
+                    ->whereNumber('id');
+                Route::delete($base . '/{id}', [VaultController::class, 'destroy'])
+                    ->whereNumber('id');
+
+                Route::post($base . '/{id}/restore', [
+                    VaultController::class,
+                    'restore',
+                ])->whereNumber('id');
+
+                Route::post($base . '/{id}/log', [VaultController::class, 'log'])
+                    ->whereNumber('id');
+                Route::get($base . '/{id}/log', [
+                    VaultController::class,
+                    'entryLog',
+                ])->whereNumber('id');
+
+                // The two that hand out secrets.
+                Route::middleware(
+                    array_merge($reveal, ['vault.confirmed'])
+                )->post($base . '/{id}/reveal', [
+                    VaultController::class,
+                    'reveal',
+                ])->whereNumber('id');
+
+                Route::middleware($reveal)->get($base . '/{id}/otp', [
+                    VaultController::class,
+                    'otp',
+                ])->whereNumber('id');
+            });
+    }
+
+    /**
+     * Append Laravel's throttle middleware to a stack, unless the limit has been
+     * configured away.
+     *
+     * The config value is the bare "<max>,<minutes>" string rather than a named
+     * limiter, so an application can retune a limit in config without having to
+     * register a RateLimiter in a service provider first.
+     *
+     * @return array<int, string>
+     */
+    protected function withThrottle(array $middleware, $limit): array
+    {
+        if (!is_string($limit) || trim($limit) === '') {
+            return $middleware;
+        }
+
+        return array_merge($middleware, ['throttle:' . trim($limit)]);
     }
 
     /**
