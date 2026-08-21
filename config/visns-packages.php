@@ -1177,6 +1177,26 @@ return [
         */
         'client_search' => null,
 
+        /*
+        | Client id -> the detail a template needs. An invokable taking the
+        | thread's stored client_id and returning
+        |
+        |   ['first_name' => 'Cleo', 'last_name' => 'Client',
+        |    'name' => 'Client, Cleo (Ms)',
+        |    'next_event' => ['title' => 'Annual review',
+        |                     'date'  => '2026-08-24T14:30:00+08:00']]
+        |
+        | Merged into the `client` block of ONE opened thread (never the list),
+        | so the composer can fill `{first_name}`, `{date}` and `{time}` when a
+        | template is inserted. The thread's own id and name stay authoritative
+        | - a hook that returns an empty name does not blank the label a human
+        | typed.
+        |
+        | Every key is optional, and a throwing hook costs the placeholders,
+        | never the conversation.
+        */
+        'client_details' => null,
+
         // Threads per page in the inbox list.
         'page_size' => 50,
 

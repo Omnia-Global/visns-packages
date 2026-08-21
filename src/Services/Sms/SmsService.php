@@ -329,6 +329,19 @@ class SmsService
     }
 
     /**
+     * The application's client id -> detail hook, or null.
+     *
+     * Called only when ONE conversation is opened, never for a list: this is
+     * the block the composer fills a template's `{first_name}` / `{date}` from,
+     * and running a per-client query for fifty inbox rows to fill placeholders
+     * nobody is typing would be fifty queries for nothing.
+     */
+    public function clientDetails(): ?callable
+    {
+        return ModuleConfig::callable('messaging.client_details');
+    }
+
+    /**
      * Dispatch one of the module's two events, honouring the class configured
      * for it.
      *

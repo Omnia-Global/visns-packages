@@ -1239,6 +1239,7 @@ numbers the CRM does not recognise.
     ],
     'client_resolver' => null,      // (string $e164) => ['id'=>..,'name'=>..]|null
     'client_search' => null,        // (string $q) => [['id'=>..,'name'=>..,'numbers'=>[...]]]
+    'client_details' => null,       // (int|string $clientId) => ['first_name'=>..,'next_event'=>..]|null
     'page_size' => 50,
     'max_body_length' => 1600,
     'zoom' => ['api' => null, 'send_path' => '/phone/sms/messages'],
@@ -1327,7 +1328,7 @@ it keeps a working inbox.
 | GET | `{base}/unread` | — | `{total, by_line: {}, by_thread: {}}`. Deliberately cheap: one grouped query. Poll it every 30s as a backstop to the broadcast. |
 | GET | `{base}/threads` | — | Paginated. `line_id`, `search`, `unread_only`, `archived`, `page`, `per_page` (≤100). Ordered by `last_message_at` desc. |
 | POST | `{base}/threads` | — | `{line_id, to, body?}` → find-or-create the thread for the normalised `to`, optionally send `body`. 201 `{thread, message\|null}`. 422 on a number that cannot be read. |
-| GET | `{base}/threads/{id}` | — | `{thread, messages[], has_more}`, oldest→newest. `before=<message id>`, `limit` (≤200). **Marks the thread read for this user.** |
+| GET | `{base}/threads/{id}` | — | `{thread, messages[], has_more}`, oldest→newest. `before=<message id>`, `limit` (≤200). **Marks the thread read for this user.** `thread.client` is enriched by `client_details` here and nowhere else. |
 | POST | `{base}/threads/{id}/messages` | — | `{body}` (≤ `max_body_length`) → 201 `{message, thread}`. Sends synchronously and reports the real status. |
 | POST | `{base}/threads/{id}/read` | — | 204. |
 | POST | `{base}/threads/{id}/archive` · `/unarchive` | — | 204. |
@@ -1405,6 +1406,24 @@ the message.
 `client_search` takes the typed term and returns
 `[['id' => .., 'name' => .., 'numbers' => [['label' => 'Mobile', 'number' => '+61...']]]]`.
 Unset means the composer simply has no search; the number box still works.
+
+`client_details` is what makes a **template** worth having. It takes the thread's
+stored `client_id` and returns the detail a placeholder needs:
+
+```php
+['first_name' => 'Cleo', 'last_name' => 'Client', 'name' => 'Client, Cleo (Ms)',
+ 'next_event' => ['title' => 'Annual review', 'date' => '2026-08-24T14:30:00+08:00']]
+```
+
+Every key is optional. The result is merged into the `client` block of
+`GET {base}/threads/{id}` — **that one endpoint only**, never the inbox list,
+because fifty rows would be fifty lookups for placeholders nobody is typing —
+and the front end fills `{first_name}`, `{last_name}`, `{name}`, `{date}` and
+`{time}` from it when a template is inserted. The thread's own `id` is never
+overwritten and its `name` survives unless the hook returns a non-empty one, so
+a conversation a human linked and labelled by hand keeps that label. A missing
+or throwing hook costs the placeholders, never the conversation: an unfilled
+token is left verbatim for the sender to type over.
 
 #### Transactional SMS: login codes and OTPs
 

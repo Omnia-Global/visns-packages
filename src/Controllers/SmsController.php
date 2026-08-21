@@ -3,6 +3,7 @@
 namespace Visnsstudio\VisnsPackages\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Visnsstudio\VisnsPackages\Models\SmsLine;
 use Visnsstudio\VisnsPackages\Models\SmsMessage;
 use Visnsstudio\VisnsPackages\Models\SmsThread;
@@ -253,7 +254,7 @@ class SmsController extends \App\Http\Controllers\Controller
         $this->markRead($thread, $user);
 
         return response()->json([
-            'thread' => SmsPayload::thread($thread->fresh(), $user),
+            'thread' => $this->withClientDetails(SmsPayload::thread($thread->fresh(), $user)),
             'messages' => $messages->map(fn (SmsMessage $m) => SmsPayload::message($m))->values(),
             'has_more' => $hasMore,
         ]);
@@ -373,7 +374,7 @@ class SmsController extends \App\Http\Controllers\Controller
             $results = $search($term);
         } catch (\Throwable $e) {
             // A broken hook costs the search box, never the page.
-            \Illuminate\Support\Facades\Log::warning('sms client search failed', [
+            Log::warning('sms client search failed', [
                 'error' => $e->getMessage(),
             ]);
 
@@ -466,6 +467,72 @@ class SmsController extends \App\Http\Controllers\Controller
         $newest = $thread->messages()->max('id');
 
         SmsThreadRead::markRead((int) $thread->id, $userId, $newest === null ? null : (int) $newest);
+    }
+
+    /**
+     * Fatten one opened thread's `client` block with whatever the application
+     * knows about that client - the first name, the surname, the next meeting.
+     *
+     * This is what makes a template worth having: a body reading "Hi
+     * {first_name}, a reminder of your review on {date}" is only useful if the
+     * composer can fill it, and the composer can only fill it from what came
+     * down with the thread.
+     *
+     * Three deliberate limits:
+     *
+     *  - **Show only.** The inbox list does not call it; see
+     *    SmsService::clientDetails().
+     *  - **The thread wins on identity.** `id` as stored on the thread is
+     *    never overwritten, and neither is `name` unless the hook returns a
+     *    non-empty one - a human may have linked and named this conversation by
+     *    hand, and a hook with nothing to say must not blank that.
+     *  - **Best effort.** A missing hook, a hook returning nothing, or a hook
+     *    that throws all leave the block exactly as the payload built it. A
+     *    placeholder left unfilled is a small annoyance; a conversation that
+     *    will not open is not.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function withClientDetails(array $payload): array
+    {
+        $client = $payload['client'] ?? null;
+
+        if (! is_array($client) || ($client['id'] ?? null) === null) {
+            return $payload;
+        }
+
+        $hook = $this->sms->clientDetails();
+
+        if ($hook === null) {
+            return $payload;
+        }
+
+        try {
+            $extra = $hook($client['id']);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('sms.client-details hook failed', [
+                'client_id' => $client['id'],
+                'error' => $e->getMessage(),
+            ]);
+
+            return $payload;
+        }
+
+        if (! is_array($extra) || $extra === []) {
+            return $payload;
+        }
+
+        $name = $client['name'];
+
+        $payload['client'] = array_merge($client, $extra, ['id' => $client['id']]);
+
+        // The hook may enrich the name, never erase it.
+        if (trim((string) ($extra['name'] ?? '')) === '') {
+            $payload['client']['name'] = $name;
+        }
+
+        return $payload;
     }
 
     /**

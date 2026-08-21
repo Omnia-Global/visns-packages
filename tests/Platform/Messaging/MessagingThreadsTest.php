@@ -4,6 +4,7 @@ namespace Visnsstudio\VisnsPackages\Tests\Platform\Messaging;
 
 use Visnsstudio\VisnsPackages\Models\SmsMessage;
 use Visnsstudio\VisnsPackages\Models\SmsThread;
+use Visnsstudio\VisnsPackages\Tests\Fixtures\Messaging\StubClientDetails;
 use Visnsstudio\VisnsPackages\Tests\Fixtures\Messaging\StubClientResolver;
 use Visnsstudio\VisnsPackages\Tests\Fixtures\Messaging\StubClientSearch;
 
@@ -16,6 +17,7 @@ class MessagingThreadsTest extends MessagingTestCase
     {
         parent::setUp();
 
+        StubClientDetails::reset();
         StubClientResolver::reset();
         StubClientSearch::reset();
     }
@@ -461,6 +463,166 @@ class MessagingThreadsTest extends MessagingTestCase
             ->assertJsonPath('thread.client', null);
 
         $this->assertNull($thread->fresh()->client_name);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Client details, for the composer's placeholders
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_opening_a_thread_enriches_its_client_block_from_the_details_hook(): void
+    {
+        $this->app['config']->set(
+            'visns-packages.messaging.client_details',
+            StubClientDetails::class
+        );
+
+        $member = $this->member();
+        $line = $this->line([$member]);
+        $thread = $this->thread($line, '+61412345678', [
+            'client_id' => 42,
+            'client_name' => 'Client, Cleo (Ms)',
+        ]);
+
+        $this->actingAs($member)
+            ->getJson(self::BASE . '/threads/' . $thread->id)
+            ->assertOk()
+            ->assertJsonPath('thread.client.id', 42)
+            // The stub answers with no name of its own, so the one a human
+            // linked survives.
+            ->assertJsonPath('thread.client.name', 'Client, Cleo (Ms)')
+            ->assertJsonPath('thread.client.first_name', 'Cleo')
+            ->assertJsonPath('thread.client.last_name', 'Client')
+            ->assertJsonPath('thread.client.next_event.title', 'Annual review')
+            ->assertJsonPath('thread.client.next_event.date', '2026-08-24T14:30:00+08:00');
+
+        $this->assertSame([42], StubClientDetails::$calls);
+    }
+
+    public function test_a_details_hook_may_correct_the_name_but_never_blank_it(): void
+    {
+        $this->app['config']->set(
+            'visns-packages.messaging.client_details',
+            StubClientDetails::class
+        );
+        StubClientDetails::$answer = ['id' => 999, 'name' => '', 'first_name' => 'Cleo'];
+
+        $member = $this->member();
+        $line = $this->line([$member]);
+        $thread = $this->thread($line, '+61412345678', [
+            'client_id' => 42,
+            'client_name' => 'Client, Cleo (Ms)',
+        ]);
+
+        $this->actingAs($member)
+            ->getJson(self::BASE . '/threads/' . $thread->id)
+            ->assertOk()
+            // The hook cannot move the conversation to another client, nor
+            // wipe the label somebody typed.
+            ->assertJsonPath('thread.client.id', 42)
+            ->assertJsonPath('thread.client.name', 'Client, Cleo (Ms)')
+            ->assertJsonPath('thread.client.first_name', 'Cleo');
+
+        StubClientDetails::$answer = ['name' => 'Client, Cleopatra (Ms)'];
+
+        $this->actingAs($member)
+            ->getJson(self::BASE . '/threads/' . $thread->id)
+            ->assertOk()
+            ->assertJsonPath('thread.client.name', 'Client, Cleopatra (Ms)');
+    }
+
+    public function test_a_thread_with_no_client_never_calls_the_details_hook(): void
+    {
+        $this->app['config']->set(
+            'visns-packages.messaging.client_details',
+            StubClientDetails::class
+        );
+
+        $member = $this->member();
+        $line = $this->line([$member]);
+        $thread = $this->thread($line);
+
+        $this->actingAs($member)
+            ->getJson(self::BASE . '/threads/' . $thread->id)
+            ->assertOk()
+            ->assertJsonPath('thread.client', null);
+
+        $this->assertSame([], StubClientDetails::$calls);
+    }
+
+    public function test_no_details_hook_leaves_the_client_block_as_it_was(): void
+    {
+        $member = $this->member();
+        $line = $this->line([$member]);
+        $thread = $this->thread($line, '+61412345678', [
+            'client_id' => 42,
+            'client_name' => 'Client, Cleo (Ms)',
+        ]);
+
+        $this->actingAs($member)
+            ->getJson(self::BASE . '/threads/' . $thread->id)
+            ->assertOk()
+            ->assertExactJson([
+                'thread' => [
+                    'id' => $thread->id,
+                    'line_id' => $line->id,
+                    'external_number' => '+61412345678',
+                    'display_number' => $thread->display_number,
+                    'client' => ['id' => 42, 'name' => 'Client, Cleo (Ms)'],
+                    'contact_name' => null,
+                    'last_message' => null,
+                    'unread_count' => 0,
+                    'archived_at' => null,
+                    'updated_at' => $thread->fresh()->updated_at?->toIso8601String(),
+                ],
+                'messages' => [],
+                'has_more' => false,
+            ]);
+    }
+
+    public function test_a_throwing_details_hook_costs_the_placeholders_not_the_conversation(): void
+    {
+        $this->app['config']->set(
+            'visns-packages.messaging.client_details',
+            StubClientDetails::class
+        );
+        StubClientDetails::$shouldThrow = true;
+
+        $member = $this->member();
+        $line = $this->line([$member]);
+        $thread = $this->thread($line, '+61412345678', [
+            'client_id' => 42,
+            'client_name' => 'Client, Cleo (Ms)',
+        ]);
+
+        $this->actingAs($member)
+            ->getJson(self::BASE . '/threads/' . $thread->id)
+            ->assertOk()
+            ->assertJsonPath('thread.client', ['id' => 42, 'name' => 'Client, Cleo (Ms)']);
+    }
+
+    public function test_the_inbox_list_is_not_enriched(): void
+    {
+        $this->app['config']->set(
+            'visns-packages.messaging.client_details',
+            StubClientDetails::class
+        );
+
+        $member = $this->member();
+        $line = $this->line([$member]);
+        $this->thread($line, '+61412345678', [
+            'client_id' => 42,
+            'client_name' => 'Client, Cleo (Ms)',
+        ]);
+
+        // Fifty rows would be fifty lookups, for placeholders nobody is typing.
+        $this->actingAs($member)
+            ->getJson(self::BASE . '/threads')
+            ->assertOk()
+            ->assertJsonPath('data.0.client', ['id' => 42, 'name' => 'Client, Cleo (Ms)']);
+
+        $this->assertSame([], StubClientDetails::$calls);
     }
 
     /*
