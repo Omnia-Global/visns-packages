@@ -147,6 +147,8 @@ class SmsController extends \App\Http\Controllers\Controller
             }
         }
 
+        $this->applyClientFilter($query, $request);
+
         // Archived threads are out of the way by default; `archived=1` is the
         // archive view, and there is deliberately no "both" - a list mixing
         // them would make the archive button look like it did nothing.
@@ -457,6 +459,32 @@ class SmsController extends \App\Http\Controllers\Controller
         return $thread;
     }
 
+    /**
+     * Narrow a thread list to one client.
+     *
+     * What makes a client page's "SMS" tab possible: the same list endpoint,
+     * across every line the user can work, showing only the conversations
+     * linked to that client record.
+     *
+     * Deliberately NOT a widening of visibility. The filter is applied on top
+     * of `visibleTo`, so a conversation with this client on a line the user is
+     * not on stays invisible - a client page must not become a way around the
+     * line pivot.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder  $query
+     */
+    private function applyClientFilter($query, Request $request): void
+    {
+        if (! $request->filled('client_id')) {
+            return;
+        }
+
+        // A non-numeric id casts to 0, which matches nothing - the right
+        // answer for a filter, where "no such client" and "no conversations"
+        // read the same on screen.
+        $query->where('client_id', (int) $request->input('client_id'));
+    }
+
     private function canSeeLine($user, bool $manages, int $lineId): bool
     {
         if ($manages) {
@@ -615,6 +643,8 @@ class SmsController extends \App\Http\Controllers\Controller
         if ($request->filled('line_id')) {
             $query->where('line_id', (int) $request->input('line_id'));
         }
+
+        $this->applyClientFilter($query, $request);
 
         if ($request->boolean('archived')) {
             $query->whereNotNull('archived_at');

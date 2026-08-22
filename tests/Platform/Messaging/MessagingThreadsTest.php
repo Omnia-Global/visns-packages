@@ -241,6 +241,97 @@ class MessagingThreadsTest extends MessagingTestCase
             ->assertJsonCount(1, 'data');
     }
 
+    public function test_threads_can_be_narrowed_to_one_client(): void
+    {
+        $member = $this->member();
+        $line = $this->line([$member]);
+        $other = $this->line([$member]);
+
+        // The same client, texting two of the practice's numbers.
+        $mobile = $this->thread($line, '+61400000001', [
+            'client_id' => 77,
+            'client_name' => 'Cleo Client',
+            'last_message_at' => now(),
+        ]);
+        $second = $this->thread($other, '+61400000002', [
+            'client_id' => 77,
+            'client_name' => 'Cleo Client',
+            'last_message_at' => now()->subHour(),
+        ]);
+
+        // Somebody else entirely, and an unlinked conversation.
+        $this->thread($line, '+61400000003', ['client_id' => 78, 'last_message_at' => now()]);
+        $this->thread($line, '+61400000004', ['last_message_at' => now()]);
+
+        $ids = $this->actingAs($member)
+            ->getJson(self::BASE . '/threads?client_id=77')
+            ->assertOk()
+            ->json('data.*.id');
+
+        $this->assertSame([$mobile->id, $second->id], $ids);
+    }
+
+    public function test_the_client_filter_does_not_reach_lines_the_user_is_not_on(): void
+    {
+        $member = $this->member();
+        $mine = $this->line([$member]);
+        $theirs = $this->line();
+
+        $visible = $this->thread($mine, '+61400000001', [
+            'client_id' => 77,
+            'last_message_at' => now(),
+        ]);
+
+        // The same client, on a line this user was never attached to. A client
+        // page must not become a way around the line pivot.
+        $this->thread($theirs, '+61400000002', [
+            'client_id' => 77,
+            'last_message_at' => now(),
+        ]);
+
+        $this->assertSame(
+            [$visible->id],
+            $this->actingAs($member)->getJson(self::BASE . '/threads?client_id=77')->json('data.*.id')
+        );
+    }
+
+    public function test_the_client_filter_narrows_the_unread_view_as_well(): void
+    {
+        $member = $this->member();
+        $line = $this->line([$member]);
+
+        $ours = $this->thread($line, '+61400000001', ['last_message_at' => now()]);
+        $someone = $this->thread($line, '+61400000002', ['last_message_at' => now()]);
+
+        $ours->forceFill(['client_id' => 77])->save();
+        $someone->forceFill(['client_id' => 78])->save();
+
+        $this->inbound($ours, 'Are we still on for Tuesday?');
+        $this->inbound($someone, 'Sending the forms through');
+
+        $this->assertSame(
+            [$ours->id],
+            $this->actingAs($member)
+                ->getJson(self::BASE . '/threads?client_id=77&unread_only=1')
+                ->json('data.*.id')
+        );
+    }
+
+    public function test_a_client_with_no_conversations_lists_nothing_rather_than_everything(): void
+    {
+        $member = $this->member();
+        $line = $this->line([$member]);
+
+        $this->thread($line, '+61400000001', ['client_id' => 77, 'last_message_at' => now()]);
+
+        // The failure worth guarding: a filter that quietly does nothing would
+        // show a client every other client's messages.
+        $this->actingAs($member)
+            ->getJson(self::BASE . '/threads?client_id=999')
+            ->assertOk()
+            ->assertJsonCount(0, 'data');
+    }
+
     public function test_archived_threads_are_out_of_the_way_until_they_are_asked_for(): void
     {
         $member = $this->member();

@@ -1326,7 +1326,7 @@ it keeps a working inbox.
 | GET | `{base}/status` | — | `{transport, connected, lines_count, unread_total}`. `connected` is true only under the Zoom transport. |
 | GET | `{base}/lines` | — | `{data: [{id, label, phone_number, display_number, active, unread_count}]}` — the lines this user may work. |
 | GET | `{base}/unread` | — | `{total, by_line: {}, by_thread: {}}`. Deliberately cheap: one grouped query. Poll it every 30s as a backstop to the broadcast. |
-| GET | `{base}/threads` | — | Paginated. `line_id`, `search`, `unread_only`, `archived`, `page`, `per_page` (≤100). Ordered by `last_message_at` desc. |
+| GET | `{base}/threads` | — | Paginated. `line_id`, `client_id`, `search`, `unread_only`, `archived`, `page`, `per_page` (≤100). Ordered by `last_message_at` desc. |
 | POST | `{base}/threads` | — | `{line_id, to, body?}` → find-or-create the thread for the normalised `to`, optionally send `body`. 201 `{thread, message\|null}`. 422 on a number that cannot be read. |
 | GET | `{base}/threads/{id}` | — | `{thread, messages[], has_more}`, oldest→newest. `before=<message id>`, `limit` (≤200). **Marks the thread read for this user.** `thread.client` is enriched by `client_details` here and nowhere else. |
 | POST | `{base}/threads/{id}/messages` | — | `{body}` (≤ `max_body_length`) → 201 `{message, thread}`. Sends synchronously and reports the real status. |
@@ -1339,6 +1339,13 @@ it keeps a working inbox.
 | GET | `{base}/settings/lines` | manage | Every line incl. `deleted`, its `users[]`, `zoom_connected`, and `zoom_users[]` when Zoom answers. |
 | POST · PUT · DELETE | `{base}/settings/lines[/{id}]` | manage | `{label, phone_number, zoom_user_id?, zoom_user_email?, active?, user_ids[]}`. Number is normalised to E.164 and unique. |
 | POST | `{base}/threads/{id}/simulate-inbound` | manage, non-Zoom transports only | `{body}` → records an inbound message as if from the external number. **422 while Zoom is connected.** |
+
+`client_id` is what a client page's "SMS" tab is built on: the same list, every
+line the user can work, narrowed to the conversations linked to that client
+record. It filters **on top of** line visibility rather than around it — a
+conversation with the same client on a line the user is not attached to stays
+invisible — and it applies to the `unread_only` view as well. An id nothing is
+linked to lists nothing.
 
 The webhook is **not** registered by this module — see the Zoom step above.
 
