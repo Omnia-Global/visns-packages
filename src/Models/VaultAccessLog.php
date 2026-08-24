@@ -22,9 +22,20 @@ use Visnsstudio\VisnsPackages\Support\ModuleConfig;
  *   otp              a one-time code was generated
  *   copy_username    the browser reported copying the username
  *   confirm_failed   a password confirmation was refused (entry is null)
+ *   share_create     an external share link was created for the entry
+ *   share_view       an external share link was opened and its fields read
+ *   share_revoke     an external share link was closed
  *
  * `confirm_failed` is the one worth alerting on: a run of them against one user
  * is somebody working on a session they should not have.
+ *
+ * `share_view` is the one row in this table written by a request with no
+ * authenticated user behind it. Its `user_id` is the CRM account that CREATED
+ * the link, not the reader - the reader has no account, the column is not
+ * nullable, and inventing a user would be worse than attributing the access to
+ * the person who is genuinely accountable for it. The `ip` and `user_agent` on
+ * the row are the reader's, so the pair reads as "the link this user created
+ * was opened from that address", which is the sentence the log is for.
  */
 class VaultAccessLog extends Model
 {
@@ -80,7 +91,27 @@ class VaultAccessLog extends Model
         string $action,
         Request $request
     ): ?self {
-        $userId = $request->user()?->id;
+        return static::recordAs($entry, $action, $request, $request->user()?->id);
+    }
+
+    /**
+     * Write one row against a user who is not the one making the request.
+     *
+     * The one caller is the public share endpoint: an external reveal has a
+     * real IP and a real user agent but no session, and the account accountable
+     * for it is whoever created the link. Everything else goes through
+     * record(), which is this with the request's own user filled in.
+     *
+     * Still returns null with no user id, for the same reason record() did: a
+     * log write is not the place to throw.
+     */
+    public static function recordAs(
+        VaultEntry|int|null $entry,
+        string $action,
+        Request $request,
+        $userId
+    ): ?self {
+        $userId = is_numeric($userId) ? (int) $userId : null;
 
         if ($userId === null) {
             return null;

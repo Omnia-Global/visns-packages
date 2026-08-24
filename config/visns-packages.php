@@ -1046,6 +1046,60 @@ return [
         'tables' => [
             'entries' => 'vault_entries',
             'access_logs' => 'vault_access_logs',
+            'shares' => 'vault_shares',
+        ],
+
+        /*
+        | External share links - "send this password to the client's IT
+        | contact" without putting it in an email.
+        |
+        | A link is created from inside the vault, carries an expiry and
+        | optionally a view budget, and can be revoked. THE LINK IS THE SECRET:
+        | there is no password on the public side, so anyone holding the URL
+        | inside those limits can read the fields it was created with. Those
+        | three limits are the entire control surface, which is why there is no
+        | "never expires" option anywhere above the schema.
+        |
+        | The public page lives OUTSIDE the auth middleware by definition. It
+        | renders nothing sensitive on GET - the reveal is a POST from a button
+        | - so that a chat client fetching the URL for a preview card cannot
+        | spend a view or cache the secret.
+        |
+        | Set `enabled` to false to remove the feature entirely: no endpoints,
+        | no public route, existing rows untouched and unreachable.
+        */
+        'share' => [
+            'enabled' => true,
+
+            'uris' => [
+                // Where the recipient's page lives. NOT under the ajax prefix:
+                // this is a URL a person gets sent in a message.
+                'public' => 'vault/share',
+            ],
+
+            // `web` only - a session for the CSRF token on the reveal form.
+            // No auth, no permission; that is the feature.
+            'routes_middleware' => ['web'],
+
+            /*
+            | Laravel throttle strings, "<max>,<minutes>", keyed by IP on an
+            | unauthenticated request. `reveal` is the tight one: it spends a
+            | view and decrypts a secret, where `view` serves a static page.
+            | `create` guards the staff endpoint that mints links.
+            */
+            'throttle' => [
+                'view' => '30,1',
+                'reveal' => '10,1',
+                'create' => '20,1',
+            ],
+
+            // The longest a link may live. There is no way to exceed this and
+            // no way to opt out of expiry.
+            'max_days' => 30,
+
+            // The Blade view the public page renders. Publish
+            // `visns-packages-views` and point this at your own to restyle it.
+            'view' => 'visns-packages::vault.share',
         ],
 
         // Null = the package-wide `user_model`.

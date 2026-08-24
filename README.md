@@ -1089,14 +1089,28 @@ log recording who read what.
     'require_password_confirmation' => true,   // false: a live session is enough to reveal
     'confirmation_ttl_minutes' => 10,
     'throttle' => ['reveal' => '60,1', 'confirm' => '5,1'],
-    'tables' => ['entries' => 'vault_entries', 'access_logs' => 'vault_access_logs'],
+    'tables' => [
+        'entries' => 'vault_entries',
+        'access_logs' => 'vault_access_logs',
+        'shares' => 'vault_shares',
+    ],
     'user_model' => null,           // null = the package-wide user_model
     'search_columns' => ['title', 'username', 'url'],
+
+    // External share links — see "Share links" below.
+    'share' => [
+        'enabled' => true,
+        'uris' => ['public' => 'vault/share'],
+        'routes_middleware' => ['web'],           // NO auth; that is the feature
+        'throttle' => ['view' => '30,1', 'reveal' => '10,1', 'create' => '20,1'],
+        'max_days' => 30,
+        'view' => 'visns-packages::vault.share',
+    ],
 ],
 ```
 
-Then publish and run the migrations — the module needs `vault_entries` and
-`vault_access_logs`:
+Then publish and run the migrations — the module needs `vault_entries`,
+`vault_access_logs` and `vault_shares`:
 
 ```bash
 php artisan vendor:publish --tag=visns-packages-migrations
@@ -1183,6 +1197,84 @@ case a rotation has to write — and it deliberately leaves `updated_at` alone.
 ```bash
 php artisan vault:prune-log --days=365   # trim the access log; schedule it
 ```
+
+#### Tidying imported titles
+
+Importers commonly build a title that is unique across the whole practice by
+prefixing the client — `"Karrinyup Dental Centre — MiVBS"`. Once the entry is
+also *linked* to that client, the list shows the name twice and the part that
+distinguishes one credential from another is pushed off the end of the column.
+
+```bash
+php artisan vault:strip-client-titles --dry-run    # a before → after table
+php artisan vault:strip-client-titles [--force]    # confirms unless forced
+```
+
+Strips the client name plus an em dash, en dash or hyphen from the **front** of
+a title, case-insensitively, using the stored `client_label` and — where
+`vault.client.model` is configured — the live client name too, preferring the
+longer match. A title that merely *starts with* the client's name without a
+separator is left alone, and a row whose remainder would be empty is skipped: an
+entry with no title is worse than one with a redundant one. Writes go through
+`save()`, so an application that has subclassed `VaultEntry` for auditing gets
+its audit rows.
+
+#### Share links
+
+Added in 4.8.0. Send one credential to somebody who has no account:
+`POST {base}/{id}/shares` mints a URL at `/vault/share/{token}` (48 hex
+characters from `random_bytes(24)`), the recipient opens it, presses **Reveal**,
+and gets the fields the link was created with.
+
+> **THE LINK IS THE CREDENTIAL.** There is no password on the far side. Anyone
+> holding the URL, inside its expiry and its view budget, reads what it carries.
+> Say so to your users; the front end in `visns-components` does.
+
+| Method | URI | Guard | What it does |
+| --- | --- | --- | --- |
+| GET | `{base}/{id}/shares` | `Vault Access` | Every link for the entry, closed ones included. Never a token or a hash. |
+| POST | `{base}/{id}/shares` | `Vault Access`, `throttle:20,1` | Body `{ fields: [...], expires_in_hours, max_views? }`. **201 with `url` — the only time it exists.** Logs `share_create`. |
+| DELETE | `{base}/{id}/shares/{share}` | creator or `Vault Manage` | Revoke. Idempotent. Logs `share_revoke`. |
+| GET | `/vault/share/{token}` | none, `throttle:30,1` | The neutral page. **No secret in the body and no view spent.** |
+| POST | `/vault/share/{token}` | none, `throttle:10,1` | Reveal. Spends one view, `no-store`. Logs `share_view`. |
+
+`fields` is any of `username`, `password`, `totp`, `url`, `notes`. An expiry is
+required and capped at `share.max_days`; there is no "never" at any layer.
+
+Six things are load bearing:
+
+- **Only the SHA-256 of the token is stored.** The create response is the one
+  and only copy of the URL — it cannot be looked up again, by anyone, including
+  you. A database dump yields no working links.
+- **The GET renders nothing sensitive and spends no view.** Slack, Teams,
+  WhatsApp and most mail scanners fetch a URL the moment it is pasted; a secret
+  in the GET body would land in a preview cache and burn a one-view link before
+  the recipient ever clicked. The reveal is a `POST` from a real button, and a
+  bot does not press buttons.
+- **Values are read LIVE at reveal time, never snapshotted.** Revoking, rotating
+  the password or soft-deleting the entry all take effect on the next reveal,
+  and there is exactly one copy of each secret in the database. The cost: a
+  rotation between sending the link and it being opened silently changes what
+  the recipient receives.
+- **`totp` shares the current six-digit code**, computed server-side at reveal.
+  The seed is never shareable — a permanent second factor in the same message as
+  the password is not a second factor.
+- **Unknown, expired, revoked and spent all return the identical 404 page**, so
+  a dead link is not an oracle for which.
+- **A view is spent by one guarded `UPDATE`**, never read-then-write, so two
+  simultaneous clicks on a one-view link cannot both succeed.
+
+The public page is a self-contained Blade view — no bundle, no session beyond
+the CSRF token, no external asset — carrying `X-Robots-Tag: noindex`,
+`Referrer-Policy: no-referrer` and `Cache-Control: no-store`. Publish
+`visns-packages-views` and repoint `share.view` to restyle it.
+
+A `share_view` log row carries the **reader's** IP and user agent against the CRM
+account that **created** the link; the reader has no account, and inventing one
+would be worse than attributing the access to whoever is genuinely accountable.
+
+Set `share.enabled` to `false` to remove the endpoints and the public route
+entirely. Existing rows are left untouched and unreachable.
 
 #### Auditing
 

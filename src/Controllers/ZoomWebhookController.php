@@ -120,7 +120,7 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
     private function urlValidation(array $body)
     {
         $plainToken = (string) Arr::get($body, 'payload.plainToken', '');
-        $secret = (string) ModuleConfig::get('call_queue.webhook_secret_token');
+        $secret = (string) \Visnsstudio\VisnsPackages\Support\ZoomWebhookSecret::resolve();
 
         return response()->json([
             'plainToken' => $plainToken,

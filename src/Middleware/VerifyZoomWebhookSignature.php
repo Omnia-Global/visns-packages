@@ -6,6 +6,7 @@ use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
+use Visnsstudio\VisnsPackages\Support\ZoomWebhookSecret;
 
 /**
  * Verifies the signature Zoom puts on every webhook delivery.
@@ -21,7 +22,7 @@ class VerifyZoomWebhookSignature
 {
     public function handle(Request $request, Closure $next)
     {
-        $secret = ModuleConfig::get('call_queue.webhook_secret_token');
+        $secret = $this->secret();
 
         if (! is_string($secret) || $secret === '') {
             return $this->reject($request, 'webhook secret not configured');
@@ -57,6 +58,11 @@ class VerifyZoomWebhookSignature
         }
 
         return $next($request);
+    }
+
+    private function secret(): ?string
+    {
+        return ZoomWebhookSecret::resolve();
     }
 
     /** Reject deliveries whose timestamp is further than this from now. */

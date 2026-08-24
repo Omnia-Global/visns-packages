@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Route;
 use Visnsstudio\VisnsPackages\Commands\PublishMigrationsCommand;
 use Visnsstudio\VisnsPackages\Commands\VaultPruneLogCommand;
 use Visnsstudio\VisnsPackages\Commands\VaultReencryptCommand;
+use Visnsstudio\VisnsPackages\Commands\VaultStripClientTitlesCommand;
 use Visnsstudio\VisnsPackages\Commands\SmsPruneCommand;
 use Visnsstudio\VisnsPackages\Commands\SmsSimulateInboundCommand;
 use Visnsstudio\VisnsPackages\Commands\SmsSyncLinesCommand;
@@ -41,6 +42,8 @@ use Visnsstudio\VisnsPackages\Controllers\ZoomWebhookController;
 use Visnsstudio\VisnsPackages\Controllers\CallQueueController;
 use Visnsstudio\VisnsPackages\Controllers\CallQueueSettingsController;
 use Visnsstudio\VisnsPackages\Controllers\VaultController;
+use Visnsstudio\VisnsPackages\Controllers\VaultPublicShareController;
+use Visnsstudio\VisnsPackages\Controllers\VaultShareController;
 use Visnsstudio\VisnsPackages\Controllers\SmsController;
 use Visnsstudio\VisnsPackages\Controllers\SmsLineSettingsController;
 use Visnsstudio\VisnsPackages\Controllers\SmsTemplateController;
@@ -68,6 +71,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             // not asked about.
             VaultReencryptCommand::class,
             VaultPruneLogCommand::class,
+            VaultStripClientTitlesCommand::class,
 
             // Messaging maintenance and dev aids. Registered unconditionally
             // for the same reason: each one checks the module's own state and
@@ -187,6 +191,27 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                 ),
             ],
             'oauth-providers-config'
+        );
+
+        // Blade views, under the `visns-packages::` namespace.
+        //
+        // The package is otherwise entirely JSON-over-HTTP: the consuming
+        // applications render React behind auth and have no use for a server
+        // side template. The exception is the vault's public share page, which
+        // is served to somebody who has no account and must therefore not be
+        // handed an SPA bundle at all - see resources/views/vault/share.blade.php.
+        //
+        // Published as well as loaded, so an application that wants the page in
+        // its own house style can override it without forking the package.
+        $this->loadViewsFrom(__DIR__ . '/../resources/views', 'visns-packages');
+
+        $this->publishes(
+            [
+                __DIR__ . '/../resources/views' => resource_path(
+                    'views/vendor/visns-packages'
+                ),
+            ],
+            'visns-packages-views'
         );
 
         // Register middleware
@@ -1057,6 +1082,100 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                     'otp',
                 ])->whereNumber('id');
             });
+
+        $this->registerVaultShareRoutes($accessMiddleware, $prefix, $base);
+    }
+
+    /**
+     * Vault share links: the staff endpoints, and the one public page.
+     *
+     * TWO GROUPS, AND THE SPLIT IS THE POINT.
+     *
+     * The `ajax/vault/{id}/shares` endpoints sit inside the vault's own
+     * middleware - session, auth, the access permission - because creating a
+     * link that hands a credential to somebody outside the CRM must not be
+     * reachable from a session that could not read the credential itself.
+     *
+     * The public page sits OUTSIDE all of that, which is the whole feature: the
+     * recipient has no account. It carries `web` (it needs a session for the
+     * CSRF token on the reveal form and nothing else), a throttle keyed by IP,
+     * and no permission of any kind. `{token}` is constrained to hex so that a
+     * request carrying anything else is refused by the router rather than
+     * reaching the database.
+     *
+     * The reveal is a POST on the SAME path as the page. A preview bot fetching
+     * the URL - which Slack, Teams and WhatsApp all do the moment it is pasted -
+     * gets the inert page and cannot spend a view.
+     *
+     * @return void
+     */
+    protected function registerVaultShareRoutes(
+        array $accessMiddleware,
+        string $prefix,
+        string $base
+    ) {
+        if (!config('visns-packages.vault.share.enabled', true)) {
+            return;
+        }
+
+        $create = $this->withThrottle(
+            $accessMiddleware,
+            config('visns-packages.vault.share.throttle.create')
+        );
+
+        Route::middleware($accessMiddleware)
+            ->prefix($prefix)
+            ->group(function () use ($base, $create) {
+                Route::get($base . '/{id}/shares', [
+                    VaultShareController::class,
+                    'index',
+                ])->whereNumber('id')->name('visns.vault.shares.index');
+
+                Route::middleware($create)->post($base . '/{id}/shares', [
+                    VaultShareController::class,
+                    'store',
+                ])->whereNumber('id')->name('visns.vault.shares.store');
+
+                Route::delete($base . '/{id}/shares/{share}', [
+                    VaultShareController::class,
+                    'destroy',
+                ])->whereNumber('id')->whereNumber('share')
+                    ->name('visns.vault.shares.destroy');
+            });
+
+        $publicBase = trim(
+            (string) config('visns-packages.vault.share.uris.public', 'vault/share'),
+            '/'
+        ) ?: 'vault/share';
+
+        // NOT $prefix: that prefix names the application's ajax surface, and
+        // this is a URL a person is going to be sent in a message.
+        $publicMiddleware =
+            config('visns-packages.vault.share.routes_middleware') ?: ['web'];
+
+        Route::middleware(
+            $this->withThrottle(
+                (array) $publicMiddleware,
+                config('visns-packages.vault.share.throttle.view')
+            )
+        )->get($publicBase . '/{token}', [
+            VaultPublicShareController::class,
+            'show',
+        ])->where('token', '[A-Fa-f0-9]{40,128}')
+            ->name('visns.vault.share.show');
+
+        // Tighter than the GET: this one spends a view and decrypts a secret,
+        // where the GET is a static page.
+        Route::middleware(
+            $this->withThrottle(
+                (array) $publicMiddleware,
+                config('visns-packages.vault.share.throttle.reveal')
+            )
+        )->post($publicBase . '/{token}', [
+            VaultPublicShareController::class,
+            'reveal',
+        ])->where('token', '[A-Fa-f0-9]{40,128}')
+            ->name('visns.vault.share.reveal');
     }
 
     /**

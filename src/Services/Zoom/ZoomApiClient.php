@@ -4,15 +4,18 @@ namespace Visnsstudio\VisnsPackages\Services\Zoom;
 
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Visnsstudio\VisnsPackages\Services\IntegrationRegistry;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 
 /**
  * Request/token plumbing for Zoom's Server-to-Server OAuth REST API.
  *
- * Credentials and URLs come from `visns-packages.call_queue.api.*`; nothing here
- * reads the environment directly, because the environment reader returns null
- * once an application has run `config:cache` — which is exactly the state
- * production runs in.
+ * Credentials resolve through the `zoom` integration setting (the record the
+ * settings UI writes, then its declared env vars) and fall back to
+ * `visns-packages.call_queue.api.*` for deployments configured before the
+ * integrations screen existed. Nothing here reads the environment directly,
+ * because the environment reader returns null once an application has run
+ * `config:cache` — which is exactly the state production runs in.
  */
 class ZoomApiClient
 {
@@ -30,9 +33,18 @@ class ZoomApiClient
 
     public function __construct()
     {
-        $this->accountId = (string) ModuleConfig::get('call_queue.api.account_id');
-        $this->clientId = (string) ModuleConfig::get('call_queue.api.client_id');
-        $this->clientSecret = (string) ModuleConfig::get('call_queue.api.client_secret');
+        $registry = app(IntegrationRegistry::class);
+        $fromIntegration = $registry->exists('zoom');
+
+        $this->accountId = (string) ($fromIntegration
+            ? $registry->credential('zoom', 'account_id', ModuleConfig::get('call_queue.api.account_id'))
+            : ModuleConfig::get('call_queue.api.account_id'));
+        $this->clientId = (string) ($fromIntegration
+            ? $registry->credential('zoom', 'client_id', ModuleConfig::get('call_queue.api.client_id'))
+            : ModuleConfig::get('call_queue.api.client_id'));
+        $this->clientSecret = (string) ($fromIntegration
+            ? $registry->credential('zoom', 'client_secret', ModuleConfig::get('call_queue.api.client_secret'))
+            : ModuleConfig::get('call_queue.api.client_secret'));
         $this->baseUrl = (string) ModuleConfig::get('call_queue.api.base_url', 'https://api.zoom.us/v2');
         $this->tokenUrl = (string) ModuleConfig::get('call_queue.api.token_url', 'https://zoom.us/oauth/token');
     }
@@ -43,7 +55,16 @@ class ZoomApiClient
      */
     protected function getAccessToken(): string
     {
-        return Cache::remember(self::CACHE_KEY_TOKEN, self::TOKEN_TTL_SECONDS, function () {
+        // Keyed by credential fingerprint so saving new credentials in the
+        // settings UI takes effect immediately instead of after the old
+        // token's TTL.
+        $cacheKey = self::CACHE_KEY_TOKEN . ':' . substr(
+            sha1($this->accountId . '|' . $this->clientId . '|' . $this->clientSecret),
+            0,
+            12
+        );
+
+        return Cache::remember($cacheKey, self::TOKEN_TTL_SECONDS, function () {
             $ch = curl_init($this->tokenUrl);
 
             curl_setopt_array($ch, [

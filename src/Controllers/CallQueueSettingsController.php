@@ -112,15 +112,11 @@ class CallQueueSettingsController extends \App\Http\Controllers\Controller
             $queues[] = $this->row($queueId, $queue, $setting);
         }
 
-        // A queue configured here but no longer in the account still has to be
-        // visible — otherwise its stale exclusion silently keeps a queue that
-        // was recreated under a new id from popping, with nothing on screen to
-        // explain why.
-        foreach ($local as $queueId => $setting) {
-            if (! in_array($queueId, $seen, true)) {
-                $queues[] = $this->row($queueId, [], $setting) + ['missing_in_zoom' => true];
-            }
-        }
+        // Settings rows for queues Zoom no longer lists are NOT returned:
+        // they are leftovers of deleted/recreated queues, and a recreated
+        // queue carries a new id, so a stale row cannot affect it. The rows
+        // stay in the table (and reappear in the unreachable fallback above,
+        // where the Zoom listing cannot vouch for anything).
 
         return response()->json([
             'queues' => $queues,
