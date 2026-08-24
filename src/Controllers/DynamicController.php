@@ -1291,13 +1291,111 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
     }
 
-    protected function applyConditionBasedOnOperator($query, $condition, $value)
+    protected function applyConditionBasedOnOperator($query, $condition, $value, bool $insideRelation = false)
     {
         $operator = $condition['operator'] ?? '=';
         $id = $condition['id'] ?? null;
         $whereHas = $condition['whereHas'] ?? [];
         $type = $condition['type'] ?? null;
         $orKey = $condition['orKey'] ?? null;
+
+        /**
+         * Dot notation filters THROUGH a relation: `customers.name`.
+         *
+         * Needed for any column whose value does not live on the table. A
+         * contact's client is the clearest case — contacts and customers are
+         * many-to-many through a pivot, so there is no `customer_id` on
+         * `contacts` to filter on, and the grid column is an appended
+         * accessor. Without this the column can be displayed and sorted but
+         * never filtered, which is exactly the state the Contacts grid was in.
+         *
+         * Only ONE level is handled deliberately. `a.b.c` would need nested
+         * whereHas and a way to say which relation the operator applies to;
+         * one level covers every grid in this application and keeps the
+         * generated SQL something a person can read.
+         */
+        /**
+         * Filter THROUGH a relation: `customers.name`, `customers.id`.
+         *
+         * Needed for any column whose value does not live on the table. A
+         * contact's client is the clearest case — contacts and customers are
+         * many-to-many through a pivot, so there is no `customer_id` on
+         * `contacts` to filter on and the grid column is an appended accessor.
+         * Without this the column can be shown and sorted but never filtered,
+         * which is the state the Contacts grid was in.
+         *
+         * The operator is applied HERE rather than by recursing back into this
+         * method. Recursion looked tidier and silently produced
+         * `where exists (select * from customers ...)` with no inner condition
+         * and no bindings — a subquery that matches every row, so the filter
+         * appeared to work and changed nothing.
+         *
+         * One level only: `a.b.c` would need nested whereHas and a way to say
+         * which relation the operator belongs to. One level covers every grid
+         * here.
+         */
+        if (!$insideRelation && is_string($id) && str_contains($id, '.')) {
+            [$relation, $column] = explode('.', $id, 2);
+
+            if (!str_contains($column, '.') && method_exists($this->model, $relation)) {
+                $query->whereHas($relation, function ($related) use ($column, $operator, $value) {
+                    // QUALIFIED with the related table: a many-to-many
+                    // whereHas joins the pivot, so a bare `id` is ambiguous
+                    // between `customers.id` and `contact_customer.id` and
+                    // SQLite refuses the query outright.
+                    $col = $related->getModel()->getTable() . '.' . $column;
+
+                    switch ($operator) {
+                        case 'contains':
+                            $related->where($col, 'like', '%' . $value . '%');
+                            break;
+                        case 'notContains':
+                        case 'not_contains':
+                            $related->where($col, 'not like', '%' . $value . '%');
+                            break;
+                        case 'startsWith':
+                        case 'startswith':
+                            $related->where($col, 'like', $value . '%');
+                            break;
+                        case 'endsWith':
+                        case 'endswith':
+                            $related->where($col, 'like', '%' . $value);
+                            break;
+                        case 'neq':
+                        case '!=':
+                            $related->where($col, '!=', $value);
+                            break;
+                        case 'inlist':
+                        case 'in':
+                            $related->whereIn($col, (array) $value);
+                            break;
+                        case 'empty':
+                            $related->whereNull($col);
+                            break;
+                        case 'notEmpty':
+                        case 'notempty':
+                            $related->whereNotNull($col);
+                            break;
+                        case 'gt':
+                            $related->where($col, '>', $value);
+                            break;
+                        case 'gte':
+                            $related->where($col, '>=', $value);
+                            break;
+                        case 'lt':
+                            $related->where($col, '<', $value);
+                            break;
+                        case 'lte':
+                            $related->where($col, '<=', $value);
+                            break;
+                        default:
+                            $related->where($col, $value);
+                    }
+                });
+
+                return;
+            }
+        }
 
         // Special case: if only whereHas is provided (no id/value needed)
         if (empty($id) && !empty($whereHas)) {

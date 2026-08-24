@@ -84,6 +84,13 @@ class VaultController extends \App\Http\Controllers\Controller
             ->visibleTo($user)
             ->search($request->input('search'));
 
+        // Scoped to one client, which is what a customer's Credentials tab
+        // asks for. Applied AFTER `visibleTo`, never instead of it — narrowing
+        // to a client must not widen what the user is allowed to see.
+        if ($request->filled('client_id')) {
+            $query->where('client_id', (int) $request->input('client_id'));
+        }
+
         // Soft-deleted entries are an administrator's concern; for everyone else
         // a deleted entry is simply gone.
         if ($request->boolean('include_deleted') && $this->manages($user)) {
@@ -151,6 +158,7 @@ class VaultController extends \App\Http\Controllers\Controller
         $entry->url = $data['url'] ?? null;
         $entry->notes = $data['notes'] ?? null;
         $entry->tags = $this->cleanTags($data['tags'] ?? null);
+        $this->assignClient($entry, $data);
         $entry->visibility = $visibility;
         $entry->owner_user_id = $user?->id;
         $entry->updated_by_user_id = $user?->id;
@@ -211,6 +219,8 @@ class VaultController extends \App\Http\Controllers\Controller
                 $entry->{$field} = $data[$field];
             }
         }
+
+        $this->assignClient($entry, $data);
 
         if (array_key_exists('tags', $data)) {
             $entry->tags = $this->cleanTags($data['tags']);
@@ -518,6 +528,9 @@ class VaultController extends \App\Http\Controllers\Controller
             'url' => $entry->url,
             'has_totp' => $entry->has_totp,
             'visibility' => $entry->visibility,
+            'client_id' => $entry->client_id,
+            'client_label' => $entry->client_label,
+            'client_url' => $this->clientUrl($entry->client_id),
             'tags' => $entry->tags ?? [],
             'owner_user_id' => $entry->owner_user_id,
             'updated_at' => $entry->updated_at?->toIso8601String(),
@@ -693,6 +706,11 @@ class VaultController extends \App\Http\Controllers\Controller
             // cleanTags() drops it.
             'tags.*' => ['nullable', 'string', 'max:40'],
             'visibility' => ['nullable', Rule::in(['shared', 'private'])],
+            // Not `exists:` — the client table lives in the consuming
+            // application and this package does not know its name. The id is
+            // resolved against the configured model below, and an id that
+            // resolves to nothing simply clears the assignment.
+            'client_id' => ['nullable', 'integer'],
         ]);
     }
 
@@ -741,4 +759,100 @@ class VaultController extends \App\Http\Controllers\Controller
     {
         return $response->header('Cache-Control', 'no-store');
     }
+
+    // -- client assignment ----------------------------------------------------
+
+    /**
+     * Resolve a client id to its label, or null.
+     *
+     * The label is stored ON the entry rather than joined at read time: the
+     * list shows it on every row, and a package cannot join a table whose name
+     * it does not know. It is refreshed on every write, so a renamed client
+     * corrects itself the next time the entry is saved.
+     */
+    private function clientLabel($clientId): ?string
+    {
+        $model = config('visns-packages.vault.client.model');
+
+        if (!$clientId || !$model || !class_exists($model)) {
+            return null;
+        }
+
+        $column = config('visns-packages.vault.client.label_column', 'name');
+
+        return $model::query()->whereKey($clientId)->value($column);
+    }
+
+    private function clientUrl($clientId): ?string
+    {
+        $pattern = config('visns-packages.vault.client.url');
+
+        return ($clientId && $pattern)
+            ? str_replace('{id}', (string) $clientId, $pattern)
+            : null;
+    }
+
+    /**
+     * Apply a validated client assignment to an entry.
+     *
+     * Absent key = leave the assignment alone (a partial update must not
+     * silently unassign). Present but empty = clear it. An id that resolves to
+     * no client also clears it, rather than storing a dangling reference and a
+     * label nobody can explain.
+     */
+    private function assignClient(VaultEntry $entry, array $data): void
+    {
+        if (!array_key_exists('client_id', $data)) {
+            return;
+        }
+
+        $clientId = $data['client_id'] ?: null;
+        $label = $this->clientLabel($clientId);
+
+        $entry->client_id = $label === null ? null : $clientId;
+        $entry->client_label = $label;
+    }
+
+    /**
+     * Typeahead for the client picker.
+     *
+     * Returns nothing at all when no client model is configured, so a
+     * consuming application without a client concept gets an inert picker
+     * rather than an error.
+     */
+    public function clients(Request $request)
+    {
+        $model = config('visns-packages.vault.client.model');
+
+        if (!$model || !class_exists($model)) {
+            return response()->json(['data' => []]);
+        }
+
+        $term = trim((string) $request->input('q', ''));
+        $labelColumn = config('visns-packages.vault.client.label_column', 'name');
+        $searchColumns = (array) config(
+            'visns-packages.vault.client.search_columns',
+            [$labelColumn]
+        );
+
+        $query = $model::query();
+
+        if ($term !== '') {
+            $query->where(function ($q) use ($searchColumns, $term) {
+                foreach ($searchColumns as $i => $column) {
+                    $q->{$i === 0 ? 'where' : 'orWhere'}($column, 'like', '%' . $term . '%');
+                }
+            });
+        }
+
+        $rows = $query->orderBy($labelColumn)->limit(20)->get();
+
+        return response()->json([
+            'data' => $rows->map(fn($row) => [
+                'id' => $row->getKey(),
+                'label' => $row->{$labelColumn},
+            ])->values(),
+        ]);
+    }
+
 }

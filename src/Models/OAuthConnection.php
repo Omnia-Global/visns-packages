@@ -29,6 +29,17 @@ class OAuthConnection extends Model
         'is_active' => 'boolean',
         'scopes' => 'array',
         'metadata' => 'array',
+        // These were stored in PLAINTEXT. An access token is a bearer
+        // credential for a live third-party account and a refresh token is a
+        // standing one, so anything with read access to the database had the
+        // keys to the connected CRM, helpdesk or mailbox.
+        //
+        // EncryptedOrPlain rather than Laravel's `encrypted`: this table
+        // already has rows in consuming projects, and the built-in cast throws
+        // on the first legacy value it reads — which would surface mid-sync
+        // rather than at deploy. See the cast for the reasoning.
+        'access_token' => \Visnsstudio\VisnsPackages\Casts\EncryptedOrPlain::class,
+        'refresh_token' => \Visnsstudio\VisnsPackages\Casts\EncryptedOrPlain::class,
     ];
 
     protected $hidden = [

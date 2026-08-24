@@ -925,6 +925,57 @@ return [
         ],
     ],
 
+
+    /*
+    |--------------------------------------------------------------------------
+    | Universal search
+    |--------------------------------------------------------------------------
+    |
+    | One search box across the whole application. Every CRM on this package
+    | has the same problem: a user knows a name or a ticket number and has to
+    | guess which list page it lives on before they can look for it.
+    |
+    | WHAT IS SEARCHED IS CONFIGURATION. Each entry under `sources` names a
+    | model, the columns to match, what to show, and where a hit goes. A source
+    | the caller lacks the permission for is never queried at all - not merely
+    | hidden from the results - so search cannot become a way to confirm that a
+    | record exists.
+    |
+    | Column names may be `relation.column`; the query goes through whereHas.
+    |
+    |   'customers' => [
+    |       'label'      => 'Customers',
+    |       'model'      => \App\Models\Customer::class,
+    |       'columns'    => ['name', 'abn'],
+    |       'title'      => 'name',                      // one = fallback chain
+    |       'subtitle'   => ['abn', 'status'],           // several = composite
+    |       'url'        => '/customers/{id}',
+    |       'permission' => 'Customer',
+    |       'with'       => ['sites'],                   // optional eager load
+    |       'where'      => ['status' => 1],             // optional constraint
+    |       'scope'      => 'active',                    // optional model scope
+    |   ],
+    |
+    */
+    'universal_search' => [
+        'enabled' => env('VISNS_UNIVERSAL_SEARCH', true),
+
+        'uris' => ['base' => 'ajax/search'],
+
+        'routes_middleware' => ['web', 'auth'],
+
+        // Below this, searching is more noise than signal.
+        'min_length' => 2,
+
+        // Per source. The palette shows a few of each rather than fifty of one.
+        'per_source' => 5,
+
+        // Empty by default: a shared package cannot know what a consuming app
+        // wants searched, and guessing would expose models nobody asked to
+        // publish.
+        'sources' => [],
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Vault (staff password manager)
@@ -1006,7 +1057,29 @@ return [
         | secret column name here is dropped rather than trusted. The tags
         | column is always searched as text in addition to these.
         */
-        'search_columns' => ['title', 'username', 'url'],
+        // `client_label` is included so typing a client's name finds every
+        // credential held for them, not just the ones whose title happens to
+        // mention it.
+        'search_columns' => ['title', 'username', 'url', 'client_label'],
+
+        /*
+        | Assigning an entry to a client.
+        |
+        | Most credentials in a CRM are the CLIENT's - their firewall, their
+        | NVR, their vendor portal - not the practice's own. This names the
+        | model so the vault can offer a picker and show who each entry
+        | belongs to.
+        |
+        | `null` disables the feature entirely: no picker, no column, and the
+        | client columns simply stay empty. A consuming app without a client
+        | concept is unaffected.
+        */
+        'client' => [
+            'model' => null,                    // e.g. \App\Models\Customer::class
+            'label_column' => 'name',           // what to show for one
+            'search_columns' => ['name'],       // what the picker searches
+            'url' => null,                      // e.g. '/customers/{id}'
+        ],
     ],
 
     /*
@@ -1818,4 +1891,42 @@ return [
             'email_integration_enabled' => false,
         ],
     ],
+    /*
+    |--------------------------------------------------------------------------
+    | Integrations
+    |--------------------------------------------------------------------------
+    |
+    | The catalogue behind Settings -> Integrations. Adding an integration is a
+    | config block, not a class.
+    |
+    | Two drivers:
+    |
+    |   'oauth2'  — a consent redirect and a token exchange. Delegates the flow
+    |               to OAuthManager/OAuthController, which already own it.
+    |   'api_key' — a set of fields somebody types in. No redirect.
+    |
+    | Each field may declare `env`, which is the variable it falls back to.
+    | CREDENTIALS RESOLVE database -> env -> `default`, in that order: a
+    | practice that already has keys in .env keeps working untouched, and a key
+    | typed into the UI overrides it from then on. The reverse order would mean
+    | a stale .env silently beating what the user just saved.
+    |
+    | `secret: true` means the value is write-only. It is stored encrypted and
+    | the API reports only whether it is SET, never what it is.
+    |
+    | `test` is an optional callable receiving the resolved credentials and
+    | returning a bool or ['success' => bool, 'message' => string]. It is what
+    | the "Test connection" button runs for an api_key integration.
+    |
+    | Nothing ships enabled here — the consuming app declares what it uses.
+    |
+    */
+
+    'integrations' => [],
+
+    // The permission required to view or change any of the above. Integrations
+    // hold the keys to every connected system, so this is deliberately its own
+    // gate rather than a general "manage settings", and null disables the
+    // check entirely (for an app with no permission system at all).
+    'integrations_permission' => env('VISNS_INTEGRATIONS_PERMISSION', 'manage integrations'),
 ];

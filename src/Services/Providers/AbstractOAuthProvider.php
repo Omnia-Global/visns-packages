@@ -60,6 +60,29 @@ abstract class AbstractOAuthProvider implements OAuthProvider
      */
     protected function getConfig(string $key, $default = null)
     {
+        // The integrations registry FIRST, because that is where a credential
+        // somebody typed into Settings -> Integrations lives. Without this the
+        // UI could store a client id that nothing ever read, and the only way
+        // to change a key would still be a deploy.
+        //
+        // It resolves database -> env -> config default internally, so the two
+        // fallbacks below remain the answer for a provider that is not in the
+        // integrations catalogue at all.
+        try {
+            $registry = app(\Visnsstudio\VisnsPackages\Services\IntegrationRegistry::class);
+
+            if ($registry->exists($this->name)) {
+                $value = $registry->credential($this->name, $key);
+
+                if ($value !== null && $value !== '') {
+                    return $value;
+                }
+            }
+        } catch (\Throwable $e) {
+            // No container, or the settings table does not exist yet. Fall
+            // through to the static config rather than break the provider.
+        }
+
         return $this->config[$key] ?? config("oauth-providers.{$this->name}.{$key}", $default);
     }
 

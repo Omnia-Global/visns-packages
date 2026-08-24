@@ -30,6 +30,7 @@ use Visnsstudio\VisnsPackages\Services\ReportSemantics\SemanticModel;
 use Visnsstudio\VisnsPackages\Controllers\PDFController;
 use Visnsstudio\VisnsPackages\Controllers\ProposalTemplateController;
 use Visnsstudio\VisnsPackages\Controllers\BrandingProfileController;
+use Visnsstudio\VisnsPackages\Controllers\IntegrationsController;
 use Visnsstudio\VisnsPackages\Controllers\OAuthController;
 use Visnsstudio\VisnsPackages\Middleware\AcceptJson;
 use Visnsstudio\VisnsPackages\Middleware\EnsureVaultPasswordConfirmed;
@@ -678,6 +679,8 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             );
             $this->registerCallQueueRoutes($middleware, $prefix);
             $this->registerVaultRoutes($middleware, $prefix);
+            $this->registerUniversalSearchRoutes($middleware, $prefix);
+            $this->registerIntegrationRoutes($middleware, $prefix);
             $this->registerMessagingRoutes($middleware, $prefix);
 
             // Register dynamic entity routes first (they will be more general)
@@ -881,6 +884,92 @@ class VisnsPackagesServiceProvider extends ServiceProvider
      *
      * @return void
      */
+    /**
+     * One search endpoint for the whole application.
+     *
+     * No permission is required to reach it: the controller filters SOURCES by
+     * permission instead, so a user always gets a working search box that
+     * covers exactly what they may see — rather than a 403 on the box itself.
+     */
+    protected function registerUniversalSearchRoutes(array $middleware, string $prefix)
+    {
+        if (!config('visns-packages.universal_search.enabled', true)) {
+            return;
+        }
+
+        $base = trim(
+            (string) config('visns-packages.universal_search.uris.base', 'ajax/search'),
+            '/'
+        ) ?: 'ajax/search';
+
+        $routeMiddleware =
+            config('visns-packages.universal_search.routes_middleware') ?: $middleware;
+
+        \Illuminate\Support\Facades\Route::middleware($routeMiddleware)
+            ->prefix($prefix)
+            ->group(function () use ($base) {
+                \Illuminate\Support\Facades\Route::get(
+                    $base,
+                    \Visnsstudio\VisnsPackages\Controllers\UniversalSearchController::class
+                )->name('visns.universal-search');
+            });
+    }
+
+    /**
+     * Settings -> Integrations.
+     *
+     * Credential entry and status for both drivers. The OAuth redirect and
+     * callback are NOT here: `integrations/oauth/{provider}/authorize` and
+     * `/callback` already exist on OAuthController and are browser
+     * navigations, where these are all fetch calls from the settings page.
+     *
+     * Nothing registers unless the app has declared at least one integration,
+     * so a project that does not use this pays nothing for it.
+     */
+    protected function registerIntegrationRoutes(array $middleware, string $prefix)
+    {
+        if (!config('visns-packages.integrations')) {
+            return;
+        }
+
+        // `ajax/integrations`, NOT bare `integrations`. The latter is where
+        // OAuthController already lives (`integrations/oauth/...`), so an
+        // `integrations/{provider}` wildcard alongside it is asking for one to
+        // swallow the other. `$prefix` is the app-wide outer prefix and is
+        // usually empty; the base is what actually names the module.
+        $base = trim(
+            (string) config('visns-packages.integrations_uri', 'ajax/integrations'),
+            '/'
+        ) ?: 'ajax/integrations';
+
+        Route::middleware($middleware)
+            ->prefix($prefix)
+            ->group(function () use ($base) {
+                Route::prefix($base)
+                    ->controller(IntegrationsController::class)
+                    ->group(function () {
+                        Route::get('/', 'index')->name('visns.integrations.index');
+                        Route::post('/{provider}/test', 'test')
+                            ->name('visns.integrations.test');
+                        // Returns the consent URL as JSON rather than
+                        // redirecting: a 302 to a third-party host fails CORS
+                        // from a fetch, where a URL the page can assign to
+                        // window.location does not.
+                        Route::get('/{provider}/authorize-url', 'authorizeUrl')
+                            ->name('visns.integrations.authorize');
+                        // The wildcards go LAST, or `{provider}` matches
+                        // `zoho/test` before the specific routes above get a
+                        // chance.
+                        Route::get('/{provider}', 'show')
+                            ->name('visns.integrations.show');
+                        Route::put('/{provider}', 'update')
+                            ->name('visns.integrations.update');
+                        Route::delete('/{provider}', 'destroy')
+                            ->name('visns.integrations.destroy');
+                    });
+            });
+    }
+
     protected function registerVaultRoutes(array $middleware, string $prefix)
     {
         if (!config('visns-packages.vault.enabled', false)) {
@@ -922,6 +1011,11 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             ->group(function () use ($base, $reveal, $confirm) {
                 // Literal segments first; see the docblock.
                 Route::get($base . '/log', [VaultController::class, 'logIndex']);
+
+                        // Typeahead for the client picker. Inert when no
+                        // client model is configured.
+                        Route::get($base . '/clients', [VaultController::class, 'clients'])
+                            ->name('visns.vault.clients');
 
                 Route::middleware($confirm)->post(
                     $base . '/confirm-password',
@@ -1390,6 +1484,28 @@ class VisnsPackagesServiceProvider extends ServiceProvider
      */
     protected function registerOAuthProviders(OAuthManager $manager): void
     {
+        // Anything declared as an `oauth2` integration becomes a provider with
+        // no class of its own. Registered BEFORE the legacy `oauth-providers`
+        // list so a hand-written provider class can still take a name back.
+        foreach ((array) config('visns-packages.integrations', []) as $name => $definition) {
+            if (!is_array($definition) || ($definition['driver'] ?? null) !== 'oauth2') {
+                continue;
+            }
+
+            try {
+                $manager->registerProvider(
+                    $name,
+                    new \Visnsstudio\VisnsPackages\Services\Providers\GenericOAuthProvider($name)
+                );
+            } catch (\Throwable $e) {
+                if (app()->bound('log')) {
+                    app('log')->warning(
+                        "Failed to register integration provider {$name}: " . $e->getMessage()
+                    );
+                }
+            }
+        }
+
         $providers = config('oauth-providers', []);
 
         foreach ($providers as $name => $config) {
