@@ -1393,6 +1393,9 @@ To go live with Zoom:
    reorganised more than once.
 4. `php artisan sms:sync-lines` to stamp each line with the Zoom user that
    actually holds its number.
+5. Connect the **user-level** SMS app — see
+   [Sending needs a SECOND Zoom app](#sending-needs-a-second-zoom-app-user-level)
+   below. Without it, only the account owner's own number can send.
 
 > **What has and has not been proved.** The Zoom transport is written against
 > Zoom's published "Send SMS" and `phone.sms_*` references and has **never been
@@ -1405,6 +1408,71 @@ To go live with Zoom:
 By default the messaging module reuses the call queue's `call_queue.api`
 credentials, which is right whenever both features live in the same Zoom
 Server-to-Server app. Set `messaging.zoom.api` (same keys) only when they do not.
+
+#### Sending needs a SECOND Zoom app, user-level
+
+> **Proved on the live tenant.** A Server-to-Server token can send **only from
+> the account owner's own number.** Zoom checks `POST /phone/sms/messages`
+> against the *identity* of the token — the token's user must **be**
+> `sender.user_id` — and an S2S token acts as the account owner. Every send
+> from a shared line comes back
+>
+> ```json
+> { "code": 7639, "message": "You do not have permission to send SMS for this user" }
+> ```
+>
+> while the same code sending from the owner's number answers 201. No
+> account-level scope lifts it. The fix is a **User-managed OAuth app**,
+> authorised once while signed in to Zoom as the user who holds the line's
+> number.
+
+So the module reads a second credential, and only for the send:
+
+| Call | Token |
+| --- | --- |
+| `POST /phone/sms/messages` | the `zoom_sms` **user** connection, when one exists |
+| `GET /phone/users` (`sms:sync-lines`, the settings page), call queues, webhooks | the Server-to-Server app, always |
+
+With no `zoom_sms` connection, sending behaves exactly as it did before this
+existed — the same curl path on the same account token. Nothing to switch on.
+
+Set it up as an [`oauth2` integration](#integrations) called **`zoom_sms`**
+(`ZoomSmsClient::USER_PROVIDER`), then in the Zoom Marketplace:
+
+1. **Develop → Build App → General App**, and set **"Intent to publish"** to
+   **No** — this app is for one account and publishing it would put it through
+   review for nothing.
+2. Under **Basic Information → App Credentials**, note the **Client ID** and
+   **Client Secret**, and add the **OAuth Redirect URL**
+   `<app-url>/integrations/oauth/zoom_sms/callback`. Zoom matches it character
+   for character, scheme and trailing slash included. Add the same value to
+   **OAuth allow lists**.
+3. **Scopes** — user-level, no `:admin` suffix (an admin scope puts the token
+   back on the account and reintroduces 7639):
+   `phone:write:sms`, `phone:read:sms_message`, `user:read:user`. Zoom has
+   reorganised its Phone scopes more than once and not every account is offered
+   the same list; if the consent screen answers `4700 Invalid scope`, trim the
+   list to what the app actually shows — the integration's `scopes` field
+   overrides the config without a deploy.
+4. **Activate** the app (a Development-only app still issues tokens for the
+   account that built it).
+5. In the CRM: **Settings → Integrations → Zoom SMS**, paste the client ID and
+   secret, save, then **sign in to Zoom as the user who holds the line's number**
+   and press **Connect**. Press **Test connection** afterwards — the probe reads
+   `GET /users/me` and reports *which* account is connected, which is the one
+   thing nothing else in the UI would ever tell you.
+
+Two behaviours worth knowing:
+
+- **The refresh token rotates on every refresh** and the old one dies
+  immediately, so both tokens are re-persisted each time
+  (`OAuthConnection::updateTokens()`). A refresh that cannot be stored is a
+  locked-out integration, not a slow one.
+- **A mismatched sender is substituted, not refused.** If `SmsLine::zoom_user_id`
+  is not the token's own user, the send goes out with the *token's* id and logs
+  `sms.zoom sender substituted with the connected Zoom user` — that is the only
+  id Zoom will accept from this token, and a message from a slightly unexpected
+  number beats no message. The log line and the probe are how you find out.
 
 #### Endpoints
 

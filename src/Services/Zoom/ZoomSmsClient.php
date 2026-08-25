@@ -3,6 +3,10 @@
 namespace Visnsstudio\VisnsPackages\Services\Zoom;
 
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Visnsstudio\VisnsPackages\Models\OAuthConnection;
+use Visnsstudio\VisnsPackages\Services\OAuthManager;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 
 /**
@@ -18,13 +22,43 @@ use Visnsstudio\VisnsPackages\Support\ModuleConfig;
  * features live in the same Zoom Server-to-Server app. Setting `messaging.zoom.api`
  * is for the case where they do not.
  *
+ * ## Why sending has a second token
+ *
+ * Zoom checks `POST /phone/sms/messages` against the IDENTITY of the token, not
+ * against the account: the token's own user must BE `sender.user_id`. A
+ * Server-to-Server token acts as the account owner, so a send from the owner's
+ * own number succeeds and a send from any other user's number is refused with
+ *
+ *     code 7639 — "You do not have permission to send SMS for this user"
+ *
+ * which is why the shared "Omnia Global" line could never send while the owner
+ * could. There is no account-level SMS scope that lifts this; the fix is a
+ * USER-managed OAuth app, authorised once while signed in to Zoom as the line's
+ * user, whose token IS that user.
+ *
+ * So: when an active `zoom_sms` OAuth connection exists, **the send path and
+ * only the send path** uses its bearer token. `listPhoneUsers()`, the call
+ * queue and the webhooks keep the Server-to-Server token, because those are
+ * account-wide reads that a single user's token cannot answer. With no
+ * connection, sending behaves exactly as it did before this existed.
+ *
+ * ## Sender substitution
+ *
+ * The connection is made by a human clicking Connect, so nothing guarantees
+ * they were signed in to Zoom as the user that holds the line's number. When
+ * `SmsLine::zoom_user_id` and the token's own user id differ, the send goes out
+ * with the TOKEN's user id and logs that it substituted — because that is the
+ * only id Zoom will accept from this token, and failing the send instead would
+ * trade a message that arrives from a slightly unexpected number for no message
+ * at all. The probe on Settings -> Integrations names the connected user for
+ * exactly this reason: connecting as the wrong person is silent otherwise.
+ *
  * Exercised against the live tenant on 21 Aug 2026 with a Server-to-Server
  * OAuth app: `POST /phone/sms/messages` answered 201 with
  * `{session_id, message_id, date_time}` when the sender carried both the Zoom
- * user id and the number. The older forum guidance that S2S apps cannot send
- * on behalf of a user did not apply. Every response read is still defensive:
- * Zoom's shapes drift and a wrong guess must degrade to a logged failure, not
- * an exception.
+ * user id and the number - as the account owner. Every response read is still
+ * defensive: Zoom's shapes drift and a wrong guess must degrade to a logged
+ * failure, not an exception.
  */
 class ZoomSmsClient extends ZoomApiClient
 {
@@ -33,6 +67,25 @@ class ZoomSmsClient extends ZoomApiClient
 
     /** Runaway guard for the pagination loop. */
     private const MAX_PAGES = 20;
+
+    /**
+     * The integration whose user-level token sends.
+     *
+     * Deliberately NOT `zoom`: that one is the Server-to-Server app and stays
+     * an api_key integration. Two Zoom apps, two cards, two jobs.
+     */
+    public const USER_PROVIDER = 'zoom_sms';
+
+    /**
+     * Refresh this many seconds before Zoom says the token dies.
+     *
+     * A send that starts inside the window would otherwise 401 halfway and pay
+     * for the retry.
+     */
+    private const REFRESH_SKEW_SECONDS = 120;
+
+    /** Set once a refresh has been attempted, so one send cannot loop. */
+    private bool $refreshed = false;
 
     public function __construct()
     {
@@ -67,7 +120,73 @@ class ZoomSmsClient extends ZoomApiClient
      */
     public function sendSms(string $from, string $to, string $body, ?string $userId = null): array
     {
-        return $this->request('POST', $this->sendPath(), $this->sendBody($from, $to, $body, $userId));
+        $connection = $this->userConnection();
+
+        // No user-level connection: the original Server-to-Server path,
+        // unchanged. Every deployment that has not connected the SMS app keeps
+        // behaving exactly as it did.
+        if ($connection === null) {
+            return $this->request('POST', $this->sendPath(), $this->sendBody($from, $to, $body, $userId));
+        }
+
+        $token = $this->userAccessToken($connection);
+
+        if ($token === null) {
+            // The connection exists but cannot produce a token (refresh
+            // refused, or consent revoked at Zoom). Falling back to the S2S
+            // token would send from the wrong identity and be refused with
+            // 7639 anyway, so say what is actually wrong.
+            Log::warning('sms.zoom user token unusable; not falling back to the account token', [
+                'provider' => self::USER_PROVIDER,
+                'connection_id' => $connection->id,
+            ]);
+
+            return [
+                'success' => false,
+                'http_code' => 401,
+                'data' => [
+                    'message' => 'The Zoom SMS connection has expired. Reconnect it under Settings > Integrations.',
+                ],
+            ];
+        }
+
+        return $this->sendAsUser(
+            $token,
+            $this->sendBody($from, $to, $body, $this->senderUserId($connection, $token, $userId))
+        );
+    }
+
+    /**
+     * The user id to put in `sender.user_id`.
+     *
+     * The token's own user, whenever it is known - see the class docblock. The
+     * line's id is kept when the token's user cannot be read, so a temporarily
+     * unreachable `/users/me` degrades to the previous behaviour rather than to
+     * a send with no sender at all.
+     */
+    private function senderUserId(OAuthConnection $connection, string $token, ?string $lineUserId): ?string
+    {
+        $tokenUser = $this->tokenUser($connection, $token);
+        $tokenUserId = trim((string) ($tokenUser['id'] ?? ''));
+
+        if ($tokenUserId === '') {
+            return $lineUserId;
+        }
+
+        $lineUserId = $lineUserId === null ? '' : trim($lineUserId);
+
+        if ($lineUserId !== '' && $lineUserId !== $tokenUserId) {
+            Log::info('sms.zoom sender substituted with the connected Zoom user', [
+                'line_zoom_user_id' => $lineUserId,
+                'token_zoom_user_id' => $tokenUserId,
+                'token_zoom_email' => $tokenUser['email'] ?? null,
+                // Said plainly, because the fix is a human action: reconnect
+                // while signed in to Zoom as the line's own user.
+                'reason' => 'Zoom only accepts sender.user_id equal to the token owner (error 7639).',
+            ]);
+        }
+
+        return $tokenUserId;
     }
 
     /**
@@ -181,6 +300,280 @@ class ZoomSmsClient extends ZoomApiClient
         }
 
         return 'Zoom refused the request (HTTP ' . (int) ($result['http_code'] ?? 0) . ').';
+    }
+
+    /**
+     * Who the SMS app is connected as, for Settings -> Integrations.
+     *
+     * The whole point of the probe: an admin who connected while signed in to
+     * Zoom as themselves gets a working-looking integration that sends from the
+     * wrong number, and nothing else in the UI would ever say so.
+     *
+     * @param  bool  $fresh  Ignore the cached identity and ask Zoom again.
+     * @return array{success: bool, id: ?string, email: ?string, message: string}
+     */
+    public function userTokenIdentity(bool $fresh = false): array
+    {
+        $connection = $this->userConnection();
+
+        if ($connection === null) {
+            return [
+                'success' => false,
+                'id' => null,
+                'email' => null,
+                'message' => 'Not connected. Press Connect while signed in to Zoom as the user who holds the SMS number.',
+            ];
+        }
+
+        $token = $this->userAccessToken($connection);
+
+        if ($token === null) {
+            return [
+                'success' => false,
+                'id' => null,
+                'email' => null,
+                'message' => 'The stored authorisation could not be refreshed. Press Connect to authorise again.',
+            ];
+        }
+
+        $user = $this->tokenUser($connection, $token, $fresh);
+
+        if (($user['id'] ?? '') === '') {
+            return [
+                'success' => false,
+                'id' => null,
+                'email' => null,
+                'message' => 'Zoom accepted the token but would not say who it belongs to. Check the user:read:user scope is granted.',
+            ];
+        }
+
+        $email = (string) ($user['email'] ?? '');
+
+        return [
+            'success' => true,
+            'id' => (string) $user['id'],
+            'email' => $email !== '' ? $email : null,
+            'message' => 'Connected as ' . ($email !== '' ? $email : $user['id'])
+                . ' - every SMS will go out as this Zoom user. If that is not the user who holds the line\'s number,'
+                . ' sign out of Zoom, sign in as that user, and press Connect again.',
+        ];
+    }
+
+    /** True when a user-level token is in play, i.e. sends bypass the S2S app. */
+    public function hasUserConnection(): bool
+    {
+        return $this->userConnection() !== null;
+    }
+
+    /**
+     * The active `zoom_sms` connection, or null.
+     *
+     * Never throws. This is called on the send path of an app whose
+     * `oauth_connections` table may not have been migrated yet, and a missing
+     * table must degrade to "no user connection" rather than take the send
+     * down with it.
+     */
+    private function userConnection(): ?OAuthConnection
+    {
+        try {
+            return OAuthConnection::getActiveConnection(self::USER_PROVIDER);
+        } catch (\Throwable $e) {
+            Log::warning('sms.zoom could not read the user OAuth connection', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * A usable bearer token for the connection, refreshing first if it is due.
+     *
+     * The framework has a refresh, but only behind OAuthManager's PROTECTED
+     * `ensureValidConnection()` - reachable from `testConnection()` and
+     * `syncData()` and from nothing else. Rather than widen that, the same two
+     * public pieces it is built from are used here: the provider's
+     * `refreshToken()` (which knows the token URL and the client auth) and the
+     * model's `updateTokens()` (which persists the result).
+     */
+    private function userAccessToken(OAuthConnection $connection): ?string
+    {
+        $due = $connection->expires_at === null
+            ? false
+            : $connection->expires_at->lte(now()->addSeconds(self::REFRESH_SKEW_SECONDS));
+
+        if ($due && ! $this->refreshUserToken($connection)) {
+            return null;
+        }
+
+        $token = (string) ($connection->access_token ?? '');
+
+        return $token !== '' ? $token : null;
+    }
+
+    /**
+     * Swap the refresh token for a new pair, and store BOTH.
+     *
+     * Zoom rotates the refresh token on every refresh and invalidates the old
+     * one immediately, so persisting only the access token would work once and
+     * then lock the integration out until somebody re-consented.
+     * `OAuthConnection::updateTokens()` writes both.
+     */
+    private function refreshUserToken(OAuthConnection $connection): bool
+    {
+        $this->refreshed = true;
+
+        if (! $connection->refresh_token) {
+            return false;
+        }
+
+        try {
+            $provider = app(OAuthManager::class)->getProvider(self::USER_PROVIDER);
+
+            if ($provider === null) {
+                Log::warning('sms.zoom has a connection but no registered provider', [
+                    'provider' => self::USER_PROVIDER,
+                ]);
+
+                return false;
+            }
+
+            $tokens = $provider->refreshToken((string) $connection->refresh_token);
+        } catch (\Throwable $e) {
+            Log::error('sms.zoom token refresh threw', ['error' => $e->getMessage()]);
+
+            return false;
+        }
+
+        if (! is_array($tokens) || empty($tokens['access_token'])) {
+            Log::error('sms.zoom token refresh was refused', [
+                'connection_id' => $connection->id,
+            ]);
+
+            return false;
+        }
+
+        $connection->updateTokens($tokens);
+        $connection->refresh();
+
+        Log::info('sms.zoom user token refreshed', [
+            'connection_id' => $connection->id,
+            'expires_at' => $connection->expires_at?->toIso8601String(),
+        ]);
+
+        return true;
+    }
+
+    /**
+     * The Zoom user the token belongs to, cached on the connection.
+     *
+     * `GET /users/me` on every send would double the outbound calls for an
+     * answer that cannot change while the connection lives, so the id and email
+     * are written into the connection's metadata the first time and read from
+     * there afterwards. A reconnect makes a new row, so the cache cannot
+     * outlive the token it describes.
+     *
+     * @return array{id: string, email: string}
+     */
+    private function tokenUser(OAuthConnection $connection, string $token, bool $fresh = false): array
+    {
+        $cached = (array) Arr::get($connection->metadata ?? [], 'token_user', []);
+
+        if (! $fresh && ($cached['id'] ?? '') !== '') {
+            return ['id' => (string) $cached['id'], 'email' => (string) ($cached['email'] ?? '')];
+        }
+
+        try {
+            $response = Http::withToken($token)
+                ->timeout(10)
+                ->acceptJson()
+                ->get(rtrim($this->baseUrl, '/') . '/users/me');
+        } catch (\Throwable $e) {
+            Log::warning('sms.zoom could not read /users/me', ['error' => $e->getMessage()]);
+
+            return ['id' => '', 'email' => ''];
+        }
+
+        if (! $response->successful()) {
+            Log::warning('sms.zoom /users/me was refused', [
+                'status' => $response->status(),
+                'message' => $response->json('message'),
+            ]);
+
+            return ['id' => '', 'email' => ''];
+        }
+
+        $user = [
+            'id' => (string) ($response->json('id') ?? ''),
+            'email' => (string) ($response->json('email') ?? ''),
+        ];
+
+        if ($user['id'] !== '') {
+            $connection->update([
+                'metadata' => array_merge($connection->metadata ?? [], [
+                    'token_user' => $user + ['fetched_at' => now()->toIso8601String()],
+                ]),
+            ]);
+        }
+
+        return $user;
+    }
+
+    /**
+     * The send itself, on the user's token.
+     *
+     * Http rather than the inherited curl `request()`: that one hard-wires the
+     * Server-to-Server token, and this is the one call that must not use it.
+     * The return shape is identical, because ZoomSmsTransport, SmsSystemSender
+     * and `errorMessage()` all read it.
+     *
+     * @param  array<string, mixed>  $body
+     * @return array{success: bool, http_code: int, data: mixed}
+     */
+    private function sendAsUser(string $token, array $body): array
+    {
+        try {
+            $response = Http::withToken($token)
+                ->timeout(20)
+                ->acceptJson()
+                ->post(rtrim($this->baseUrl, '/') . $this->sendPath(), $body);
+        } catch (\Throwable $e) {
+            Log::error('sms.zoom user-token send threw', ['error' => $e->getMessage()]);
+
+            return [
+                'success' => false,
+                'http_code' => 0,
+                'data' => ['message' => 'Could not reach Zoom: ' . $e->getMessage()],
+            ];
+        }
+
+        // A 401 means the token died between the expiry check and the call.
+        // One refresh, one retry, then give up - `$this->refreshed` makes that
+        // true even if the expiry check already refreshed.
+        if ($response->status() === 401 && ! $this->refreshed) {
+            $connection = $this->userConnection();
+
+            if ($connection !== null && $this->refreshUserToken($connection)) {
+                $retry = (string) ($connection->access_token ?? '');
+
+                if ($retry !== '') {
+                    return $this->sendAsUser($retry, $body);
+                }
+            }
+        }
+
+        if (! $response->successful()) {
+            Log::error('Zoom SMS send failed on the user token', [
+                'http_code' => $response->status(),
+                'response' => $response->body(),
+            ]);
+        }
+
+        return [
+            'success' => $response->successful(),
+            'http_code' => $response->status(),
+            'data' => $response->json() ?? null,
+        ];
     }
 
     private function sendPath(): string

@@ -58,8 +58,30 @@ class GenericOAuthProvider extends AbstractOAuthProvider
         return $this->oauthUrl('token_url');
     }
 
+    /**
+     * The scopes to ask consent for.
+     *
+     * A `scopes` CREDENTIAL wins over the config list when one is set, because
+     * providers reorganise their scope names without warning — Zoom has done it
+     * twice — and an "invalid scope" refusal at the consent screen would
+     * otherwise need a deploy to fix. Typed into the settings field it is a
+     * comma- or whitespace-separated list.
+     */
     public function getScopes(): array
     {
+        $override = $this->registry()->credential($this->providerKey, 'scopes');
+
+        if (is_string($override) && trim($override) !== '') {
+            return array_values(array_filter(array_map(
+                'trim',
+                preg_split('/[\s,]+/', $override) ?: []
+            )));
+        }
+
+        if (is_array($override) && $override !== []) {
+            return array_values($override);
+        }
+
         return (array) ($this->definition()['scopes'] ?? []);
     }
 
@@ -148,10 +170,26 @@ class GenericOAuthProvider extends AbstractOAuthProvider
 
     private function tokenRequest(array $payload): ?array
     {
+        $request = Http::asForm()->timeout(15);
+
+        // `oauth.client_auth = 'basic'` sends the client credentials as HTTP
+        // Basic instead of form fields. Zoom's token endpoint accepts ONLY
+        // that — client_id/client_secret in the body come back as
+        // `invalid_client`, which reads like a wrong secret and is not. The
+        // default stays 'body' so Zoho is untouched, and the credentials are
+        // removed from the payload because RFC 6749 §2.3.1 forbids sending
+        // them both ways at once.
+        if (($this->definition()['oauth']['client_auth'] ?? 'body') === 'basic') {
+            $request = $request->withBasicAuth(
+                (string) ($payload['client_id'] ?? $this->getClientId()),
+                (string) ($payload['client_secret'] ?? $this->getClientSecret())
+            );
+
+            unset($payload['client_id'], $payload['client_secret']);
+        }
+
         try {
-            $response = Http::asForm()
-                ->timeout(15)
-                ->post($this->getTokenUrl(), $payload);
+            $response = $request->post($this->getTokenUrl(), $payload);
         } catch (\Throwable $e) {
             Log::error('OAuth token request threw', [
                 'provider' => $this->providerKey,

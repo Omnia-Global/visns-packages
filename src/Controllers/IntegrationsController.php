@@ -201,13 +201,17 @@ class IntegrationsController extends \App\Http\Controllers\Controller
         $message = 'No test is defined for this integration.';
 
         try {
-            if ($this->registry->driver($provider) === 'oauth2') {
-                $result = $this->oauth->testConnection($provider);
-                $ok = (bool) ($result['success'] ?? false);
-                $message = $result['message'] ?? ($ok ? 'Connected' : 'The provider refused the request.');
-            } elseif (is_callable($definition['test'] ?? null)) {
-                // An api_key integration supplies its own probe, because only
-                // it knows what a cheap authenticated call looks like.
+            if (is_callable($definition['test'] ?? null)) {
+                // An integration's own probe wins, for BOTH drivers, because
+                // only it knows what a cheap authenticated call looks like.
+                //
+                // It used to be reachable for api_key integrations only, which
+                // meant an oauth2 integration's declared probe was dead config:
+                // the oauth2 branch below proves the stored token has not
+                // expired and nothing else — not that the API will answer, and
+                // not WHICH account was connected. A user-level integration
+                // (Zoom SMS) lives or dies on that second question, so the
+                // probe that can answer it has to be the one that runs.
                 $result = ($definition['test'])($this->registry->credentials($provider));
 
                 if (is_array($result)) {
@@ -217,6 +221,10 @@ class IntegrationsController extends \App\Http\Controllers\Controller
                     $ok = (bool) $result;
                     $message = $ok ? 'Connected' : 'The service refused the credentials.';
                 }
+            } elseif ($this->registry->driver($provider) === 'oauth2') {
+                $result = $this->oauth->testConnection($provider);
+                $ok = (bool) ($result['success'] ?? false);
+                $message = $result['message'] ?? ($ok ? 'Connected' : 'The provider refused the request.');
             }
         } catch (\Throwable $e) {
             // A thrown probe is a failed test, not a 500 — the user is on a

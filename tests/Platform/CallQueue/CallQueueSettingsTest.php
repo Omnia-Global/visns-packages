@@ -173,19 +173,21 @@ class CallQueueSettingsTest extends TestCase
             ->assertJsonPath('queues.0.queue_id', 'queue-1');
     }
 
-    public function test_a_locally_configured_queue_missing_from_zoom_is_still_shown(): void
+    public function test_a_locally_configured_queue_missing_from_zoom_is_not_shown(): void
     {
         $this->fakeZoom();
 
         ZoomCallQueueSetting::create(['queue_id' => 'gone-queue', 'excluded' => true]);
 
-        // Otherwise a stale exclusion silently keeps a recreated queue from
-        // popping, with nothing on screen to explain why.
+        // A row for a queue Zoom no longer lists is a leftover of a deleted or
+        // recreated queue; a recreated queue carries a new id, so the stale row
+        // cannot affect it and only clutters the page. The row itself stays in
+        // the table and reappears in the zoom-unreachable fallback.
         $this->actingAs($this->staffWith('Call Queue Settings'))
             ->getJson('/ajax/call-queue/settings')
             ->assertOk()
-            ->assertJsonPath('queues.1.queue_id', 'gone-queue')
-            ->assertJsonPath('queues.1.missing_in_zoom', true);
+            ->assertJsonCount(1, 'queues')
+            ->assertJsonPath('queues.0.queue_id', 'queue-1');
     }
 
     /*
