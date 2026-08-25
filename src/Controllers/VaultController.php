@@ -63,6 +63,14 @@ class VaultController extends \App\Http\Controllers\Controller
     {
         $user = $request->user();
 
+        // The only parameter here worth rejecting rather than correcting: page
+        // size and sort are preferences with sane fallbacks, but a client
+        // filter that silently becomes `client_id = 0` would answer "this
+        // client has no credentials" to a caller that asked something else.
+        $request->validate([
+            'client_id' => ['nullable', 'integer', 'min:1'],
+        ]);
+
         $perPage = (int) $request->input('per_page', self::DEFAULT_PER_PAGE);
         $perPage = max(1, min($perPage, self::MAX_PER_PAGE));
 
@@ -853,6 +861,104 @@ class VaultController extends \App\Http\Controllers\Controller
                 'label' => $row->{$labelColumn},
             ])->values(),
         ]);
+    }
+
+    /**
+     * The clients that actually have entries in this vault.
+     *
+     * This is what fills the list's "client" filter, and it is deliberately
+     * NOT `clients()`: that one is a typeahead over every client in the CRM -
+     * thousands of them, almost none with a credential - whereas a filter is
+     * only useful offering the handful that would return something.
+     *
+     * Read off the ENTRY table rather than joined to the client model, for two
+     * reasons. It works in an application that has no client model configured
+     * at all (the label is denormalised onto the row), and it cannot offer a
+     * client whose only entries this user is not allowed to see - the list is
+     * built through `visibleTo`, so a private entry of somebody else's cannot
+     * put a client's name in front of you.
+     *
+     * The count travels with each row: "which of these is worth filtering to"
+     * is the question being asked, and a name on its own does not answer it.
+     */
+    public function entryClients(Request $request)
+    {
+        $user = $request->user();
+
+        $query = VaultEntry::query()
+            ->visibleTo($user)
+            ->whereNotNull($this->entriesTable() . '.client_id');
+
+        // Matches the list: with "Show deleted" on, a client whose entries are
+        // all deleted is still worth being able to filter to.
+        if ($request->boolean('include_deleted') && $this->manages($user)) {
+            $query->withTrashed();
+        }
+
+        // Kept on the Eloquent builder rather than dropped to the base query:
+        // the soft-delete scope is applied when the Eloquent builder runs, and
+        // `getQuery()` would hand back a query with that scope missing - which
+        // would count deleted entries into every row above.
+        $rows = $query
+            ->select('client_id', 'client_label')
+            ->selectRaw('COUNT(*) as entries')
+            // Grouped by BOTH columns rather than by the id alone: a client
+            // renamed between two saves leaves two labels on the table, and
+            // `GROUP BY client_id` while selecting `client_label` is exactly
+            // what ONLY_FULL_GROUP_BY refuses. The pair is folded back to one
+            // row per client below, where the newest label wins.
+            ->groupBy('client_id', 'client_label')
+            ->get();
+
+        $clients = [];
+
+        foreach ($rows as $row) {
+            $id = (int) $row->client_id;
+            $label = trim((string) ($row->client_label ?? ''));
+
+            if (!isset($clients[$id])) {
+                $clients[$id] = [
+                    'id' => $id,
+                    'label' => $label,
+                    'entries' => 0,
+                    'url' => $this->clientUrl($id),
+                ];
+            }
+
+            $clients[$id]['entries'] += (int) $row->entries;
+
+            // A row whose label was never filled in must not blank out a name
+            // the other rows do have.
+            if ($clients[$id]['label'] === '' && $label !== '') {
+                $clients[$id]['label'] = $label;
+            }
+        }
+
+        $clients = array_values($clients);
+
+        foreach ($clients as $i => $client) {
+            // An id with no name anywhere is still selectable - the entries
+            // exist and the filter has to be able to reach them.
+            if ($client['label'] === '') {
+                $clients[$i]['label'] = 'Client #' . $client['id'];
+            }
+        }
+
+        // Sorted here rather than in SQL: the collation that decides whether
+        // "acme" comes before "Zeta" differs between MySQL and SQLite, and the
+        // list is short enough that PHP settling it costs nothing.
+        usort(
+            $clients,
+            fn($a, $b) => strcasecmp((string) $a['label'], (string) $b['label'])
+        );
+
+        return response()->json(['data' => $clients]);
+    }
+
+    /** The entry table's configured name, for a qualified column. */
+    private function entriesTable(): string
+    {
+        return (new VaultEntry())->getTable();
     }
 
 }

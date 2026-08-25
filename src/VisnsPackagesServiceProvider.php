@@ -1042,6 +1042,16 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                         Route::get($base . '/clients', [VaultController::class, 'clients'])
                             ->name('visns.vault.clients');
 
+                        // The clients that actually HAVE entries, for the
+                        // list's client filter. Registered before `/{id}` for
+                        // the same reason as everything else in this block:
+                        // a literal segment must not be eaten by the
+                        // parameter route.
+                        Route::get($base . '/entry-clients', [
+                            VaultController::class,
+                            'entryClients',
+                        ])->name('visns.vault.entry-clients');
+
                 Route::middleware($confirm)->post(
                     $base . '/confirm-password',
                     [VaultController::class, 'confirmPassword']

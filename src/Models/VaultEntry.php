@@ -169,11 +169,16 @@ class VaultEntry extends Model
      */
     public function searchableColumns(): array
     {
-        $allowed = ['title', 'username', 'url', 'visibility'];
+        // `client_label` is the client's name denormalised onto the entry (see
+        // VaultController::assignClient). Searching it is what makes typing a
+        // client's name into the search box find their credentials, which is
+        // how most people look for one - they remember whose firewall it is
+        // long before they remember what the entry was called.
+        $allowed = ['title', 'username', 'url', 'visibility', 'client_label'];
 
         $configured = (array) ModuleConfig::get(
             'vault.search_columns',
-            ['title', 'username', 'url']
+            ['title', 'username', 'url', 'client_label']
         );
 
         $columns = array_values(
