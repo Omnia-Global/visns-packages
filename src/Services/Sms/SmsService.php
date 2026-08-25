@@ -373,6 +373,17 @@ class SmsService
             }
         }
 
-        event(new $class($thread, $message));
+        try {
+            event(new $class($thread, $message));
+        } catch (\Throwable $e) {
+            // The events broadcast synchronously (ShouldBroadcastNow), so a
+            // dead or misconfigured websocket server would otherwise turn a
+            // successfully stored message into a 500. Realtime is an
+            // enhancement; the send/receive must not depend on it.
+            Log::warning('sms broadcast failed; message stored, realtime update dropped', [
+                'event' => $key,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }
