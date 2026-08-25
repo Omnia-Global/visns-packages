@@ -709,10 +709,10 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             $this->registerMessagingRoutes($middleware, $prefix);
 
             // Register dynamic entity routes first (they will be more general)
-            $this->registerDynamicEntityRoutes();
+            $this->registerDynamicEntityRoutes($middleware);
 
             // Register custom routes after (they will override/supplement dynamic routes)
-            $this->registerCustomEntityRoutes();
+            $this->registerCustomEntityRoutes($middleware);
         }
     }
 
@@ -1440,18 +1440,47 @@ class VisnsPackagesServiceProvider extends ServiceProvider
     }
 
     /**
+     * The middleware stack for one dynamic entity's routes.
+     *
+     * The base is the package-wide `routes_middleware` (normally `['web']`,
+     * and required here regardless — without it there is no session, so
+     * nothing downstream can even tell WHO is asking). On top of that,
+     * `entity_config.<entity>.middleware` if the application declared one,
+     * or a bare `auth` when it did not.
+     *
+     * That default is the point of this method existing. These routes used
+     * to be registered with no middleware at all, which made every dynamic
+     * entity — contacts, customers, the lot — readable and writable by an
+     * unauthenticated request, while the `middleware` key the config file
+     * documented was never read. An entity that truly must be public now
+     * has to say so explicitly (`'middleware' => []` in its entity_config).
+     *
+     * @return array<int, string>
+     */
+    protected function entityMiddleware(string $entity, array $base): array
+    {
+        $declared = config("visns-packages.entity_config.{$entity}.middleware");
+
+        return array_values(array_unique(array_merge(
+            $base,
+            is_array($declared) ? $declared : ['auth']
+        )));
+    }
+
+    /**
      * Register dynamic entity routes for DynamicController
      *
      * @return void
      */
-    protected function registerDynamicEntityRoutes()
+    protected function registerDynamicEntityRoutes(array $middleware)
     {
         $dynamicEntities = config('visns-packages.dynamic_entities', []);
 
         if (!empty($dynamicEntities)) {
             foreach ($dynamicEntities as $entity) {
                 // Register dynamic routes for all entities (controller is now determined by DynamicController)
-                Route::prefix("ajax/{$entity}")
+                Route::middleware($this->entityMiddleware($entity, $middleware))
+                    ->prefix("ajax/{$entity}")
                     ->controller(
                         \Visnsstudio\VisnsPackages\Controllers\DynamicController::class
                     )
@@ -1470,7 +1499,8 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                         Route::post('/sort/{id}', 'templateSort');
                     });
 
-                Route::prefix("ajax/{$entity}/json")
+                Route::middleware($this->entityMiddleware($entity, $middleware))
+                    ->prefix("ajax/{$entity}/json")
                     ->controller(
                         \Visnsstudio\VisnsPackages\Controllers\DynamicJsonController::class
                     )
@@ -1490,9 +1520,10 @@ class VisnsPackagesServiceProvider extends ServiceProvider
     /**
      * Register custom routes for entities with specific custom methods
      *
+     * @param array<int, string> $middleware the package's routes_middleware
      * @return void
      */
-    protected function registerCustomEntityRoutes()
+    protected function registerCustomEntityRoutes(array $middleware)
     {
         $entityConfig = config('visns-packages.entity_config', []);
 
@@ -1502,7 +1533,8 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                 $controllerClass = $this->getControllerClassForEntity($entity);
 
                 if ($controllerClass) {
-                    Route::prefix("ajax/{$entity}")
+                    Route::middleware($this->entityMiddleware($entity, $middleware))
+                        ->prefix("ajax/{$entity}")
                         ->controller($controllerClass)
                         ->group(function () use ($config) {
                             foreach (
