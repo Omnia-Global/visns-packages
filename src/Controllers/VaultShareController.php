@@ -3,7 +3,10 @@
 namespace Visnsstudio\VisnsPackages\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\Rule;
+use Visnsstudio\VisnsPackages\Mail\VaultShareLink;
 use Visnsstudio\VisnsPackages\Models\VaultAccessLog;
 use Visnsstudio\VisnsPackages\Models\VaultEntry;
 use Visnsstudio\VisnsPackages\Models\VaultShare;
@@ -39,6 +42,16 @@ use Visnsstudio\VisnsPackages\Support\ModuleConfig;
  * would be worse than attributing it. The `ip` and `user_agent` on the row are
  * the recipient's, so the two together read as "the link Reyhan created was
  * opened from 203.0.113.9", which is the sentence that is actually wanted.
+ *
+ * **A failed email never costs the share.** `store()` will optionally mail the
+ * link, because creation is the only moment the raw URL exists on this side.
+ * The send is therefore wrapped: a dead transport comes back as `email_error`
+ * alongside the URL, not as an error status. Failing the request would leave a
+ * live share row nobody can ever reach the link for - an orphan credential -
+ * and would push the sender straight back to pasting the password into chat,
+ * which is the thing this feature exists to stop. The mirror of that rule is
+ * that `recipient_email` is validated BEFORE a token is minted: a request that
+ * is going to be refused must not leave a share behind either.
  */
 class VaultShareController extends \App\Http\Controllers\Controller
 {
@@ -73,6 +86,13 @@ class VaultShareController extends \App\Http\Controllers\Controller
 
         return response()->json([
             'data' => $shares->map(fn(VaultShare $share) => $this->row($share))->values(),
+            // The dialog's own configuration, on the one request it already
+            // makes when it opens. A separate settings endpoint would be a
+            // second round trip to learn one boolean, and a front end that
+            // guessed would offer an email field the create endpoint refuses.
+            'meta' => [
+                'email_enabled' => $this->emailEnabled(),
+            ],
         ]);
     }
 
@@ -100,7 +120,24 @@ class VaultShareController extends \App\Http\Controllers\Controller
             // would put the recipient's expiry on the sender's clock.
             'expires_in_hours' => ['required', 'integer', 'min:1', 'max:' . ($maxDays * 24)],
             'max_views' => ['nullable', 'integer', 'min:1', 'max:' . self::MAX_VIEWS_CEILING],
+            // Optional, and validated here rather than after the row is
+            // written: a 422 that has already minted a share leaves a live
+            // link nobody holds the URL for.
+            'recipient_email' => ['nullable', 'email', 'max:191'],
+            'recipient_name' => ['nullable', 'string', 'max:191'],
         ]);
+
+        $recipient = trim((string) ($data['recipient_email'] ?? ''));
+        $recipientName = trim((string) ($data['recipient_name'] ?? ''));
+
+        // Refused before anything is created, for the same reason. An
+        // application that has switched emailing off has usually done it
+        // because its mail goes somewhere it should not.
+        if ($recipient !== '' && ! $this->emailEnabled()) {
+            return response()->json([
+                'message' => 'Emailing share links is switched off here - create the link and send it yourself.',
+            ], 422);
+        }
 
         $fields = VaultShare::cleanFields($data['fields']);
 
@@ -131,14 +168,35 @@ class VaultShareController extends \App\Http\Controllers\Controller
             'views' => 0,
         ]);
 
-        VaultAccessLog::record($entry, 'share_create', $request);
+        $url = self::publicUrl($token);
+
+        // Sent from here and nowhere else: this request is the only moment the
+        // raw URL exists on the server, so a "send it later" path could not be
+        // built even if it were wanted.
+        $sent = $recipient === ''
+            ? []
+            : $this->email($share, $entry, $url, $user, $recipient, $recipientName);
+
+        // Where the link went belongs in the audit trail whether or not the
+        // send succeeded - "we tried to email it to this address" is exactly
+        // what somebody asks about afterwards. The URL itself never goes in:
+        // see VaultAccessLog.
+        VaultAccessLog::record(
+            $entry,
+            'share_create',
+            $request,
+            $recipient === '' ? [] : [
+                'recipient_email' => $recipient,
+                'emailed' => ! isset($sent['email_error']),
+            ]
+        );
 
         return response()
             ->json(
                 $this->row($share) + [
                     // The one and only time this appears anywhere.
-                    'url' => self::publicUrl($token),
-                ],
+                    'url' => $url,
+                ] + $sent,
                 201
             )
             ->header('Cache-Control', 'no-store');
@@ -192,6 +250,73 @@ class VaultShareController extends \App\Http\Controllers\Controller
     /* ---------------------------------------------------------------------
      | Internals
      | ------------------------------------------------------------------- */
+
+    /**
+     * Whether this installation will email a link at all.
+     *
+     * Read in two places - the create endpoint and the list endpoint's `meta`,
+     * which is where the dialog learns whether to offer the field - so that the
+     * UI and the rule it is a face for cannot drift apart.
+     */
+    private function emailEnabled(): bool
+    {
+        return (bool) ModuleConfig::get('vault.share.email_enabled', true);
+    }
+
+    /**
+     * Mail the link, and never let that decide whether the share stands.
+     *
+     * Returns what to merge into the create response: `emailed_to` on success,
+     * `email_error` on a transport failure. Nothing throws out of here. The
+     * share row is already written and the URL already minted - the caller is
+     * holding the only copy of it that will ever exist - so a thrown exception
+     * would trade a delivery problem for a lost credential and an orphan row.
+     *
+     * The Mailable is handed the title and nothing else off the entry. That is
+     * enforced there rather than assumed here, but it is worth saying twice:
+     * the point of a share link is that the credential does not travel by mail.
+     *
+     * @return array<string, string>
+     */
+    private function email(
+        VaultShare $share,
+        VaultEntry $entry,
+        string $url,
+        $user,
+        string $recipient,
+        string $recipientName
+    ): array {
+        $sender = $this->displayName($user);
+
+        try {
+            Mail::to($recipient)->send(new VaultShareLink(
+                $url,
+                (string) $entry->title,
+                // A share always has somebody behind it in practice; the
+                // fallback keeps the subject line a sentence if it ever does
+                // not.
+                $sender ?: 'A colleague',
+                $share->expires_at ?? now(),
+                $share->max_views === null ? null : (int) $share->max_views,
+                $recipientName !== '' ? $recipientName : null
+            ));
+
+            return ['emailed_to' => $recipient];
+        } catch (\Throwable $e) {
+            // The address is logged, the URL is not - a share link in
+            // storage/logs is a credential in storage/logs.
+            Log::warning('vault.share could not email a share link', [
+                'share_id' => $share->id,
+                'vault_entry_id' => $entry->id,
+                'recipient' => $recipient,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'email_error' => 'The link could not be emailed - copy it from here instead.',
+            ];
+        }
+    }
 
     /**
      * The full public URL for a token.

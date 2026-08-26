@@ -597,6 +597,11 @@ class VaultController extends \App\Http\Controllers\Controller
                     'id' => $log->id,
                     'action' => $log->action,
                     'ip' => $log->ip,
+                    // The per-action detail - today, the address a share link
+                    // was emailed to. Non-secret facts about the access only;
+                    // see VaultAccessLog. Administrators only, like the rest
+                    // of this payload.
+                    'meta' => $log->meta ?: null,
                     'created_at' => $log->created_at?->toIso8601String(),
                     'user' => $log->user === null ? null : [
                         'id' => $log->user->id,

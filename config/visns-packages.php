@@ -1097,9 +1097,26 @@ return [
             // no way to opt out of expiry.
             'max_days' => 30,
 
+            /*
+            | Whether the create endpoint will EMAIL the link for the sender.
+            | The mail carries the entry's title, the link and the link's
+            | limits - never a username, password, code or note - and goes out
+            | on the application's default mailer at the moment the link is
+            | minted, which is the only moment the raw URL exists on this side.
+            |
+            | False removes the field from the dialog (the share list endpoint
+            | says so in its `meta`) and refuses a `recipient_email` on create.
+            | Worth turning off wherever outbound mail goes somewhere it should
+            | not - a staging environment on a catch-all mailbox, say.
+            */
+            'email_enabled' => true,
+
             // The Blade view the public page renders. Publish
             // `visns-packages-views` and point this at your own to restyle it.
             'view' => 'visns-packages::vault.share',
+
+            // The Blade view the email above renders. Same deal.
+            'mail_view' => 'visns-packages::vault.mail.share-link',
         ],
 
         // Null = the package-wide `user_model`.

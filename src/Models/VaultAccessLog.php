@@ -36,6 +36,13 @@ use Visnsstudio\VisnsPackages\Support\ModuleConfig;
  * the person who is genuinely accountable for it. The `ip` and `user_agent` on
  * the row are the reader's, so the pair reads as "the link this user created
  * was opened from that address", which is the sentence the log is for.
+ *
+ * `meta` is the free-form detail an action word cannot carry - today, the
+ * address a share link was emailed to. NOTHING SECRET MAY GO IN IT. This table
+ * is unencrypted, append-only, readable by every vault administrator and kept
+ * for a year; a password, a share token or a share URL written here would
+ * outlive every control the vault has. Where a link went is a fact about the
+ * share, not a piece of it.
  */
 class VaultAccessLog extends Model
 {
@@ -47,10 +54,12 @@ class VaultAccessLog extends Model
         'action',
         'ip',
         'user_agent',
+        'meta',
         'created_at',
     ];
 
     protected $casts = [
+        'meta' => 'array',
         'created_at' => 'datetime',
     ];
 
@@ -85,13 +94,25 @@ class VaultAccessLog extends Model
      * Returns null when there is no authenticated user: nothing in this module
      * reaches an unauthenticated request, but a log write is not the place to
      * throw if that ever changes.
+     *
+     * `$meta` is the per-action detail described in the class docblock. Read
+     * the rule there before putting anything in it.
+     *
+     * @param  array<string, mixed>  $meta
      */
     public static function record(
         VaultEntry|int|null $entry,
         string $action,
-        Request $request
+        Request $request,
+        array $meta = []
     ): ?self {
-        return static::recordAs($entry, $action, $request, $request->user()?->id);
+        return static::recordAs(
+            $entry,
+            $action,
+            $request,
+            $request->user()?->id,
+            $meta
+        );
     }
 
     /**
@@ -104,12 +125,15 @@ class VaultAccessLog extends Model
      *
      * Still returns null with no user id, for the same reason record() did: a
      * log write is not the place to throw.
+     *
+     * @param  array<string, mixed>  $meta
      */
     public static function recordAs(
         VaultEntry|int|null $entry,
         string $action,
         Request $request,
-        $userId
+        $userId,
+        array $meta = []
     ): ?self {
         $userId = is_numeric($userId) ? (int) $userId : null;
 
@@ -129,6 +153,9 @@ class VaultAccessLog extends Model
             'user_agent' => $request->userAgent() === null
                 ? null
                 : substr($request->userAgent(), 0, 255),
+            // Null rather than an empty object for the ordinary action with
+            // nothing to add, so "did this row carry detail" is one IS NULL.
+            'meta' => $meta === [] ? null : $meta,
             'created_at' => now(),
         ]);
     }
