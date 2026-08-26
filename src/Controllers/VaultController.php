@@ -712,7 +712,21 @@ class VaultController extends \App\Http\Controllers\Controller
             'url' => ['nullable', 'string', 'max:2048', $this->urlRule()],
             'password' => ['nullable', 'string', 'max:4096'],
             'totp_secret' => ['nullable', 'string', 'max:2048'],
-            'notes' => ['nullable', 'string', 'max:20000'],
+            // The ceiling is the storage column, worked backwards. `notes` is
+            // TEXT — 65,535 BYTES on MySQL — and the `encrypted` cast stores
+            // Laravel's envelope rather than the plaintext: base64 of a JSON
+            // object holding the iv, the base64 ciphertext and the mac, which
+            // measures ~1.78x the plaintext, not the ~1.4x a plain base64
+            // estimate suggests. 32,000 x 1.78 is roughly 57KB, comfortably
+            // inside the column; the old 20,000 was simply cautious.
+            //
+            // It is also exactly where the consuming application's Zoho raw
+            // backup writes its mirrors (CredentialBackup::MAX_NOTES_BYTES
+            // splits a payload at this same number), so a lower cap here would
+            // make one of those entries impossible to save from the edit form
+            // — the user would open a legitimate entry, change its title, and
+            // be told the notes are too long.
+            'notes' => ['nullable', 'string', 'max:32000'],
             'tags' => ['nullable', 'array', 'max:50'],
             // `nullable` because the framework's ConvertEmptyStringsToNull
             // middleware turns a blank tag into null before this ever runs;
