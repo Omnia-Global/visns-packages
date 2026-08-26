@@ -2,6 +2,7 @@
 
 namespace Visnsstudio\VisnsPackages\Services\Sms;
 
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Log;
 use Visnsstudio\VisnsPackages\Contracts\SmsTransport;
 use Visnsstudio\VisnsPackages\Events\SmsMessageUpdated;
@@ -134,7 +135,17 @@ class SmsService
             $message->raw_payload = $result->raw;
         }
 
-        $message->save();
+        try {
+            $message->save();
+        } catch (UniqueConstraintViolationException $e) {
+            // Zoom's phone.sms_sent webhook beat this save and recorded the same
+            // provider id on a row of its own. SmsWebhookHandler claims an
+            // in-flight send rather than inserting when it can see one, so this
+            // is the narrow window that guard cannot cover - and `provider_message_id`
+            // is unique, so the collision arrives as a 500 on a text the client
+            // has already received. It must not.
+            $this->resolveProviderIdCollision($message, (string) $result->providerMessageId);
+        }
 
         // Even a not_connected message is the newest thing in the thread: the
         // list has to show it, or the practice loses track of what it tried to
@@ -144,6 +155,52 @@ class SmsService
         $this->dispatch('updated', SmsMessageUpdated::class, $thread, $message);
 
         return $message;
+    }
+
+    /**
+     * Get an outbound row saved when the provider id it is holding is already on
+     * another row.
+     *
+     * There is only one unique index on the table, so a collision here is all but
+     * always the webhook having inserted its own copy of this same send - same
+     * thread, same direction, same body says so before anything is deleted. That
+     * copy has
+     * no `user_id` - Zoom identifies a sender by extension, not by CRM user -
+     * whereas this row knows who pressed send, so this row is the one to keep and
+     * the webhook's is deleted. Nothing points at it by foreign key:
+     * SmsThread::touchLastMessage() stores denormalised copies, and send() calls
+     * it immediately after this, so the thread's pointer self-heals.
+     *
+     * Anything else on that id - an unrelated message, somehow - and the id is
+     * dropped instead. Losing the provider id costs a later status webhook; not
+     * saving would cost the record of a text the client has already read.
+     */
+    private function resolveProviderIdCollision(SmsMessage $message, string $providerId): void
+    {
+        $other = SmsMessage::query()
+            ->where('provider_message_id', $providerId)
+            ->where('id', '!=', $message->id)
+            ->first();
+
+        if ($other !== null
+            && (int) $other->thread_id === (int) $message->thread_id
+            && $other->direction === SmsMessage::DIRECTION_OUT
+            && $other->body === $message->body
+        ) {
+            // Zoom's own timestamp is better than none, and the webhook has it
+            // when a not-yet-successful result did not stamp one here.
+            $message->sent_at = $message->sent_at ?? $other->sent_at;
+
+            $other->delete();
+
+            $message->save();
+
+            return;
+        }
+
+        $message->provider_message_id = null;
+
+        $message->save();
     }
 
     /**

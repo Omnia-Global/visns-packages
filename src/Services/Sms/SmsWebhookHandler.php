@@ -166,6 +166,42 @@ class SmsWebhookHandler
 
         $thread = SmsThread::findOrCreateFor($line, $to, $this->sms->clientResolver());
 
+        // The same race systemMessage() guards, one table over: SmsService::send()
+        // writes its row BEFORE calling the transport and stores Zoom's message id
+        // AFTER the HTTP response, and the webhook is free to arrive in between.
+        // The id lookup above found nothing because the id is not on the row yet -
+        // not because this is somebody's text from the Zoom app. A queued outbound
+        // on this very thread, seconds old and with no provider id, is that
+        // in-flight send: claim it. Recording a second row instead would duplicate
+        // the message in the thread AND hand `send()` a unique-key violation when
+        // it finally saves the id it is holding. The body has to match too: two
+        // staff texting the same client within the window are two in-flight rows,
+        // and claiming by recency alone could pin this confirmation - and its
+        // provider id - on the other one's message.
+        $inFlight = SmsMessage::query()
+            ->where('thread_id', $thread->id)
+            ->where('direction', SmsMessage::DIRECTION_OUT)
+            ->whereNull('provider_message_id')
+            ->where('status', SmsMessage::STATUS_QUEUED)
+            ->where('body', (string) (Arr::get($object, 'message') ?? ''))
+            ->where('created_at', '>=', Carbon::now()->subMinutes(2))
+            ->orderByDesc('id')
+            ->first();
+
+        if ($inFlight !== null) {
+            $this->sms->markStatus(
+                $inFlight,
+                SmsMessage::STATUS_SENT,
+                null,
+                [
+                    'provider_message_id' => $this->messageId($object),
+                    'sent_at' => $inFlight->sent_at ?? $this->dateTime($object),
+                ]
+            );
+
+            return 'ok';
+        }
+
         $recorded = $this->sms->recordOutboundFromProvider(
             $thread,
             (string) (Arr::get($object, 'message') ?? ''),

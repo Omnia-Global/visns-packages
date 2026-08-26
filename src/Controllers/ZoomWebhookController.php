@@ -12,6 +12,7 @@ use Visnsstudio\VisnsPackages\Events\CallQueueRinging;
 use Visnsstudio\VisnsPackages\Models\ZoomCallQueueSetting;
 use Visnsstudio\VisnsPackages\Models\ZoomLiveQueueCall;
 use Visnsstudio\VisnsPackages\Services\Sms\SmsWebhookHandler;
+use Visnsstudio\VisnsPackages\Services\Zoom\PhonePresenceRecorder;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 
 /**
@@ -85,6 +86,26 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
                 return $this->urlValidation($body);
             }
 
+            /*
+            | The Zoom Phone roster ("who is on a call right now") is folded in
+            | FIRST, before the queue logic decides whether this call is one it
+            | cares about.
+            |
+            | The two features read the same events and disagree about almost
+            | everything else. The queue pop wants calls ringing in a QUEUE and
+            | drops the row the moment somebody answers; the roster wants every
+            | staff extension, including direct dials and outbound calls, and
+            | keeps its row until the call ends. Running the recorder here — on
+            | its own, never inside handleRinging() — is what stops the queue's
+            | "not a queue call, ignore it" early return from also throwing away
+            | the roster's most common event.
+            |
+            | It never changes the response: the recorder swallows its own
+            | failures, and this endpoint's contract with Zoom is 200 and the
+            | queue's status word.
+            */
+            $this->recordPresence($event, $body);
+
             if (in_array($event, self::RINGING_EVENTS, true)) {
                 return $this->handleRinging($event, $body);
             }
@@ -101,6 +122,12 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
                 return $this->handleSms($event, $body);
             }
 
+            // A presence-only event (an outbound leg, say) is handled, not
+            // unhandled — logging it as a mystery would bury the real ones.
+            if (in_array($event, PhonePresenceRecorder::events(), true)) {
+                return response()->json(['status' => 'ok']);
+            }
+
             $this->logUnhandled($event, $body, 'event not handled');
         } catch (\Throwable $e) {
             // A malformed payload must never 500 back to Zoom — that gets the
@@ -112,6 +139,25 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
         }
 
         return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Fold a call event into the Zoom Phone roster.
+     *
+     * Silent when the presence feature is switched off, and silent when it
+     * fails: the recorder catches its own exceptions so a roster problem can
+     * never cost the call queue its pop.
+     */
+    private function recordPresence(string $event, array $body): void
+    {
+        if (! in_array($event, PhonePresenceRecorder::events(), true)) {
+            return;
+        }
+
+        app(PhonePresenceRecorder::class)->record(
+            $event,
+            (array) Arr::get($body, 'payload.object', [])
+        );
     }
 
     /**

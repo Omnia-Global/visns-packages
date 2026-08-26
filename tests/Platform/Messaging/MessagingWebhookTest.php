@@ -377,6 +377,86 @@ class MessagingWebhookTest extends MessagingTestCase
         $this->assertSame($line->id, SmsThread::first()->line_id);
     }
 
+    public function test_a_sent_confirmation_claims_a_send_still_in_flight(): void
+    {
+        $member = $this->member();
+        $line = $this->line([$member], ['phone_number' => self::LINE_NUMBER]);
+        $thread = $this->thread($line, '+61412345678');
+
+        // The shape SmsService::send() leaves behind while it is waiting on
+        // Zoom's HTTP response: the row exists, the provider id does not yet.
+        $message = SmsMessage::create([
+            'thread_id' => $thread->id,
+            'direction' => SmsMessage::DIRECTION_OUT,
+            'body' => 'Booked you in.',
+            'status' => SmsMessage::STATUS_QUEUED,
+            'user_id' => $member->id,
+        ]);
+
+        $this->signedPost([
+            'event' => 'phone.sms_sent',
+            'payload' => ['object' => [
+                'message_id' => 'msg-raced',
+                'message' => 'Booked you in.',
+                'sender' => ['phone_number' => self::LINE_NUMBER],
+                'to_members' => [['phone_number' => '+61412345678']],
+                'date_time' => '2026-08-21T03:04:05Z',
+            ]],
+        ])->assertOk()->assertJson(['status' => 'ok']);
+
+        // One row, not two: the webhook confirmed our send rather than inventing
+        // a second copy of it - which would also have collided with the unique
+        // provider id the send is about to store.
+        $this->assertSame(1, SmsMessage::count());
+
+        $message->refresh();
+
+        $this->assertSame('msg-raced', $message->provider_message_id);
+        $this->assertSame(SmsMessage::STATUS_SENT, $message->status);
+        $this->assertNotNull($message->sent_at);
+
+        // And it is still attributed to whoever pressed send.
+        $this->assertSame($member->id, (int) $message->user_id);
+    }
+
+    public function test_a_sent_confirmation_does_not_claim_an_old_queued_message(): void
+    {
+        $member = $this->member();
+        $line = $this->line([$member], ['phone_number' => self::LINE_NUMBER]);
+        $thread = $this->thread($line, '+61412345678');
+
+        // Older than the race window - a send that stalled hours ago, not the
+        // one this event is about. Claiming it would rewrite an unrelated
+        // message's history.
+        $stale = SmsMessage::create([
+            'thread_id' => $thread->id,
+            'direction' => SmsMessage::DIRECTION_OUT,
+            'body' => 'Something from this morning.',
+            'status' => SmsMessage::STATUS_QUEUED,
+            'user_id' => $member->id,
+            'created_at' => now()->subHours(3),
+            'updated_at' => now()->subHours(3),
+        ]);
+
+        $this->signedPost([
+            'event' => 'phone.sms_sent',
+            'payload' => ['object' => [
+                'message_id' => 'msg-from-app',
+                'message' => 'Sent from my phone',
+                'sender' => ['phone_number' => self::LINE_NUMBER],
+                'to_members' => [['phone_number' => '+61412345678']],
+                'date_time' => '2026-08-21T03:04:05Z',
+            ]],
+        ])->assertOk()->assertJson(['status' => 'ok']);
+
+        $this->assertSame(2, SmsMessage::count());
+
+        $stale->refresh();
+
+        $this->assertSame(SmsMessage::STATUS_QUEUED, $stale->status);
+        $this->assertNull($stale->provider_message_id);
+    }
+
     public function test_an_unrecognised_sms_event_is_acknowledged(): void
     {
         // Not in SMS_EVENTS at all: falls through to the controller's own

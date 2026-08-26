@@ -11,6 +11,7 @@ use Visnsstudio\VisnsPackages\Services\Zoom\ZoomSmsClient;
 use Visnsstudio\VisnsPackages\Support\SmsChannel;
 use Visnsstudio\VisnsPackages\Tests\Fixtures\Messaging\AppSmsReceived;
 use Visnsstudio\VisnsPackages\Tests\Fixtures\Messaging\FakeZoomSmsClient;
+use Visnsstudio\VisnsPackages\Tests\Fixtures\Messaging\RacingSmsTransport;
 
 /**
  * Sending: the three transports, what each leaves behind, and what the browsers
@@ -23,6 +24,7 @@ class MessagingSendTest extends MessagingTestCase
         parent::setUp();
 
         FakeZoomSmsClient::reset();
+        RacingSmsTransport::reset();
     }
 
     private function useZoom(): void
@@ -285,6 +287,100 @@ class MessagingSendTest extends MessagingTestCase
             ->postJson(self::BASE . '/threads/' . $thread->id . '/messages', ['body' => 'Hello'])
             ->assertStatus(201)
             ->assertJsonPath('message.status', SmsMessage::STATUS_NOT_CONNECTED);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | The webhook getting there first
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_a_webhook_that_beats_the_send_does_not_cost_the_message(): void
+    {
+        // `provider_message_id` is unique, so the webhook having already stored
+        // the id this send is holding used to surface as a 500 on a text the
+        // client had already received.
+        $this->app['config']->set(
+            'visns-packages.messaging.transport',
+            RacingSmsTransport::class
+        );
+
+        $member = $this->member();
+        $line = $this->line([$member]);
+        $thread = $this->thread($line);
+
+        $this->actingAs($member)
+            ->postJson(self::BASE . '/threads/' . $thread->id . '/messages', ['body' => 'On my way'])
+            ->assertStatus(201);
+
+        $outbound = SmsMessage::where('direction', 'out')->get();
+
+        // One message in the thread, not the send's row and the webhook's copy
+        // of it.
+        $this->assertCount(1, $outbound);
+        $this->assertSame(RacingSmsTransport::PROVIDER_ID, $outbound[0]->provider_message_id);
+
+        // The row that survives is the one that knows who pressed send - the
+        // webhook's copy has no user, because Zoom identifies a sender by
+        // extension.
+        $this->assertSame($member->id, (int) $outbound[0]->user_id);
+        $this->assertSame(SmsMessage::STATUS_SENT, $outbound[0]->status);
+        $this->assertNotNull($outbound[0]->sent_at);
+
+        // And the thread list summary is the surviving row's, not the deleted
+        // one's - touchLastMessage() runs after the collision is resolved.
+        $fresh = $thread->fresh();
+
+        $this->assertSame('On my way', $fresh->last_message_preview);
+        $this->assertSame(SmsMessage::STATUS_SENT, $fresh->last_message_status);
+    }
+
+    public function test_a_provider_id_already_used_elsewhere_costs_the_id_not_the_message(): void
+    {
+        $this->app['config']->set(
+            'visns-packages.messaging.transport',
+            RacingSmsTransport::class
+        );
+
+        // The collision here is with a row that is nothing to do with this send,
+        // so the transport writes no duplicate of its own.
+        RacingSmsTransport::$inserts = false;
+
+        $member = $this->member();
+        $line = $this->line([$member]);
+        $thread = $this->thread($line);
+        $other = $this->thread($line, '+61498765432');
+
+        // Nothing should put the same id on an unrelated conversation, but if a
+        // provider ever did, the send must still be recorded.
+        $stranger = SmsMessage::create([
+            'thread_id' => $other->id,
+            'direction' => 'in',
+            'body' => 'Not this send at all.',
+            'status' => SmsMessage::STATUS_RECEIVED,
+            'provider_message_id' => RacingSmsTransport::PROVIDER_ID,
+            'received_at' => now(),
+        ]);
+
+        $this->actingAs($member)
+            ->postJson(self::BASE . '/threads/' . $thread->id . '/messages', ['body' => 'On my way'])
+            ->assertStatus(201);
+
+        $mine = SmsMessage::where('thread_id', $thread->id)->where('direction', 'out')->first();
+
+        // Ours kept its body, its status and its sender; only the id it could
+        // not have is gone.
+        $this->assertNotNull($mine);
+        $this->assertNull($mine->provider_message_id);
+        $this->assertSame('On my way', $mine->body);
+        $this->assertSame(SmsMessage::STATUS_SENT, $mine->status);
+        $this->assertSame($member->id, (int) $mine->user_id);
+
+        // And the stranger's row is exactly where it was.
+        $this->assertSame(
+            RacingSmsTransport::PROVIDER_ID,
+            $stranger->fresh()->provider_message_id
+        );
     }
 
     /*

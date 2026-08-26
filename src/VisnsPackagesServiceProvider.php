@@ -41,6 +41,7 @@ use Visnsstudio\VisnsPackages\Controllers\ImpersonationController;
 use Visnsstudio\VisnsPackages\Controllers\ZoomWebhookController;
 use Visnsstudio\VisnsPackages\Controllers\CallQueueController;
 use Visnsstudio\VisnsPackages\Controllers\CallQueueSettingsController;
+use Visnsstudio\VisnsPackages\Controllers\PhonePresenceController;
 use Visnsstudio\VisnsPackages\Controllers\VaultController;
 use Visnsstudio\VisnsPackages\Controllers\VaultPublicShareController;
 use Visnsstudio\VisnsPackages\Controllers\VaultShareController;
@@ -884,6 +885,37 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                     'update',
                 ]);
             });
+
+        /*
+        | The Zoom Phone roster.
+        |
+        | Registered only when `presence.enabled` is on, so a deployment running
+        | the call queue alone does not grow an endpoint that would answer with
+        | an empty list and a "not connected" flag.
+        |
+        | The permission defaults to the queue monitor's. Anyone who may watch
+        | the pop already sees a caller's number and the client it resolves to,
+        | which is exactly what the roster shows — a separate permission would
+        | mean a new row assigned to nobody, and a header icon that renders for
+        | no one until an administrator goes and ticks it. `presence.permission`
+        | is there for a deployment that wants that anyway.
+        */
+        if (config('visns-packages.call_queue.presence.enabled', false)) {
+            $presence = config(
+                'visns-packages.call_queue.presence.permission'
+            ) ?: $monitor;
+
+            Route::middleware(
+                $this->withPermission($routeMiddleware, $presence)
+            )
+                ->prefix($prefix)
+                ->group(function () use ($uris) {
+                    Route::get(
+                        $uris['presence'] ?? 'ajax/call-queue/presence',
+                        [PhonePresenceController::class, 'index']
+                    );
+                });
+        }
     }
 
 

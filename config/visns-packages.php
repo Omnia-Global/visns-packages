@@ -803,6 +803,7 @@ return [
             'webhook' => 'api/zoom/webhook',
             'live' => 'ajax/call-queue/live',
             'settings' => 'ajax/call-queue/settings',
+            'presence' => 'ajax/call-queue/presence',
         ],
 
         // The webhook is registered outside the api group so its URI is
@@ -824,6 +825,73 @@ return [
         'tables' => [
             'live_calls' => 'zoom_live_queue_calls',
             'settings' => 'zoom_call_queue_settings',
+        ],
+
+        /*
+        |----------------------------------------------------------------------
+        | Zoom Phone presence — the live extension roster
+        |----------------------------------------------------------------------
+        |
+        | "Who is on the phone right now": every Zoom Phone extension, who is
+        | free, who is ringing, who is talking, to what number, and which client
+        | that number resolves to. Served at `uris.presence` and drawn by
+        | ZoomPhoneBadge in visns-components.
+        |
+        | TWO SOURCES, because Zoom offers no single one:
+        |
+        |   WHO   GET /phone/users, cached for `roster_cache_ttl`. Only the REST
+        |         API knows about an extension that has not had a call today, so
+        |         a directory built from webhooks alone would start empty and
+        |         never list the quiet half of the office. This is the only Zoom
+        |         request the feature makes, and it is never made in a browser.
+        |   WHAT  The signed webhook this module already receives, recorded per
+        |         extension by PhonePresenceRecorder. Zoom Phone exposes no "is
+        |         this extension busy" endpoint: /users/{id}/presence_status is
+        |         Zoom MEETINGS presence (available / in a meeting / DND) and
+        |         says nothing about calls, and it needs a scope a Phone-only
+        |         marketplace app does not carry.
+        |
+        | The consequence to know about: "Available" means "no live call leg for
+        | this extension", which is an inference from the webhook subscription
+        | being healthy. The popover prints the age of its snapshot next to the
+        | status dots rather than letting a row of green stand on its own.
+        |
+        | EXTRA EVENT SUBSCRIPTIONS beyond the call queue pop's, on the Zoom
+        | marketplace app: phone.caller_ringing and phone.caller_connected, which
+        | are the outbound legs. The inbound ones are already subscribed.
+        |
+        | Client names come from `caller_enrichment` below — the same hook the
+        | pop uses, so number -> client is resolved in exactly one place.
+        |
+        | Off by default: it costs an extra table and a wider read of the event
+        | stream, and an application running the queue pop alone should not grow
+        | either.
+        */
+        'presence' => [
+            'enabled' => false,
+
+            // Null = `permissions.monitor`. Whoever may watch the call pop
+            // already sees a live caller's number and the client it resolves
+            // to, which is what the roster shows; a separate permission would
+            // be a row assigned to nobody, i.e. a header chip that renders for
+            // no one until an administrator ticks it.
+            'permission' => null,
+
+            'tables' => ['live_calls' => 'zoom_phone_live_calls'],
+
+            // Staff join a few times a year; the popover opens all day.
+            'roster_cache_ttl' => 600,
+
+            // Legs Zoom never closed. Two windows because they mean different
+            // things: a call can genuinely run for an hour, a phone cannot ring
+            // for five minutes.
+            'stale_after_minutes' => 240,
+            'ringing_stale_after_minutes' => 5,
+
+            // Extension types that are somebody's handset. Call queues and auto
+            // receptionists are routing objects and never appear on a roster of
+            // people.
+            'extension_types' => ['user', 'commonarea'],
         ],
 
         /*

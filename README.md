@@ -1066,6 +1066,52 @@ Two tables are needed; publish and run the migrations
 already exists, so an application that already has them can adopt the module
 without a clash.
 
+#### Zoom Phone presence — the live extension roster
+
+An opt-in extension of this module (`call_queue.presence.enabled`): "who is on
+the phone right now", served at `ajax/call-queue/presence` and drawn by
+`ZoomPhoneBadge` in visns-components, mounted as a header chip through
+`Navigation`'s `renderers` slot.
+
+It answers with two sources joined, because Zoom offers no single one:
+
+| | Source | Why |
+| --- | --- | --- |
+| **Who** | `GET /phone/users`, cached `roster_cache_ttl` seconds | Only the REST API knows about an extension that has not had a call today. A directory built from webhooks alone starts empty and never lists the quiet half of the office. |
+| **What** | The signed webhook this module already receives | Zoom Phone has no "is this extension busy" endpoint. `/users/{id}/presence_status` is Zoom **Meetings** presence — available / in a meeting / DND — which says nothing about calls, and needs a scope a Phone-only app does not carry. |
+
+The browser never talks to Zoom: it reads this endpoint, then listens on the
+call queue's own broadcast channel for `.phone.presence` while it is open.
+Sharing the channel is deliberate — the two surfaces show the same class of
+information to the same people, so a second private channel would only mean a
+second `/broadcasting/auth` round trip and a second registration to keep in
+step. `presence.permission` defaults to `permissions.monitor` for the same
+reason.
+
+`PhonePresenceRecorder` writes one row per **leg** into `zoom_phone_live_calls`,
+keyed `call_id|extension`: Zoom reuses one `call_id` across every handset a
+queue call is fanned out to, so the call id alone would let five ringing phones
+overwrite each other into one row. A row is created when a leg starts ringing
+and lives until the call ends — unlike `zoom_live_queue_calls`, whose rows die
+on pickup because the pop is finished with them. Anything Zoom never closed is
+pruned on read (`stale_after_minutes`, `ringing_stale_after_minutes`).
+
+Client names come from the same `caller_enrichment` hook the pop uses, so
+number → client is resolved in exactly one place.
+
+Events the marketplace app must subscribe to, **beyond** the pop's:
+`phone.caller_ringing` and `phone.caller_connected` (the outbound legs). Without
+them the roster shows inbound calls only.
+
+Worth being explicit about: "Available" means *no live call leg for this
+extension*, which is only as true as the webhook subscription is healthy. The
+popover therefore always prints the age of its snapshot — or `Live`, once a
+channel has actually reported `pusher:subscription_succeeded` — rather than
+letting a row of green dots stand on its own.
+
+One extra table (`2026_08_27_090000_create_zoom_phone_live_calls_table.php`),
+idempotent like the other two.
+
 ### Vault (staff password manager)
 
 Added in 4.4.0. A shared credential store for staff: title, username, URL, an
