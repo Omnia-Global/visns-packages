@@ -3,7 +3,6 @@
     "description": "Laravel/PHP packages used for Omnia Global Projects",
     "type": "library",
     "license": "MIT",
-    "version": "4.9.0",
     "autoload": {
         "psr-4": {
             "Visnsstudio\\VisnsPackages\\": "src/"
