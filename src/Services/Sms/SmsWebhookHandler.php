@@ -97,7 +97,7 @@ class SmsWebhookHandler
 
         $message = $this->sms->recordInbound(
             $thread,
-            (string) (Arr::get($object, 'message') ?? ''),
+            $this->messageText($object),
             [
                 'provider_message_id' => $this->messageId($object),
                 'received_at' => $this->dateTime($object),
@@ -183,7 +183,7 @@ class SmsWebhookHandler
             ->where('direction', SmsMessage::DIRECTION_OUT)
             ->whereNull('provider_message_id')
             ->where('status', SmsMessage::STATUS_QUEUED)
-            ->where('body', (string) (Arr::get($object, 'message') ?? ''))
+            ->where('body', $this->messageText($object))
             ->where('created_at', '>=', Carbon::now()->subMinutes(2))
             ->orderByDesc('id')
             ->first();
@@ -204,7 +204,7 @@ class SmsWebhookHandler
 
         $recorded = $this->sms->recordOutboundFromProvider(
             $thread,
-            (string) (Arr::get($object, 'message') ?? ''),
+            $this->messageText($object),
             [
                 'provider_message_id' => $this->messageId($object),
                 'sent_at' => $this->dateTime($object),
@@ -389,6 +389,25 @@ class SmsWebhookHandler
             (string) (is_scalar($value) ? $value : ''),
             (string) ModuleConfig::get('messaging.default_country', 'AU')
         );
+    }
+
+    /**
+     * The message text, with Zoom's escaping undone.
+     *
+     * Zoom's SMS webhooks carry newlines as the two characters `\` `n` rather
+     * than as newlines — observed live: a text sent with real line breaks came
+     * back in phone.sms_sent with literal `\n\n` in `message`, and was stored
+     * (and displayed) that way. The handset showed the breaks correctly, so
+     * this is the webhook's encoding, not the message's content. Undo `\r\n`,
+     * `\n` and `\r` here, in the one place webhook text is read. The body a
+     * client who really typed a backslash-n loses is vanishingly rarer than
+     * the login codes and multi-line texts this mends.
+     */
+    private function messageText(array $object): string
+    {
+        $text = (string) (Arr::get($object, 'message') ?? '');
+
+        return str_replace(['\\r\\n', '\\n', '\\r'], "\n", $text);
     }
 
     private function messageId(array $object): ?string

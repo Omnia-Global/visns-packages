@@ -138,6 +138,26 @@ class MessagingWebhookTest extends MessagingTestCase
         $this->assertSame('zoom-user-1', $message->raw_payload['owner']['id']);
     }
 
+    public function test_zooms_escaped_newlines_are_stored_as_real_ones(): void
+    {
+        $member = $this->member();
+        $this->line([$member], ['phone_number' => self::LINE_NUMBER]);
+
+        // Observed live: Zoom's webhook carries a line break as the two
+        // characters backslash-n, not as a newline. The handler undoes it.
+        $this->signedPost($this->receivedPayload([
+            'message' => 'Line one.\n\nLine two.\r\nLine three.',
+        ]))->assertOk();
+
+        $message = SmsMessage::first();
+
+        $this->assertSame(
+            "Line one.\n\nLine two.\nLine three.",
+            $message->body
+        );
+        $this->assertStringNotContainsString('\\n', $message->body);
+    }
+
     public function test_an_inbound_text_resolves_the_client_through_the_configured_hook(): void
     {
         $this->app['config']->set(
