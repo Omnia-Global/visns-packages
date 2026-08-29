@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Laragear\WebAuthn\Contracts\WebAuthnAuthenticatable;
+use Laragear\WebAuthn\WebAuthnAuthentication;
 use Laravel\Sanctum\HasApiTokens;
 use Spatie\Permission\Traits\HasRoles;
 
@@ -14,9 +16,15 @@ use Spatie\Permission\Traits\HasRoles;
  * `last_logged_ip_address`, `dateLastLogged`, `company_contact_id`) all exist
  * here, so a test can prove the module writes them.
  */
-class User extends Authenticatable
+class User extends Authenticatable implements WebAuthnAuthenticatable
 {
     use HasApiTokens, HasRoles, Notifiable;
+
+    // Passkeys. A consuming application adds the same interface and trait to
+    // its own user model - the package cannot do it from the outside, which is
+    // why config/visns-packages.php's `passkeys` block says so in as many
+    // words.
+    use WebAuthnAuthentication;
 
     protected $guarded = [];
 

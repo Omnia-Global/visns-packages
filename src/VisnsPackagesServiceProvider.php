@@ -3,6 +3,7 @@
 namespace Visnsstudio\VisnsPackages;
 
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use Visnsstudio\VisnsPackages\Commands\PublishMigrationsCommand;
 use Visnsstudio\VisnsPackages\Commands\VaultPruneLogCommand;
@@ -35,7 +36,9 @@ use Visnsstudio\VisnsPackages\Controllers\IntegrationsController;
 use Visnsstudio\VisnsPackages\Controllers\OAuthController;
 use Visnsstudio\VisnsPackages\Middleware\AcceptJson;
 use Visnsstudio\VisnsPackages\Middleware\EnsureVaultPasswordConfirmed;
+use Visnsstudio\VisnsPackages\Middleware\ResolveWebAuthnRelyingParty;
 use Visnsstudio\VisnsPackages\Middleware\VerifyZoomWebhookSignature;
+use Visnsstudio\VisnsPackages\Controllers\PasskeyController;
 use Visnsstudio\VisnsPackages\Controllers\OtpController;
 use Visnsstudio\VisnsPackages\Controllers\ImpersonationController;
 use Visnsstudio\VisnsPackages\Controllers\ZoomWebhookController;
@@ -252,6 +255,15 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             EnsureVaultPasswordConfirmed::class
         );
 
+        // The passkey routes bind the WebAuthn ceremony to the host being
+        // browsed. Registered whether or not the module is enabled, so an
+        // application can carry its own passkey routes on the same name.
+        $this->aliasMiddlewareUnlessClaimed(
+            $router,
+            'webauthn.rp',
+            ResolveWebAuthnRelyingParty::class
+        );
+
         // The opt-in modules gate their routes with `permission:...`, an alias
         // normally declared in the application's own bootstrap.
         if (class_exists(\Spatie\Permission\Middleware\PermissionMiddleware::class)) {
@@ -264,6 +276,9 @@ class VisnsPackagesServiceProvider extends ServiceProvider
 
         // Register routes
         $this->registerRoutes();
+
+        // Stamp the credential a passkey sign-in used.
+        $this->registerPasskeyListeners();
 
         // Broadcast channel authorization for the call queue pop.
         $this->registerCallQueueChannel();
@@ -697,6 +712,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             // Opt-in modules. Each ships disabled, so an existing consumer sees
             // no new endpoints on upgrade.
             $this->registerOtpRoutes($apiMiddleware, $apiPrefix);
+            $this->registerPasskeyRoutes($middleware, $prefix);
             $this->registerImpersonationRoutes(
                 $middleware,
                 $prefix,
@@ -715,6 +731,116 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             // Register custom routes after (they will override/supplement dynamic routes)
             $this->registerCustomEntityRoutes($middleware);
         }
+    }
+
+    /**
+     * Passkeys (WebAuthn).
+     *
+     * Two unauthenticated endpoints, so the module is off until an application
+     * says otherwise. They sit under the package's web prefix, which with a
+     * stock config puts the sign-in pair at /login/passkey/options and
+     * /login/passkey - the two paths @visns-studio/visns-components' Login
+     * screen posts to, and therefore not free to move.
+     *
+     * The guest pair is throttled: they are the one unauthenticated route pair
+     * in this module that can hand out a session. The management set is behind
+     * `auth` because enrolment is a signed-in act by design - a passkey is
+     * added to an account that already proved itself, never used to claim one.
+     *
+     * @return void
+     */
+    protected function registerPasskeyRoutes(array $middleware, string $prefix)
+    {
+        if (!PasskeyController::isEnabled()) {
+            return;
+        }
+
+        $uris = (array) config('visns-packages.passkeys.uris', []);
+
+        $guestMiddleware = config('visns-packages.passkeys.guest_middleware');
+
+        if (!is_array($guestMiddleware)) {
+            $guestMiddleware = array_merge($middleware, [
+                'guest',
+                'webauthn.rp',
+                'throttle:20,1',
+            ]);
+        }
+
+        $authMiddleware = config('visns-packages.passkeys.auth_middleware');
+
+        if (!is_array($authMiddleware)) {
+            $authMiddleware = array_merge($middleware, ['auth', 'webauthn.rp']);
+        }
+
+        Route::middleware($guestMiddleware)
+            ->prefix($prefix)
+            ->controller(PasskeyController::class)
+            ->group(function () use ($uris) {
+                Route::post(
+                    $uris['login_options'] ?? 'login/passkey/options',
+                    'loginOptions'
+                );
+                Route::post($uris['login'] ?? 'login/passkey', 'login');
+            });
+
+        Route::middleware($authMiddleware)
+            ->prefix($prefix)
+            ->controller(PasskeyController::class)
+            ->group(function () use ($uris) {
+                Route::get($uris['index'] ?? 'ajax/passkeys', 'index');
+                Route::post(
+                    $uris['register_options'] ?? 'ajax/passkeys/options',
+                    'registerOptions'
+                );
+                Route::post(
+                    $uris['register'] ?? 'ajax/passkeys/register',
+                    'register'
+                );
+                Route::delete(
+                    $uris['destroy'] ?? 'ajax/passkeys/{id}',
+                    'destroy'
+                );
+            });
+    }
+
+    /**
+     * Stamp `last_used_at` on the credential a sign-in just used.
+     *
+     * The management screen shows this so a person can tell a key they still
+     * carry from one on a laptop they handed back two years ago - and so an
+     * unused credential is recognisable as a candidate for removal.
+     *
+     * A listener rather than controller code because the assertion is verified
+     * inside the auth provider, several layers below the controller, and this
+     * must also cover any future caller of it. Only wired up while the module
+     * is enabled, so the library's event carries no cost otherwise.
+     *
+     * @return void
+     */
+    protected function registerPasskeyListeners(): void
+    {
+        if (
+            !PasskeyController::isEnabled() ||
+            !class_exists(\Laragear\WebAuthn\Events\CredentialAsserted::class)
+        ) {
+            return;
+        }
+
+        Event::listen(
+            \Laragear\WebAuthn\Events\CredentialAsserted::class,
+            static function (
+                \Laragear\WebAuthn\Events\CredentialAsserted $event
+            ): void {
+                // No touch(): `updated_at` on a credential means "the record
+                // changed", and a bare update keeps a read out of any audit
+                // trail hanging off the model.
+                $event->credential
+                    ->newQuery()
+                    ->whereKey($event->credential->getKey())
+                    ->update(['last_used_at' => now()]);
+            }
+        );
     }
 
     /**

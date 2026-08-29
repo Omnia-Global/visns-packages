@@ -628,6 +628,104 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Passkeys (WebAuthn)
+    |--------------------------------------------------------------------------
+    |
+    | Signing in with the fingerprint, face or PIN that already unlocks a
+    | device. Two ceremonies, either side of the sign-in line:
+    |
+    |   enrolment (signed in)  options -> browser creates a key pair -> store
+    |   sign-in   (guest)      options -> browser signs the challenge -> verify
+    |
+    | Off by default: enabling it publishes two unauthenticated endpoints, so
+    | an existing consumer sees no new surface on upgrade.
+    |
+    | TWO THINGS THIS MODULE CANNOT DO FOR THE APPLICATION, because both live
+    | in files the package does not own. Enabling it without them leaves every
+    | ceremony failing:
+    |
+    |   1. The user model must carry the credential relation:
+    |
+    |        use Laragear\WebAuthn\Contracts\WebAuthnAuthenticatable;
+    |        use Laragear\WebAuthn\WebAuthnAuthentication;
+    |
+    |        class User extends Authenticatable implements WebAuthnAuthenticatable
+    |        {
+    |            use WebAuthnAuthentication;
+    |        }
+    |
+    |   2. config/auth.php's `users` provider must use the driver that knows
+    |      how to verify an assertion. `password_fallback` keeps every existing
+    |      email-and-password sign-in working; false would make passkeys the
+    |      only way in and lock out every account without one:
+    |
+    |        'users' => [
+    |            'driver' => 'eloquent-webauthn',
+    |            'model' => App\Models\User::class,
+    |            'password_fallback' => true,
+    |        ],
+    |
+    | The credentials table is one of the package's publishable migrations -
+    | `php artisan vendor:publish --tag=visns-packages-migrations`.
+    |
+    | The default URIs are not free to change casually: the sign-in pair is
+    | what @visns-studio/visns-components' Login screen posts to, and those
+    | two paths are baked into the published front end.
+    |
+    | The relying party and the ceremony's own settings live in the library's
+    | config/webauthn.php. Publishing that file is optional - left unpublished
+    | `relying_party.id` is empty, and the `webauthn.rp` middleware fills it in
+    | from the host of each request, which is what lets one deployment work on
+    | whatever host it is served from.
+    |
+    */
+    'passkeys' => [
+        'enabled' => false,
+
+        'uris' => [
+            // Guest. Fixed by the front end - see above.
+            'login_options' => 'login/passkey/options',
+            'login' => 'login/passkey',
+
+            // Authenticated management.
+            'index' => 'ajax/passkeys',
+            'register_options' => 'ajax/passkeys/options',
+            'register' => 'ajax/passkeys/register',
+            // The credential id is the route parameter. It is base64url, so it
+            // is path-safe, but it can run to several hundred characters.
+            'destroy' => 'ajax/passkeys/{id}',
+        ],
+
+        /*
+        | Null = the package default shown in the comment beside each.
+        |
+        | `webauthn.rp` binds the ceremony to the host being browsed; without
+        | it the library falls back to the host of APP_URL and every ceremony
+        | on any other origin fails on "Response origin not allowed for this
+        | app". The throttle is on the guest pair because those two are the one
+        | unauthenticated route pair that can hand out a session.
+        */
+        'guest_middleware' => null, // ['guest', 'webauthn.rp', 'throttle:20,1']
+        'auth_middleware' => null, // ['auth', 'webauthn.rp']
+
+        // A label the person will recognise in a list six months from now.
+        'alias_max_length' => 60,
+
+        // Relations loaded onto the user handed back by a successful sign-in.
+        // The front end reads permissions off this payload, exactly as it does
+        // for the email-and-password response.
+        'user_relations' => ['roles.permissions'],
+
+        'messages' => [
+            'assertion_rejected' =>
+                'That passkey was not accepted. Please try again, or sign in with your email.',
+            'not_found' => 'That passkey no longer exists.',
+            'disabled' => 'Passkeys are not enabled on this site.',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Passwordless OTP login
     |--------------------------------------------------------------------------
     |
