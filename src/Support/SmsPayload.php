@@ -4,6 +4,7 @@ namespace Visnsstudio\VisnsPackages\Support;
 
 use Visnsstudio\VisnsPackages\Models\SmsMessage;
 use Visnsstudio\VisnsPackages\Models\SmsThread;
+use Visnsstudio\VisnsPackages\Support\PhoneNumber;
 
 /**
  * The wire shape of a thread and a message.
@@ -36,6 +37,13 @@ class SmsPayload
                 'name' => $thread->client_name,
             ],
             'contact_name' => $thread->contact_name,
+            // Whether there is a handset at the other end. False for a sender
+            // ID (`Apple`, `ANZ`, a short code): those threads receive and can
+            // never answer. Decided here, on the server, so the compose box and
+            // the endpoint that would refuse the send cannot disagree - and
+            // sent on every thread, because a missing key would read to an
+            // older front end exactly like `false`.
+            'can_reply' => ! PhoneNumber::isSenderId($thread->external_number),
             'last_message' => $thread->last_message_at === null ? null : [
                 'body' => $thread->last_message_preview,
                 'direction' => $thread->last_direction,

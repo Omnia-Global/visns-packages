@@ -691,6 +691,7 @@ class MessagingThreadsTest extends MessagingTestCase
                     'display_number' => $thread->display_number,
                     'client' => ['id' => 42, 'name' => 'Client, Cleo (Ms)'],
                     'contact_name' => null,
+                    'can_reply' => true,
                     'last_message' => null,
                     'unread_count' => 0,
                     'archived_at' => null,

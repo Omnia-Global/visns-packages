@@ -283,6 +283,23 @@ class SmsController extends \App\Http\Controllers\Controller
         $user = $request->user();
         $thread = $this->visibleThread($request, $id);
 
+        // A thread opened by an inbound message from a sender ID - `Apple`,
+        // `ANZ`, a short code - has no handset behind it. The compose box is
+        // already replaced by a notice for these (SmsPayload's `can_reply`), so
+        // reaching here means a stale tab or a script; either way, saying so is
+        // better than storing a row and letting Zoom reject an address it was
+        // never going to accept. 422 rather than 403: nothing is forbidden, the
+        // recipient simply is not one.
+        if (PhoneNumber::isSenderId($thread->external_number)) {
+            $refusal = $thread->external_number
+                . ' is a sender ID, not a phone number — messages from it are one-way.';
+
+            return response()->json([
+                'message' => $refusal,
+                'errors' => ['body' => [$refusal]],
+            ], 422);
+        }
+
         $data = $request->validate([
             'body' => ['required', 'string', 'max:' . $this->maxBodyLength()],
         ]);

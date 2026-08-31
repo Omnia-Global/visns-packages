@@ -71,17 +71,40 @@ class MessagingCommandsTest extends MessagingTestCase
         ])->assertFailed();
     }
 
-    public function test_simulate_inbound_refuses_a_number_it_cannot_read(): void
+    /**
+     * Refused only when the sender is neither a number NOR a sender ID.
+     *
+     * This used to be asserted with '304', on the reasoning that an extension is
+     * not a phone number - true, but no longer a refusal: an inbound sender that
+     * cannot be read as a number is threaded as a sender ID now, because that is
+     * what `Apple` and a five-digit short code are. What is left to refuse is
+     * punctuation, which names nothing.
+     */
+    public function test_simulate_inbound_refuses_a_sender_that_is_neither(): void
     {
         $this->line([], ['phone_number' => '+61893752549']);
 
         $this->artisan('sms:simulate-inbound', [
             'line' => '08 9375 2549',
-            'from' => '304',
+            'from' => '---',
             'body' => 'Hello',
         ])->assertFailed();
 
         $this->assertSame(0, SmsMessage::count());
+    }
+
+    public function test_simulate_inbound_can_rehearse_a_two_factor_code(): void
+    {
+        $this->line([], ['phone_number' => '+61893752549']);
+
+        $this->artisan('sms:simulate-inbound', [
+            'line' => '08 9375 2549',
+            'from' => 'Apple',
+            'body' => 'Your Apple Account code is: 290172. Do not share it with anyone.',
+        ])->assertSuccessful();
+
+        $this->assertSame('Apple', SmsThread::first()->external_number);
+        $this->assertSame(1, SmsMessage::count());
     }
 
     public function test_simulate_inbound_refuses_to_run_while_zoom_is_connected(): void

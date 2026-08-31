@@ -42,6 +42,69 @@ class MessagingSendTest extends MessagingTestCase
     |--------------------------------------------------------------------------
     */
 
+    /*
+    |--------------------------------------------------------------------------
+    | Receive-only threads
+    |--------------------------------------------------------------------------
+    |
+    | A thread opened by an inbound message from an alphanumeric sender ID -
+    | `Apple`, a bank, a short code - has no handset behind it. It exists so a
+    | shared line can READ a two-factor code; nothing can be sent back to it.
+    */
+
+    public function test_a_thread_from_a_sender_id_says_it_cannot_be_replied_to(): void
+    {
+        $member = $this->member();
+        $line = $this->line([$member]);
+        $numbered = $this->thread($line);
+        $senderId = $this->thread($line, 'Apple');
+
+        $this->actingAs($member)
+            ->getJson(self::BASE . '/threads/' . $senderId->id)
+            ->assertOk()
+            ->assertJsonPath('thread.can_reply', false);
+
+        // The flag is on every thread, not only the awkward ones: a key that
+        // appeared on some rows and not others would read as false wherever it
+        // was missing.
+        $this->actingAs($member)
+            ->getJson(self::BASE . '/threads/' . $numbered->id)
+            ->assertOk()
+            ->assertJsonPath('thread.can_reply', true);
+    }
+
+    public function test_a_reply_to_a_sender_id_is_refused_with_a_sentence(): void
+    {
+        $this->useZoom();
+
+        $member = $this->member();
+        $line = $this->line([$member]);
+        $thread = $this->thread($line, 'Apple');
+
+        $this->actingAs($member)
+            ->postJson(self::BASE . '/threads/' . $thread->id . '/messages', [
+                'body' => 'thanks',
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Apple is a sender ID, not a phone number — messages from it are one-way.');
+
+        // Nothing was stored and nothing was sent: a queued row would sit in the
+        // thread as a message the practice believes it sent.
+        $this->assertSame(0, SmsMessage::count());
+        $this->assertSame([], FakeZoomSmsClient::$sends);
+    }
+
+    public function test_an_ordinary_thread_is_untouched_by_that_guard(): void
+    {
+        $member = $this->member();
+        $line = $this->line([$member]);
+        $thread = $this->thread($line);
+
+        $this->actingAs($member)
+            ->postJson(self::BASE . '/threads/' . $thread->id . '/messages', ['body' => 'Hello'])
+            ->assertStatus(201);
+    }
+
     public function test_a_send_with_no_transport_is_stored_rather_than_refused(): void
     {
         $member = $this->member();

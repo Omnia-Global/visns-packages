@@ -137,6 +137,63 @@ class PhoneNumberTest extends TestCase
         $this->assertFalse(PhoneNumber::isMobile('+61393752549'));
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | Sender IDs
+    |--------------------------------------------------------------------------
+    */
+
+    public static function senderIds(): array
+    {
+        return [
+            'apples own sender id' => ['Apple', 'Apple'],
+            'a bank' => ['ANZ', 'ANZ'],
+            'a short code' => ['27311', '27311'],
+            'a 1300 number no line can text' => ['1300123456', '1300123456'],
+            'whitespace is collapsed, case is not' => ['  Apple   Pay ', 'Apple Pay'],
+            'nothing at all' => ['', null],
+            'blank' => ['   ', null],
+            'punctuation is not a sender' => ['---', null],
+            'e164 belongs to toE164, not here' => ['+61412345678', null],
+            'wider than the column' => [str_repeat('A', 33), null],
+            'a control character' => ["App\x00le", null],
+        ];
+    }
+
+    #[DataProvider('senderIds')]
+    public function test_it_reads_the_senders_that_are_not_numbers(string $input, ?string $expected): void
+    {
+        $this->assertSame($expected, PhoneNumber::toSenderId($input));
+    }
+
+    /**
+     * The two readers must never both claim the same value: `isSenderId` is the
+     * discriminator the payload, the webhook and the compose box all branch on,
+     * and one address answering yes to both would put a Send button on a thread
+     * the endpoint refuses.
+     */
+    public function test_a_number_and_a_sender_id_are_never_the_same_thing(): void
+    {
+        foreach (['+61412345678', '0412 345 678', '61412345678', '0011 64 21234567'] as $number) {
+            $e164 = PhoneNumber::toE164($number);
+
+            $this->assertNotNull($e164, $number . ' should read as a number');
+            $this->assertNull(PhoneNumber::toSenderId($e164), $e164 . ' should not read as a sender id');
+            $this->assertFalse(PhoneNumber::isSenderId($e164), $e164 . ' is a number');
+        }
+
+        foreach (['Apple', 'ANZ', '27311'] as $senderId) {
+            $this->assertNull(PhoneNumber::toE164($senderId), $senderId . ' should not read as a number');
+            $this->assertTrue(PhoneNumber::isSenderId($senderId), $senderId . ' is a sender id');
+        }
+    }
+
+    public function test_a_sender_id_is_never_a_mobile_and_is_left_alone_for_display(): void
+    {
+        $this->assertFalse(PhoneNumber::isMobile('Apple'));
+        $this->assertSame('Apple', PhoneNumber::toLocal('Apple'));
+    }
+
     public function test_a_null_is_not_a_mobile(): void
     {
         $this->assertFalse(PhoneNumber::isMobile(null));

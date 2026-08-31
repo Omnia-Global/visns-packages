@@ -69,6 +69,16 @@ class SmsWebhookHandler
      * message for a number this application does not know about is logged and
      * dropped: the account may well have numbers that have nothing to do with
      * the CRM.
+     *
+     * THE SENDER IS NOT ALWAYS A NUMBER, and assuming it was silently cost the
+     * practice every message that matters most on a shared line. Apple's
+     * two-factor codes arrive from the alphanumeric sender ID `Apple`, a bank's
+     * from `ANZ`, a courier's from a short code; toE164() refuses all three,
+     * and this method used to answer that refusal by dropping the message with
+     * "sender number could not be read". A team sharing a login needs to READ
+     * those codes, so an unreadable number falls back to a sender ID and the
+     * thread is created receive-only. Only a sender that is not even that -
+     * empty, punctuation, longer than the column - is still dropped.
      */
     private function received(array $object): string
     {
@@ -78,10 +88,12 @@ class SmsWebhookHandler
             return $this->ignore('phone.sms_received', $object, 'no line matches the recipient number');
         }
 
-        $from = $this->e164(Arr::get($object, 'sender.phone_number'));
+        $sender = Arr::get($object, 'sender.phone_number');
+
+        $from = $this->e164($sender) ?? $this->senderId($sender);
 
         if ($from === null) {
-            return $this->ignore('phone.sms_received', $object, 'sender number could not be read');
+            return $this->ignore('phone.sms_received', $object, 'sender could not be read as a number or a sender id');
         }
 
         $thread = SmsThread::findOrCreateFor($line, $from, $this->sms->clientResolver());
@@ -389,6 +401,19 @@ class SmsWebhookHandler
             (string) (is_scalar($value) ? $value : ''),
             (string) ModuleConfig::get('messaging.default_country', 'AU')
         );
+    }
+
+    /**
+     * The same value read as an alphanumeric sender ID - `Apple`, `ANZ`, a
+     * short code - for the inbound path only.
+     *
+     * Deliberately NOT used by sent() or failed(): those events are about a
+     * message this line sent, and a line cannot send to a sender ID. Widening
+     * it there would invent an outbound thread nobody could have composed.
+     */
+    private function senderId($value): ?string
+    {
+        return PhoneNumber::toSenderId((string) (is_scalar($value) ? $value : ''));
     }
 
     /**

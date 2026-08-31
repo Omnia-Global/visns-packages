@@ -209,6 +209,160 @@ class MessagingWebhookTest extends MessagingTestCase
         $this->assertSame(0, SmsMessage::count());
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | Senders that are not numbers
+    |--------------------------------------------------------------------------
+    |
+    | Observed live on 2026-08-31: Apple's two-factor codes arrive on the shared
+    | line from the sender ID `Apple`, and every one of them was dropped with
+    | "sender number could not be read". A team sharing a login has to be able
+    | to read those, so they are threaded now.
+    */
+
+    public function test_a_two_factor_code_from_an_alphanumeric_sender_is_threaded(): void
+    {
+        $member = $this->member();
+        $this->line([$member], ['phone_number' => self::LINE_NUMBER]);
+
+        $this->signedPost($this->receivedPayload([
+            'sender' => ['phone_number' => 'Apple'],
+            'message' => 'Your Apple Account code is: 290172. Do not share it with anyone.',
+        ]))
+            ->assertOk()
+            ->assertJson(['status' => 'ok']);
+
+        $thread = SmsThread::first();
+
+        $this->assertNotNull($thread);
+        // Kept exactly as the carrier sent it: this string is the thread title.
+        $this->assertSame('Apple', $thread->external_number);
+        $this->assertSame('in', $thread->last_direction);
+
+        $this->assertSame(
+            'Your Apple Account code is: 290172. Do not share it with anyone.',
+            SmsMessage::first()->body
+        );
+    }
+
+    public function test_a_short_code_sender_is_threaded_too(): void
+    {
+        $member = $this->member();
+        $this->line([$member], ['phone_number' => self::LINE_NUMBER]);
+
+        $this->signedPost($this->receivedPayload([
+            'sender' => ['phone_number' => '27311'],
+        ]))->assertJson(['status' => 'ok']);
+
+        $this->assertSame('27311', SmsThread::first()->external_number);
+    }
+
+    /**
+     * The whole point of the shared line: the second code has to land in the
+     * SAME conversation, not open a new one - and the carrier is under no
+     * obligation to spell the sender the same way twice.
+     */
+    public function test_two_codes_from_one_sender_are_one_thread_whatever_the_casing(): void
+    {
+        $member = $this->member();
+        $this->line([$member], ['phone_number' => self::LINE_NUMBER]);
+
+        $this->signedPost($this->receivedPayload([
+            'sender' => ['phone_number' => 'Apple'],
+            'message_id' => 'msg-1',
+            'message' => 'Your Apple Account code is: 290172.',
+        ]))->assertJson(['status' => 'ok']);
+
+        $this->signedPost($this->receivedPayload([
+            'sender' => ['phone_number' => 'APPLE'],
+            'message_id' => 'msg-2',
+            'message' => 'Your Apple Account code is: 325661.',
+        ]))->assertJson(['status' => 'ok']);
+
+        $this->assertSame(1, SmsThread::count());
+        $this->assertSame(2, SmsMessage::count());
+        // The first spelling wins, because it is the one already on screen.
+        $this->assertSame('Apple', SmsThread::first()->external_number);
+    }
+
+    /**
+     * The resolver is the host application's number -> client hook. A sender ID
+     * has no digits in it to match, so asking is a question the application was
+     * never written to answer.
+     */
+    public function test_the_client_resolver_is_not_asked_about_a_sender_id(): void
+    {
+        $this->app['config']->set(
+            'visns-packages.messaging.client_resolver',
+            StubClientResolver::class
+        );
+
+        $member = $this->member();
+        $this->line([$member], ['phone_number' => self::LINE_NUMBER]);
+
+        $this->signedPost($this->receivedPayload([
+            'sender' => ['phone_number' => 'Apple'],
+            'message_id' => 'msg-sender-id',
+        ]))->assertJson(['status' => 'ok']);
+
+        $this->assertSame([], StubClientResolver::$calls);
+        $this->assertNull(SmsThread::first()->client_id);
+
+        // The control: the SAME configured resolver is still asked about a real
+        // number, so the assertion above is about sender IDs and not about a
+        // hook that was never wired up.
+        $this->signedPost($this->receivedPayload(['message_id' => 'msg-number']))
+            ->assertJson(['status' => 'ok']);
+
+        $this->assertSame(['+61412345678'], StubClientResolver::$calls);
+    }
+
+    /**
+     * A sender that is not a number AND not a sender id either. Still dropped,
+     * because there is nothing to call the thread.
+     */
+    public function test_a_sender_that_is_neither_is_still_acknowledged_and_dropped(): void
+    {
+        $member = $this->member();
+        $this->line([$member], ['phone_number' => self::LINE_NUMBER]);
+
+        $this->signedPost($this->receivedPayload([
+            'sender' => ['phone_number' => '   '],
+        ]))
+            ->assertOk()
+            ->assertJson(['status' => 'ignored']);
+
+        $this->assertSame(0, SmsThread::count());
+        $this->assertSame(0, SmsMessage::count());
+    }
+
+    /**
+     * A line cannot send TO a sender ID, so the outbound paths must not learn
+     * the fallback: an unreadable sender on a sent event is still an event this
+     * module has no thread for.
+     */
+    public function test_the_sender_id_fallback_does_not_reach_the_outbound_paths(): void
+    {
+        $member = $this->member();
+        $this->line([$member], ['phone_number' => self::LINE_NUMBER]);
+
+        $this->signedPost([
+            'event' => 'phone.sms_sent',
+            'payload' => ['object' => [
+                'session_id' => 'session-abc',
+                'message_id' => 'msg-out',
+                'message' => 'anything',
+                'sender' => ['phone_number' => 'Apple'],
+                'to_members' => [['phone_number' => '+61412345678']],
+            ]],
+        ])
+            ->assertOk()
+            ->assertJson(['status' => 'ignored']);
+
+        $this->assertSame(0, SmsThread::count());
+        $this->assertSame(0, SmsMessage::count());
+    }
+
     public function test_the_line_is_matched_however_zoom_spells_the_number(): void
     {
         $member = $this->member();

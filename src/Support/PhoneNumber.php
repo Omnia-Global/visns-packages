@@ -47,6 +47,14 @@ class PhoneNumber
     private const MIN_DIGITS = 6;
 
     /**
+     * The widest sender ID that will be accepted, and it is the width of
+     * `sms_threads.external_number` rather than a rule about sender IDs - the
+     * GSM alphabet caps a real one at 11 characters, and being generous here
+     * costs a junk thread where being strict costs a dropped message.
+     */
+    private const MAX_SENDER_ID = 32;
+
+    /**
      * Canonicalise a number to E.164 ("+61412345678"), or null when it cannot
      * be understood.
      *
@@ -128,6 +136,71 @@ class PhoneNumber
         // Anything else - a local number with no area code, an extension, a
         // truncated paste. Refused on purpose.
         return null;
+    }
+
+    /**
+     * The address of a sender that is not a phone number at all.
+     *
+     * An SMS "from" is not always a number. Apple's two-factor codes arrive
+     * from the alphanumeric sender ID `Apple`, a bank's from `ANZ`, a courier's
+     * from a five-digit short code - none of which toE164() can canonicalise,
+     * and all of which used to be dropped on the floor by the inbound webhook
+     * with "sender number could not be read". A practice that shares a login
+     * needs to READ those, so an address the module cannot turn into a number
+     * becomes a sender ID instead of becoming nothing.
+     *
+     * Kept verbatim rather than upper-cased: `Apple` is what the carrier sent
+     * and what the thread should be called, and inventing `APPLE` would put a
+     * shouted name at the top of somebody's inbox. Matching two casings onto
+     * one thread is the LOOKUP's job (SmsThread::findOrCreateFor), not this
+     * one's.
+     *
+     * Refused, and each for a reason:
+     *
+     *   ''            nothing to thread
+     *   '+61...'      already E.164's shape - isSenderId() must never be true
+     *                 for something toE164 could have read, or the two would
+     *                 disagree about the same address
+     *   '---'         no letter and no digit is punctuation, not a sender
+     *   33 characters longer than the column, so it could not round-trip
+     *   control chars a log and a thread title are not the place for them
+     */
+    public static function toSenderId(string $input): ?string
+    {
+        $value = trim((string) preg_replace('/\s+/u', ' ', $input));
+
+        if ($value === '' || str_starts_with($value, '+')) {
+            return null;
+        }
+
+        if (preg_match('/[\x00-\x1F\x7F]/', $value)) {
+            return null;
+        }
+
+        if (! preg_match('/[\p{L}\p{N}]/u', $value)) {
+            return null;
+        }
+
+        return mb_strlen($value) > self::MAX_SENDER_ID ? null : $value;
+    }
+
+    /**
+     * Is this stored address a sender ID rather than a number?
+     *
+     * The discriminator is the leading '+' and deliberately nothing cleverer:
+     * every address this class produces for a real number starts with one
+     * (finish() guarantees it) and toSenderId() refuses anything that does. One
+     * character decides it, so the webhook, the payload and the compose box can
+     * never reach three different answers about the same thread.
+     *
+     * What it means downstream is "receive-only": a sender ID has no handset
+     * behind it, and a reply to one is refused rather than billed.
+     */
+    public static function isSenderId(?string $address): bool
+    {
+        $address = trim((string) $address);
+
+        return $address !== '' && ! str_starts_with($address, '+');
     }
 
     /**

@@ -14,6 +14,7 @@ use Visnsstudio\VisnsPackages\Support\PhoneNumber;
  *
  *     php artisan sms:simulate-inbound "+61812345678" "0412 345 678" "Running late"
  *     php artisan sms:simulate-inbound 3 0412345678 "Running late"
+ *     php artisan sms:simulate-inbound 3 Apple "Your Apple Account code is: 290172."
  *
  * The line can be given as an id or as its number. Everything else - the thread,
  * the client match, the unread count, the broadcast - happens exactly as it
@@ -55,10 +56,16 @@ class SmsSimulateInboundCommand extends Command
         }
 
         $country = (string) ModuleConfig::get('messaging.default_country', 'AU');
-        $from = PhoneNumber::toE164((string) $this->argument('from'), $country);
+        $sender = (string) $this->argument('from');
+
+        // Same fallback the webhook takes, and the command would be no use
+        // without it: `Apple`, `ANZ` and a short code are exactly the senders
+        // worth rehearsing, since they are the ones a shared line receives
+        // two-factor codes from.
+        $from = PhoneNumber::toE164($sender, $country) ?? PhoneNumber::toSenderId($sender);
 
         if ($from === null) {
-            $this->error('That "from" number could not be read as a phone number.');
+            $this->error('That "from" could not be read as a phone number or a sender id.');
 
             return self::FAILURE;
         }

@@ -133,23 +133,45 @@ class SmsThread extends Model
     }
 
     /**
-     * Find the conversation for a line and an outside number, creating it the
+     * Find the conversation for a line and an outside address, creating it the
      * first time.
      *
      * The uniqueness of (line_id, external_number) is enforced in the schema as
      * well; firstOrCreate on the same pair is what makes an inbound webhook and
      * a staff member starting a conversation land on one row rather than two.
      *
-     * `$resolver` is the application's number -> client hook, called only when
-     * the thread is created: re-resolving on every message would put an
-     * application query on the webhook's hot path, and a client whose record
-     * changes later is relinked from the UI.
+     * `$address` is either an E.164 number or a sender ID (`Apple`, `ANZ`, a
+     * short code) - see PhoneNumber::toSenderId. Two things follow from the
+     * second case:
+     *
+     * **The lookup is case-insensitive for a sender ID.** The address is stored
+     * exactly as the carrier sent it, because that string is what the thread is
+     * called on screen; but `Apple` and `APPLE` are one conversation. MySQL's
+     * default collation would fold them anyway - SQLite's `=` would not - so
+     * the fold is written out rather than inherited from whichever database the
+     * application happens to run on. Without it the test suite and production
+     * would disagree about how many threads exist.
+     *
+     * **The client resolver is not called for one.** It is the application's
+     * number -> client hook and a sender ID has no digits to match; handing it
+     * `Apple` asks a host application's code a question it was never written to
+     * answer, for a lookup that cannot succeed.
+     *
+     * `$resolver` is called only when the thread is created: re-resolving on
+     * every message would put an application query on the webhook's hot path,
+     * and a client whose record changes later is relinked from the UI.
      */
-    public static function findOrCreateFor(SmsLine $line, string $e164, ?callable $resolver = null): self
+    public static function findOrCreateFor(SmsLine $line, string $address, ?callable $resolver = null): self
     {
+        $isSenderId = PhoneNumber::isSenderId($address);
+
         $thread = static::query()
             ->where('line_id', $line->id)
-            ->where('external_number', $e164)
+            ->when(
+                $isSenderId,
+                fn (Builder $q) => $q->whereRaw('UPPER(external_number) = ?', [mb_strtoupper($address)]),
+                fn (Builder $q) => $q->where('external_number', $address)
+            )
             ->first();
 
         if ($thread !== null) {
@@ -158,9 +180,9 @@ class SmsThread extends Model
 
         $client = null;
 
-        if ($resolver !== null) {
+        if ($resolver !== null && ! $isSenderId) {
             try {
-                $resolved = $resolver($e164);
+                $resolved = $resolver($address);
                 $client = is_array($resolved) ? $resolved : null;
             } catch (\Throwable $e) {
                 // Enrichment is a nicety - a throwing hook must not cost the
@@ -173,7 +195,7 @@ class SmsThread extends Model
 
         return static::create([
             'line_id' => $line->id,
-            'external_number' => $e164,
+            'external_number' => $address,
             'client_id' => $client['id'] ?? null,
             'client_name' => $client['name'] ?? null,
         ]);
