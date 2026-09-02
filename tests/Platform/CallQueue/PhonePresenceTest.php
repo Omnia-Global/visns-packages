@@ -55,6 +55,12 @@ class PhonePresenceTest extends TestCase
         $this->runPackageMigration(
             '2026_08_19_210000_create_zoom_live_queue_calls_table.php'
         );
+        // The live-call table's direct-call and missed-leg columns; every
+        // ringing webhook writes `last_ringing_at`, and the snapshot's live
+        // scope reads `last_missed_at`.
+        $this->runPackageMigration(
+            '2026_09_02_120000_add_kind_and_callee_to_zoom_live_queue_calls_table.php'
+        );
         $this->runPackageMigration(
             '2026_08_19_210100_create_zoom_call_queue_settings_table.php'
         );
@@ -229,7 +235,15 @@ class PhonePresenceTest extends TestCase
 
         // The enrichment hook queries the CRM, so it runs once per leg and not
         // again on the answer event that already has an answer.
-        $this->assertSame(['+61412345678'], StubCallerEnrichment::$calls);
+        //
+        // Twice on the ringing leg, once each: this payload rings a user's own
+        // extension, so it is now BOTH a roster leg and a direct call pop, and
+        // the two features resolve the caller independently. The answer event
+        // adds nothing, which is what this is really guarding.
+        $this->assertSame(
+            ['+61412345678', '+61412345678'],
+            StubCallerEnrichment::$calls
+        );
     }
 
     public function test_a_ringing_leg_becomes_active_when_it_is_answered(): void

@@ -87,7 +87,12 @@ class CallQueueSettingsController extends \App\Http\Controllers\Controller
         if (! $result['success']) {
             return response()->json([
                 'queues' => $local
+                    // The direct-calls row is not a Zoom queue and must not be
+                    // listed as one; it is appended below in its own shape.
+                    ->reject(fn(ZoomCallQueueSetting $row) => trim((string) $row->queue_id)
+                        === ZoomCallQueueSetting::DIRECT_QUEUE_ID)
                     ->map(fn(ZoomCallQueueSetting $row) => $this->row($row->queue_id, [], $row))
+                    ->push($this->directRow($local))
                     ->values(),
                 'zoom_unreachable' => true,
                 'error' => $result['error'] ?? 'Failed to reach the Zoom API',
@@ -118,10 +123,49 @@ class CallQueueSettingsController extends \App\Http\Controllers\Controller
         // stay in the table (and reappear in the unreachable fallback above,
         // where the Zoom listing cannot vouch for anything).
 
+        // Direct calls last, after the real queues: it is a pseudo-queue, not
+        // one of Zoom's, and the page reads top-down as "the queues, then the
+        // one extra switch".
+        $queues[] = $this->directRow($local);
+
         return response()->json([
             'queues' => $queues,
             'zoom_unreachable' => false,
         ]);
+    }
+
+    /**
+     * The pseudo-queue row for calls ringing a person rather than a queue.
+     *
+     * Direct dials, internal calls and transfers pop too, and they need the
+     * same two switches every queue has — may they pop, and what do staff dial
+     * to grab one. They have no queue to hang those off, so they share a
+     * reserved settings id ('direct'), and the settings page renders them as
+     * one more row. `pseudo` is the flag the UI reads to leave out the columns
+     * only Zoom can fill (extension number, DID, status).
+     *
+     * @param \Illuminate\Support\Collection $local Settings rows keyed by queue id.
+     */
+    private function directRow($local): array
+    {
+        $setting = $local->get(ZoomCallQueueSetting::DIRECT_QUEUE_ID);
+
+        return [
+            // `id` is what the brief for this row names; `queue_id` is carried
+            // alongside it so the row keys, saves and PUTs exactly like every
+            // other row in the same list.
+            'id' => ZoomCallQueueSetting::DIRECT_QUEUE_ID,
+            'queue_id' => ZoomCallQueueSetting::DIRECT_QUEUE_ID,
+            'name' => 'Direct calls',
+            'pseudo' => true,
+            'description' => 'Calls ringing a staff member\'s own extension or a '
+                . 'common-area phone — direct dials, internal calls and transfers.',
+            'extension_number' => null,
+            'number' => null,
+            'status' => null,
+            'pickup_code' => $this->normaliseCode($setting->pickup_code ?? null),
+            'excluded' => (bool) ($setting->excluded ?? false),
+        ];
     }
 
     /**
@@ -142,6 +186,40 @@ class CallQueueSettingsController extends \App\Http\Controllers\Controller
         ]);
 
         $setting = ZoomCallQueueSetting::firstOrNew(['queue_id' => $queueId]);
+
+        /*
+        | The direct-calls pseudo-queue is the application's own row: Zoom has
+        | no object to push it to. The pickup code is still validated by exactly
+        | the same rules — it is dialled on the same phones, and a code Zoom's
+        | own rules would refuse is a code that does not work — it simply is not
+        | pushed anywhere, and the exclusion flag behaves as it does everywhere
+        | else.
+        */
+        if ($queueId === ZoomCallQueueSetting::DIRECT_QUEUE_ID) {
+            if (array_key_exists('pickup_code', $data)) {
+                $code = $this->normaliseCode($data['pickup_code']);
+
+                if ($code !== null) {
+                    $this->assertValidCode($code);
+                }
+
+                $setting->pickup_code = $code;
+            }
+
+            if (array_key_exists('excluded', $data)) {
+                $setting->excluded = (bool) $data['excluded'];
+            }
+
+            $setting->save();
+
+            ZoomCallQueueSetting::flushCache();
+
+            return response()->json([
+                'queue' => $this->directRow(
+                    collect([ZoomCallQueueSetting::DIRECT_QUEUE_ID => $setting])
+                ),
+            ]);
+        }
 
         if (array_key_exists('pickup_code', $data)) {
             $code = $this->normaliseCode($data['pickup_code']);

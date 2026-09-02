@@ -5,6 +5,7 @@ namespace Visnsstudio\VisnsPackages\Tests\Platform\CallQueue;
 use Illuminate\Support\Facades\Event;
 use Visnsstudio\VisnsPackages\Events\CallQueueAnswered;
 use Visnsstudio\VisnsPackages\Events\CallQueueEnded;
+use Visnsstudio\VisnsPackages\Events\CallQueueMissed;
 use Visnsstudio\VisnsPackages\Events\CallQueueRinging;
 use Visnsstudio\VisnsPackages\Models\ZoomCallQueueSetting;
 use Visnsstudio\VisnsPackages\Models\ZoomLiveQueueCall;
@@ -44,6 +45,12 @@ class CallQueueWebhookTest extends TestCase
 
         $this->runPackageMigration(
             '2026_08_19_210000_create_zoom_live_queue_calls_table.php'
+        );
+        // The live-call table's direct-call and missed-leg columns; every
+        // ringing webhook writes `last_ringing_at`, and the snapshot's live
+        // scope reads `last_missed_at`.
+        $this->runPackageMigration(
+            '2026_09_02_120000_add_kind_and_callee_to_zoom_live_queue_calls_table.php'
         );
         $this->runPackageMigration(
             '2026_08_19_210100_create_zoom_call_queue_settings_table.php'
@@ -193,6 +200,9 @@ class CallQueueWebhookTest extends TestCase
 
         $payload = $event->broadcastWith()['call'];
 
+        // The first seven keys, in that order, are the contract a live front
+        // end already parses; the direct-call keys were appended after them so
+        // nothing that reads this had to change. See DirectCallPopTest.
         $this->assertSame(
             [
                 'call_id',
@@ -202,6 +212,11 @@ class CallQueueWebhookTest extends TestCase
                 'caller_name',
                 'client',
                 'started_at',
+                'kind',
+                'callee_name',
+                'callee_extension',
+                'forwarded_by_name',
+                'pickup_key',
             ],
             array_keys($payload)
         );
@@ -209,6 +224,8 @@ class CallQueueWebhookTest extends TestCase
         $this->assertSame('call-abc-123', $payload['call_id']);
         $this->assertSame('queue-1', $payload['queue_id']);
         $this->assertSame('Reception', $payload['queue_name']);
+        $this->assertSame('queue', $payload['kind']);
+        $this->assertSame('queue-1', $payload['pickup_key']);
     }
 
     public function test_the_channel_is_private_and_configurable(): void
@@ -252,10 +269,32 @@ class CallQueueWebhookTest extends TestCase
         );
     }
 
-    public function test_a_call_ringing_on_a_personal_extension_is_ignored(): void
+    public function test_a_call_ringing_on_a_personal_extension_pops_as_a_direct_call(): void
     {
+        // It used to be dropped. Every unmatched ringing delivery in the live
+        // ledger turned out to be one of these — a direct dial, an internal
+        // call or a transfer — which is precisely the call no queue is ringing
+        // anybody else's phone to cover. DirectCallPopTest owns the detail.
         $this->signedPost($this->ringingPayload([
             'callee' => ['extension_type' => 'user', 'extension_id' => 'user-9'],
+        ]))
+            ->assertOk()
+            ->assertJsonPath('status', 'ok');
+
+        $call = ZoomLiveQueueCall::firstWhere('call_id', 'call-abc-123');
+
+        $this->assertSame('direct', $call->kind);
+        $this->assertNull($call->queue_id);
+    }
+
+    public function test_a_call_ringing_a_routing_object_is_still_ignored(): void
+    {
+        // An auto receptionist is not somebody's phone: nothing is ringing yet.
+        $this->signedPost($this->ringingPayload([
+            'callee' => [
+                'extension_type' => 'autoReceptionist',
+                'extension_id' => 'ar-1',
+            ],
         ]))
             ->assertOk()
             ->assertJsonPath('status', 'ignored');
@@ -366,19 +405,28 @@ class CallQueueWebhookTest extends TestCase
         );
     }
 
-    public function test_a_missed_call_is_cleared_and_announced(): void
+    public function test_one_member_declining_does_not_end_the_queue_call(): void
     {
-        Event::fake([CallQueueEnded::class]);
+        Event::fake([CallQueueEnded::class, CallQueueMissed::class]);
 
         $this->signedPost($this->ringingPayload());
 
+        // `phone.callee_missed` is per LEG. A queue rings every member's
+        // handset on one call_id, so treating it as "the call ended" — which
+        // this used to do — closed the pop on every screen the instant the
+        // first person waved it away, while the other phones rang on.
         $this->signedPost([
             'event' => 'phone.callee_missed',
             'payload' => ['object' => ['call_id' => 'call-abc-123']],
         ])->assertOk();
 
-        $this->assertSame(0, ZoomLiveQueueCall::count());
-        Event::assertDispatched(CallQueueEnded::class);
+        $call = ZoomLiveQueueCall::firstWhere('call_id', 'call-abc-123');
+
+        $this->assertNotNull($call);
+        $this->assertNotNull($call->last_missed_at);
+
+        Event::assertDispatched(CallQueueMissed::class);
+        Event::assertNotDispatched(CallQueueEnded::class);
     }
 
     public function test_a_closing_event_for_an_unknown_call_stays_quiet(): void

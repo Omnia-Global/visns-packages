@@ -980,8 +980,21 @@ class VisnsPackagesServiceProvider extends ServiceProvider
         $routeMiddleware =
             config('visns-packages.call_queue.routes_middleware') ?: $middleware;
 
-        $monitor = $permissions['monitor'] ?? 'Call Queue Monitor';
-        $settings = $permissions['settings'] ?? 'Call Queue Settings';
+        /*
+        | array_key_exists, not ??, because null here is a DECISION: it is how
+        | an application says "this one is open to any signed-in user", and
+        | withPermission() (plus the channel registration) reads it that way.
+        | `??` would have quietly swapped that null back for the default and
+        | left the route gated on a permission the config file plainly says it
+        | does not want — the sort of bug that only shows up as "why can nobody
+        | see the pop".
+        */
+        $monitor = array_key_exists('monitor', $permissions)
+            ? $permissions['monitor']
+            : 'Call Queue Monitor';
+        $settings = array_key_exists('settings', $permissions)
+            ? $permissions['settings']
+            : 'Call Queue Settings';
 
         Route::middleware(
             $this->withPermission($routeMiddleware, $monitor)
@@ -1009,6 +1022,30 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                 Route::put($settingsUri . '/{queueId}', [
                     CallQueueSettingsController::class,
                     'update',
+                ]);
+
+                /*
+                | Diagnostics: the webhook ledger, the broadcast configuration,
+                | and a test broadcast on the pop's own channel.
+                |
+                | Gated on the settings permission rather than the monitor's.
+                | It names the broadcast target, the channel and the excluded
+                | queues — administrator material, even though no credential
+                | appears in the response — and the ping puts an event on the
+                | live channel, which is not something every watcher of the pop
+                | should be able to do.
+                */
+                $diagnosticsUri =
+                    $uris['diagnostics'] ?? 'ajax/call-queue/diagnostics';
+
+                Route::get($diagnosticsUri, [
+                    CallQueueController::class,
+                    'diagnostics',
+                ]);
+
+                Route::post($diagnosticsUri . '/ping', [
+                    CallQueueController::class,
+                    'ping',
                 ]);
             });
 
@@ -1507,6 +1544,12 @@ class VisnsPackagesServiceProvider extends ServiceProvider
     /**
      * Authorize the call queue's private broadcast channel.
      *
+     * A null/empty `permissions.monitor` admits any authenticated user, exactly
+     * as withPermission() drops the middleware from the HTTP routes for the
+     * same value. Without that the two disagreed: an application that opened
+     * the pop to all staff would have unguarded routes and a channel that
+     * denied everybody, i.e. a snapshot that loads and never updates.
+     *
      * The permission row may not exist yet on an environment that has not
      * seeded it, and a lookup that throws here would take the whole
      * broadcasting auth route down - so a failure denies rather than escapes.
@@ -1530,6 +1573,10 @@ class VisnsPackagesServiceProvider extends ServiceProvider
         \Illuminate\Support\Facades\Broadcast::channel(
             \Visnsstudio\VisnsPackages\Support\CallQueueChannel::name(),
             function ($user) use ($permission) {
+                if (!is_string($permission) || $permission === '') {
+                    return (bool) $user;
+                }
+
                 try {
                     return $user->hasPermissionTo($permission);
                 } catch (\Throwable $e) {

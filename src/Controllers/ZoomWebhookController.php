@@ -8,21 +8,26 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
 use Visnsstudio\VisnsPackages\Events\CallQueueAnswered;
 use Visnsstudio\VisnsPackages\Events\CallQueueEnded;
+use Visnsstudio\VisnsPackages\Events\CallQueueMissed;
 use Visnsstudio\VisnsPackages\Events\CallQueueRinging;
 use Visnsstudio\VisnsPackages\Models\ZoomCallQueueSetting;
 use Visnsstudio\VisnsPackages\Models\ZoomLiveQueueCall;
 use Visnsstudio\VisnsPackages\Services\Sms\SmsWebhookHandler;
 use Visnsstudio\VisnsPackages\Services\Zoom\PhonePresenceRecorder;
+use Visnsstudio\VisnsPackages\Services\Zoom\WebhookLedger;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 
 /**
  * Receiver for Zoom Phone event subscriptions.
  *
- * Only calls ringing in a call queue are of interest — any queue in the account
- * counts, bar the ones excluded in Settings -> Call Queues; every other
- * extension's traffic is acknowledged and dropped. Zoom retries and eventually
- * disables endpoints that error or answer slowly, so this controller always
- * returns 200 and never lets an exception escape.
+ * Two kinds of ringing call are of interest. A QUEUE call — any queue in the
+ * account counts, bar the ones excluded in Settings -> Call Queues. And a
+ * DIRECT call, ringing a staff member's own extension or a common-area handset:
+ * a direct dial, an internal call, or a transfer. Everything else (auto
+ * receptionists, shared line groups, outbound legs) is acknowledged and
+ * dropped. Zoom retries and eventually disables endpoints that error or answer
+ * slowly, so this controller always returns 200 and never lets an exception
+ * escape.
  *
  * Signature verification lives in the `zoom_webhook` middleware.
  */
@@ -32,6 +37,19 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
     private const QUEUE_EXTENSION_TYPES = [
         'callqueue',
         'call_queue',
+    ];
+
+    /**
+     * Extension types that are a person's phone rather than a routing object.
+     *
+     * The default; `call_queue.direct_calls.extension_types` overrides it.
+     * Zoom spells common-area handsets both ways depending on the endpoint,
+     * hence both.
+     */
+    private const DIRECT_EXTENSION_TYPES = [
+        'user',
+        'commonarea',
+        'common_area',
     ];
 
     /** Events that mean "a call started ringing somewhere". */
@@ -48,6 +66,23 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
     private const ENDED_EVENTS = [
         'phone.callee_ended',
         'phone.caller_ended',
+    ];
+
+    /**
+     * Events that mean "ONE leg stopped ringing" — declined, or timed out.
+     *
+     * `phone.callee_missed` used to sit in ENDED_EVENTS, which was wrong in
+     * both directions. Zoom sends it PER LEG: a queue rings four handsets on
+     * one call_id, so the first person to wave the call away closed everybody
+     * else's pop while their phones were still ringing; and a direct call
+     * arrives on two legs (desk phone and mobile app), so it did it to itself
+     * the moment the quicker of the two gave up.
+     *
+     * So a miss is now recorded, not acted on: the row is stamped and kept,
+     * and ZoomLiveQueueCall::scopeLive() decides whether the call is still
+     * ringing anywhere.
+     */
+    private const MISSED_EVENTS = [
         'phone.callee_missed',
     ];
 
@@ -79,10 +114,26 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
 
         $event = (string) Arr::get($body, 'event', '');
 
+        /*
+        | The durable record of this delivery.
+        |
+        | Opened before anything can go wrong and written in the finally below,
+        | so every delivery leaves a row — including the ones that threw. It is
+        | the only way to tell a pop that never happened because Zoom never sent
+        | the event from one that never happened because the broadcast failed;
+        | both look identical from a browser, and both answer Zoom 200.
+        */
+        $ledger = WebhookLedger::open(
+            $event,
+            (array) Arr::get($body, 'payload.object', [])
+        );
+
         try {
             // Zoom's endpoint ownership challenge, sent on save and periodically
             // thereafter. Must be answered inline, not queued.
             if ($event === 'endpoint.url_validation') {
+                $ledger->outcome('url_validation');
+
                 return $this->urlValidation($body);
             }
 
@@ -107,35 +158,52 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
             $this->recordPresence($event, $body);
 
             if (in_array($event, self::RINGING_EVENTS, true)) {
-                return $this->handleRinging($event, $body);
+                return $this->handleRinging($event, $body, $ledger);
             }
 
             if (in_array($event, self::ANSWERED_EVENTS, true)) {
-                return $this->handleClosingEvent($event, $body, 'answered');
+                return $this->handleClosingEvent($event, $body, 'answered', $ledger);
             }
 
             if (in_array($event, self::ENDED_EVENTS, true)) {
-                return $this->handleClosingEvent($event, $body, 'ended');
+                return $this->handleClosingEvent($event, $body, 'ended', $ledger);
+            }
+
+            if (in_array($event, self::MISSED_EVENTS, true)) {
+                return $this->handleMissedLeg($event, $body, $ledger);
             }
 
             if (in_array($event, self::SMS_EVENTS, true)) {
+                $ledger->outcome('sms');
+
                 return $this->handleSms($event, $body);
             }
 
             // A presence-only event (an outbound leg, say) is handled, not
             // unhandled — logging it as a mystery would bury the real ones.
             if (in_array($event, PhonePresenceRecorder::events(), true)) {
+                $ledger->outcome('presence_only');
+
                 return response()->json(['status' => 'ok']);
             }
+
+            $ledger->outcome('unhandled');
 
             $this->logUnhandled($event, $body, 'event not handled');
         } catch (\Throwable $e) {
             // A malformed payload must never 500 back to Zoom — that gets the
             // subscription disabled.
+            $ledger->failed($e);
+
             Log::error('zoom.webhook failed', [
                 'event' => $event,
                 'error' => $e->getMessage(),
             ]);
+        } finally {
+            // One insert per delivery, whichever way the request left. The
+            // ledger swallows its own failures, so this cannot become the
+            // reason a webhook 500s.
+            $ledger->write();
         }
 
         return response()->json(['status' => 'ok']);
@@ -175,26 +243,32 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
     }
 
     /**
-     * A call is ringing. Record + broadcast it only when it is ringing in a
-     * call queue.
+     * A call is ringing. Record + broadcast it when it is ringing somewhere the
+     * office wants to see: a call queue, or a person's own extension.
      */
-    private function handleRinging(string $event, array $body)
+    private function handleRinging(string $event, array $body, WebhookLedger $ledger)
     {
         $object = (array) Arr::get($body, 'payload.object', []);
         $match = $this->resolveQueue($object);
 
         if ($match['excluded']) {
             // A queue the operator deliberately opted out of. Silent by design:
-            // it is not a payload we failed to understand.
+            // it is not a payload we failed to understand. Checked before the
+            // direct branch on purpose — a call forwarded through an excluded
+            // queue is still that queue's call, whichever handset it lands on.
+            $ledger->outcome('ringing_excluded_queue');
+
             return response()->json(['status' => 'ignored']);
         }
 
         $queue = $match['queue'];
+        $direct = $queue === null ? $this->resolveDirect($object) : null;
 
-        if ($queue === null) {
-            // Ringing on somebody's own extension. Nothing to do — but log the
-            // routing shape (extension types/ids only, no caller identity) so
-            // the matcher can be tuned from real events without putting PII
+        if ($queue === null && $direct === null) {
+            // Not a queue, and not a handset either — an auto receptionist, a
+            // shared line group, something Zoom has not been asked about. Log
+            // the routing shape (extension types/ids only, no caller identity)
+            // so the matcher can be tuned from real events without putting PII
             // into the log. Debug level: invaluable when first pointing Zoom at
             // this endpoint, noise once the subscription is tuned.
             $routing = static fn ($node) => is_array($node)
@@ -212,12 +286,29 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
                 'forwarded_by' => $routing(Arr::get($object, 'forwarded_by')),
             ]);
 
+            // The ledger row keeps the same routing shape, durably: a debug line
+            // is only there while somebody remembered to turn debug on.
+            $ledger->outcome('ringing_unmatched');
+
+            return response()->json(['status' => 'ignored']);
+        }
+
+        if ($direct !== null && ! ZoomCallQueueSetting::directPopsEnabled()) {
+            // Direct pops switched off in Settings -> Call Queues, on the
+            // `direct` pseudo-queue row. Its own outcome word rather than
+            // `ringing_excluded_queue`: on the diagnostics screen "the office
+            // turned direct pops off" and "somebody excluded a queue" are
+            // different answers to "why did that not pop".
+            $ledger->outcome('ringing_excluded_direct');
+
             return response()->json(['status' => 'ignored']);
         }
 
         $callId = $this->callId($object);
 
         if ($callId === '') {
+            $ledger->outcome('ringing_no_call_id');
+
             $this->logUnhandled($event, $body, 'ringing event without a call_id');
 
             return response()->json(['status' => 'ignored']);
@@ -225,23 +316,108 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
 
         $callerNumber = $this->trim(Arr::get($object, 'caller.phone_number'));
 
+        $ledger->callId($callId)
+            ->queue(
+                $queue === null ? ZoomCallQueueSetting::DIRECT_QUEUE_ID : $queue['id'],
+                $queue === null ? 'Direct' : $queue['name']
+            )
+            ->caller($callerNumber);
+
+        $attributes = [
+            'queue_id' => $queue === null ? null : $queue['id'],
+            'queue_name' => $queue === null ? null : $queue['name'],
+            'kind' => $queue === null ? 'direct' : 'queue',
+            'caller_number' => $callerNumber,
+            'caller_name' => $this->trim(Arr::get($object, 'caller.name')),
+            'status' => 'ringing',
+            'started_at' => $this->startedAt($object),
+            // Stamped on EVERY ringing event, not just the first: it is what
+            // tells scopeLive() that a call somebody declined a moment ago is
+            // still ringing another handset. See ZoomLiveQueueCall::scopeLive().
+            'last_ringing_at' => Carbon::now(),
+            'client_preview' => $this->clientPreview($callerNumber),
+            'raw_payload' => $object,
+        ];
+
+        if ($direct !== null) {
+            // Who it is ringing. A direct call has no queue to name it, so the
+            // callee IS the card's subject.
+            $attributes = array_merge($attributes, $direct);
+        }
+
         $call = ZoomLiveQueueCall::updateOrCreate(
             ['call_id' => $callId],
-            [
-                'queue_id' => $queue['id'],
-                'queue_name' => $queue['name'],
-                'caller_number' => $callerNumber,
-                'caller_name' => $this->trim(Arr::get($object, 'caller.name')),
-                'status' => 'ringing',
-                'started_at' => $this->startedAt($object),
-                'client_preview' => $this->clientPreview($callerNumber),
-                'raw_payload' => $object,
-            ]
+            $attributes
         );
 
         $ringing = $this->eventClass('ringing', CallQueueRinging::class);
 
-        event(new $ringing($call));
+        $ledger->outcome(
+            $queue === null ? 'ringing_recorded_direct' : 'ringing_recorded'
+        );
+
+        // Timed and recorded, then rethrown untouched. The publish is a
+        // synchronous HTTP call to Reverb on this thread — the one step that
+        // can fail while the row, the queue match and the 200 all look right,
+        // which is exactly the "it only pops sometimes" complaint.
+        $ledger->broadcast(static function () use ($ringing, $call) {
+            event(new $ringing($call));
+        });
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * One leg of a call stopped ringing (declined, or timed out).
+     *
+     * Recorded, never acted on. Zoom sends `phone.callee_missed` per leg, and a
+     * call is routinely ringing several: a queue rings every member's handset
+     * on one call_id, and a direct call rings the desk phone and the mobile app.
+     * Deleting the row here — which is what happened while this event lived in
+     * ENDED_EVENTS — closed the pop on every watching screen the instant one
+     * person waved the call away, while the phones were still ringing.
+     *
+     * So the miss is stamped and the row kept; ZoomLiveQueueCall::scopeLive()
+     * decides whether anything is still ringing, and the browsers are told what
+     * happened rather than being told the call is over.
+     */
+    private function handleMissedLeg(string $event, array $body, WebhookLedger $ledger)
+    {
+        $object = (array) Arr::get($body, 'payload.object', []);
+        $callId = $this->callId($object);
+
+        if ($callId === '') {
+            $ledger->outcome('missed_no_call_id');
+
+            $this->logUnhandled($event, $body, 'missed event without a call_id');
+
+            return response()->json(['status' => 'ignored']);
+        }
+
+        $call = ZoomLiveQueueCall::where('call_id', $callId)->first();
+
+        if ($call === null) {
+            // A leg of a call we are not tracking (an excluded queue, an
+            // extension type nobody pops for) — a broadcast would only make
+            // other tabs flicker.
+            $ledger->outcome('missed_no_match');
+
+            return response()->json(['status' => 'ignored']);
+        }
+
+        $ledger->callId($callId)
+            ->queue($call->queue_id, $call->queue_name)
+            ->caller($call->caller_number);
+
+        $call->forceFill(['last_missed_at' => Carbon::now()])->save();
+
+        $missed = $this->eventClass('missed', CallQueueMissed::class);
+
+        $ledger->outcome('missed');
+
+        $ledger->broadcast(static function () use ($missed, $callId) {
+            event(new $missed($callId));
+        });
 
         return response()->json(['status' => 'ok']);
     }
@@ -267,7 +443,7 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
     }
 
     /**
-     * Which class to dispatch for one of the three call-queue events.
+     * Which class to dispatch for one of the call-queue events.
      *
      * Configurable because Laravel's Event::fake() keys listeners by EXACT
      * class name - a subclass or a class_alias of the package event is a
@@ -335,12 +511,14 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
      * `$kind` picks the broadcast — 'answered' when somebody picked it up,
      * 'ended' for hangups / misses.
      */
-    private function handleClosingEvent(string $event, array $body, string $kind)
+    private function handleClosingEvent(string $event, array $body, string $kind, WebhookLedger $ledger)
     {
         $object = (array) Arr::get($body, 'payload.object', []);
         $callId = $this->callId($object);
 
         if ($callId === '') {
+            $ledger->outcome('closed_no_call_id');
+
             $this->logUnhandled($event, $body, 'closing event without a call_id');
 
             return response()->json(['status' => 'ignored']);
@@ -351,8 +529,13 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
         if ($call === null) {
             // Not one of ours (or already cleared) — stay quiet, a stray
             // broadcast would only make other tabs flicker.
+            $ledger->outcome('closed_no_match');
+
             return response()->json(['status' => 'ignored']);
         }
+
+        $ledger->queue($call->queue_id, $call->queue_name)
+            ->caller($call->caller_number);
 
         $call->delete();
 
@@ -360,7 +543,14 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
             ? $this->eventClass('answered', CallQueueAnswered::class)
             : $this->eventClass('ended', CallQueueEnded::class);
 
-        event(new $class($callId));
+        // 'answered' and 'closed' are kept apart: a queue where every call is
+        // recorded and then closed without ever being answered is a different
+        // fault from one where nothing is recorded at all.
+        $ledger->outcome($kind === 'answered' ? 'answered' : 'closed');
+
+        $ledger->broadcast(static function () use ($class, $callId) {
+            event(new $class($callId));
+        });
 
         return response()->json(['status' => 'ok']);
     }
@@ -420,6 +610,79 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
         $type = strtolower($this->trim(Arr::get($node, 'extension_type')));
 
         return in_array($type, self::QUEUE_EXTENSION_TYPES, true);
+    }
+
+    /**
+     * Is this a call ringing somebody's own phone, and if so, whose?
+     *
+     * Only asked once resolveQueue() has come back empty — a queue call that
+     * reaches a member's handset names the member under `callee` too, and the
+     * subject of that pop is the queue, not the handset.
+     *
+     * Production made the case for this plainly: every `ringing_unmatched` row
+     * in the ledger had `callee.extension_type = "user"` and no `forwarded_by`.
+     * They were direct dials, internal calls and transfers — the calls the
+     * office most wants a card for, because nobody else's phone is ringing to
+     * cover them — and the pop had been dropping every one of them.
+     *
+     * `call_queue.direct_calls.enabled` is the master switch: off means the
+     * feature is not installed here at all, and these calls go back to being
+     * `ringing_unmatched`, exactly as before. The operator's own switch is the
+     * `direct` settings row, checked by the caller, so that "the office turned
+     * it off" reads differently in the ledger from "this build does not do it".
+     *
+     * @return array<string, ?string>|null  The callee columns for the row, or
+     *                                      null when this is not a direct call.
+     */
+    private function resolveDirect(array $object): ?array
+    {
+        if (! (bool) ModuleConfig::get('call_queue.direct_calls.enabled', true)) {
+            return null;
+        }
+
+        $callee = Arr::get($object, 'callee');
+
+        if (! is_array($callee)) {
+            return null;
+        }
+
+        $type = strtolower($this->trim(Arr::get($callee, 'extension_type')));
+
+        $accepted = array_map(
+            fn($value) => strtolower($this->trim($value)),
+            (array) ModuleConfig::get(
+                'call_queue.direct_calls.extension_types',
+                self::DIRECT_EXTENSION_TYPES
+            )
+        );
+
+        if ($type === '' || ! in_array($type, $accepted, true)) {
+            return null;
+        }
+
+        $forwardedBy = Arr::get($object, 'forwarded_by');
+
+        return [
+            'callee_name' => $this->nullable(Arr::get($callee, 'name')),
+            'callee_extension_id' => $this->nullable(
+                Arr::get($callee, 'extension_id') ?? Arr::get($callee, 'id')
+            ),
+            'callee_extension_number' => $this->nullable(
+                Arr::get($callee, 'extension_number')
+            ),
+            // Kept verbatim rather than normalised: it is what the ledger and
+            // the log show, and a shape Zoom changes is easier to spot when it
+            // has not been tidied on the way in.
+            'callee_extension_type' => $this->nullable(
+                Arr::get($callee, 'extension_type')
+            ),
+            // "Transferred by Steve" — the single most useful line on a direct
+            // pop, and the only reason forwarded_by is read for a call that has
+            // no queue in it.
+            'forwarded_by_name' => is_array($forwardedBy)
+                ? $this->nullable(Arr::get($forwardedBy, 'name'))
+                : null,
+        ];
     }
 
     /**
@@ -497,5 +760,13 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
     private function trim($value): string
     {
         return is_scalar($value) ? trim((string) $value) : '';
+    }
+
+    /** trim(), but an empty result is null — columns, not response strings. */
+    private function nullable($value): ?string
+    {
+        $value = $this->trim($value);
+
+        return $value === '' ? null : $value;
     }
 }

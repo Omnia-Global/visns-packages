@@ -49,6 +49,12 @@ class MessagingWebhookTest extends MessagingTestCase
         $this->runPackageMigration(
             '2026_08_19_210000_create_zoom_live_queue_calls_table.php'
         );
+        // The live-call table's direct-call and missed-leg columns; every
+        // ringing webhook writes `last_ringing_at`, and the snapshot's live
+        // scope reads `last_missed_at`.
+        $this->runPackageMigration(
+            '2026_09_02_120000_add_kind_and_callee_to_zoom_live_queue_calls_table.php'
+        );
         $this->runPackageMigration(
             '2026_08_19_210100_create_zoom_call_queue_settings_table.php'
         );

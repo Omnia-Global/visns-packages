@@ -902,6 +902,7 @@ return [
             'live' => 'ajax/call-queue/live',
             'settings' => 'ajax/call-queue/settings',
             'presence' => 'ajax/call-queue/presence',
+            'diagnostics' => 'ajax/call-queue/diagnostics',
         ],
 
         // The webhook is registered outside the api group so its URI is
@@ -923,6 +924,67 @@ return [
         'tables' => [
             'live_calls' => 'zoom_live_queue_calls',
             'settings' => 'zoom_call_queue_settings',
+            // One row per Zoom webhook delivery and what came of it - see
+            // `diagnostics` below.
+            'webhook_events' => 'zoom_webhook_events',
+        ],
+
+        /*
+        |----------------------------------------------------------------------
+        | Direct calls
+        |----------------------------------------------------------------------
+        |
+        | Calls ringing a staff member's own extension - direct dials, internal
+        | calls and transfers - pop alongside the queue calls.
+        |
+        | They were dropped until now, and the ledger made the case for keeping
+        | them plainly: every unmatched ringing delivery in it had
+        | `callee.extension_type = "user"` and no `forwarded_by`. Those are the
+        | calls the office most wants a card for, because no queue is ringing
+        | anybody else's phone to cover them.
+        |
+        | `enabled` is the DEVELOPER's switch - false makes these events
+        | `ringing_unmatched` again, exactly as before the feature existed. The
+        | operator's switch is a settings row instead: the `direct` pseudo-queue
+        | in Settings -> Call Queues, which also holds the pickup code staff
+        | dial to grab one. Two switches because "this build does not do it" and
+        | "the office turned it off" are different answers, and the diagnostics
+        | screen names them differently.
+        |
+        | `extension_types` is what counts as somebody's phone rather than a
+        | routing object. Auto receptionists and shared line groups are
+        | deliberately absent: a call ringing one of those is not ringing a
+        | person. Zoom spells common-area handsets both ways depending on the
+        | endpoint, hence both.
+        */
+        'direct_calls' => [
+            'enabled' => true,
+            'extension_types' => ['user', 'commonarea', 'common_area'],
+        ],
+
+        /*
+        |----------------------------------------------------------------------
+        | Diagnostics - the webhook ledger
+        |----------------------------------------------------------------------
+        |
+        | "The pop only shows up some of the time" is unanswerable without a
+        | record: a delivery Zoom never sent, one the signature turned away, one
+        | whose queue did not match, and one whose broadcast never reached the
+        | websocket server all look identical from a browser that did not pop,
+        | and the endpoint answers Zoom 200 to every one of them because
+        | anything else gets the subscription disabled.
+        |
+        | So every delivery writes a row saying which of those it was, and
+        | `uris.diagnostics` reads them back beside the broadcast configuration
+        | they have to be interpreted against. Routing shape and the caller's
+        | number only - no payloads, no names.
+        |
+        | A rolling window, not an audit trail: the diagnostics endpoint deletes
+        | anything older than `retain_days` as it reads, so the table cannot
+        | grow without bound in an application that runs no scheduler.
+        */
+        'diagnostics' => [
+            'retain_days' => 7,
         ],
 
         /*
@@ -1005,8 +1067,8 @@ return [
         | REQUIRED CONSTRUCTOR CONTRACT - a configured class is constructed with
         | exactly the same arguments as the package class it replaces:
         |
-        |   ringing            __construct(ZoomLiveQueueCall $call)
-        |   answered / ended   __construct(string $callId)
+        |   ringing                     __construct(ZoomLiveQueueCall $call)
+        |   answered / ended / missed   __construct(string $callId)
         |
         | The model passed to `ringing` is
         | Visnsstudio\VisnsPackages\Models\ZoomLiveQueueCall, NOT the
@@ -1018,6 +1080,9 @@ return [
             'ringing' => \Visnsstudio\VisnsPackages\Events\CallQueueRinging::class,
             'answered' => \Visnsstudio\VisnsPackages\Events\CallQueueAnswered::class,
             'ended' => \Visnsstudio\VisnsPackages\Events\CallQueueEnded::class,
+            // One leg stopped ringing - NOT the call ending. Same
+            // __construct(string $callId) contract as answered/ended.
+            'missed' => \Visnsstudio\VisnsPackages\Events\CallQueueMissed::class,
         ],
 
         /*
@@ -1053,6 +1118,19 @@ return [
         // A ringing row older than this is treated as abandoned: Zoom does not
         // guarantee a closing event for every call.
         'stale_after_minutes' => 15,
+
+        /*
+        | How long a missed leg keeps its card on screen.
+        |
+        | `phone.callee_missed` is per LEG - one queue member declining while
+        | the queue rings four other handsets on the same call_id, or a desk
+        | phone timing out while the mobile app is still going - so it stamps
+        | the row rather than deleting it. This is the window in which a miss
+        | that nothing rang again still counts as live, and it exists because
+        | Zoom's per-leg events arrive out of order often enough that a card
+        | blinking off and back on is worse than one that lingers.
+        */
+        'missed_grace_seconds' => 20,
 
         /*
         | Zoom prefixes every call queue pickup code with a fixed *99, so the

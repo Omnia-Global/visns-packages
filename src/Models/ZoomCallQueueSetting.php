@@ -116,6 +116,32 @@ class ZoomCallQueueSetting extends Model
         );
     }
 
+    /**
+     * The pseudo-queue id every direct call is configured under.
+     *
+     * Calls ringing somebody's own extension have no queue to hang a setting
+     * off, but the operator still needs the same two switches — may they pop,
+     * and what do staff dial to grab one. Rather than a second table with two
+     * columns, they live in this one under a reserved id. Zoom will never issue
+     * a queue id of 'direct': its own ids are opaque base64-ish strings.
+     */
+    public const DIRECT_QUEUE_ID = 'direct';
+
+    /**
+     * May calls ringing a staff member's own extension pop at all?
+     *
+     * The operator's switch, stored as the `excluded` flag on the `direct`
+     * pseudo-queue row — so it reads through the same cache as every other
+     * exclusion and needs no key of its own. Separate from
+     * `call_queue.direct_calls.enabled`, which is the developer's master
+     * switch: config off means the feature is not installed here, this off
+     * means the office was offered it and turned it down.
+     */
+    public static function directPopsEnabled(): bool
+    {
+        return ! in_array(self::DIRECT_QUEUE_ID, self::excludedIds(), true);
+    }
+
     /** Called on every settings save — without it a change waits out the TTL. */
     public static function flushCache(): void
     {

@@ -5,6 +5,7 @@ namespace Visnsstudio\VisnsPackages\Middleware;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Visnsstudio\VisnsPackages\Services\Zoom\WebhookLedger;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 use Visnsstudio\VisnsPackages\Support\ZoomWebhookSecret;
 
@@ -78,6 +79,17 @@ class VerifyZoomWebhookSignature
             'ip' => $request->ip(),
             'path' => $request->path(),
         ]);
+
+        /*
+        | And durably, in the webhook ledger.
+        |
+        | This is the only place that knows a rejected delivery arrived at all -
+        | the controller never runs for these - so without a row here a secret
+        | that has drifted out of step with the Zoom app is indistinguishable
+        | from Zoom having gone quiet. The payload is deliberately not recorded:
+        | an unauthenticated body is evidence of nothing but its own rejection.
+        */
+        WebhookLedger::rejected($reason, ['ip' => $request->ip()]);
 
         return response()->json(['error' => 'Unauthorized'], 401);
     }

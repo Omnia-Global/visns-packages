@@ -5,10 +5,12 @@ namespace Visnsstudio\VisnsPackages\Tests\Platform\CallQueue;
 use Illuminate\Support\Facades\Event;
 use Visnsstudio\VisnsPackages\Events\CallQueueAnswered;
 use Visnsstudio\VisnsPackages\Events\CallQueueEnded;
+use Visnsstudio\VisnsPackages\Events\CallQueueMissed;
 use Visnsstudio\VisnsPackages\Events\CallQueueRinging;
 use Visnsstudio\VisnsPackages\Models\ZoomLiveQueueCall;
 use Visnsstudio\VisnsPackages\Tests\Fixtures\CallQueue\AppCallQueueAnswered;
 use Visnsstudio\VisnsPackages\Tests\Fixtures\CallQueue\AppCallQueueEnded;
+use Visnsstudio\VisnsPackages\Tests\Fixtures\CallQueue\AppCallQueueMissed;
 use Visnsstudio\VisnsPackages\Tests\Fixtures\CallQueue\AppCallQueueRinging;
 use Visnsstudio\VisnsPackages\Tests\TestCase;
 
@@ -41,6 +43,12 @@ class CallQueueEventClassTest extends TestCase
 
         $this->runPackageMigration(
             '2026_08_19_210000_create_zoom_live_queue_calls_table.php'
+        );
+        // The live-call table's direct-call and missed-leg columns; every
+        // ringing webhook writes `last_ringing_at`, and the snapshot's live
+        // scope reads `last_missed_at`.
+        $this->runPackageMigration(
+            '2026_09_02_120000_add_kind_and_callee_to_zoom_live_queue_calls_table.php'
         );
         $this->runPackageMigration(
             '2026_08_19_210100_create_zoom_call_queue_settings_table.php'
@@ -124,6 +132,7 @@ class CallQueueEventClassTest extends TestCase
                 'ringing' => CallQueueRinging::class,
                 'answered' => CallQueueAnswered::class,
                 'ended' => CallQueueEnded::class,
+                'missed' => CallQueueMissed::class,
             ],
             $shipped['call_queue']['events']
         );
@@ -185,13 +194,34 @@ class CallQueueEventClassTest extends TestCase
         Event::fake([AppCallQueueEnded::class, CallQueueEnded::class]);
 
         $this->signedPost($this->ringing());
-        $this->signedPost($this->closing('phone.callee_missed'))->assertOk();
+        $this->signedPost($this->closing('phone.callee_ended'))->assertOk();
 
         Event::assertDispatched(
             AppCallQueueEnded::class,
             fn(AppCallQueueEnded $event) => $event->callId === 'call-abc-123'
         );
         Event::assertNotDispatched(CallQueueEnded::class);
+    }
+
+    public function test_a_configured_missed_class_is_dispatched_instead(): void
+    {
+        config()->set(
+            'visns-packages.call_queue.events.missed',
+            AppCallQueueMissed::class
+        );
+
+        Event::fake([AppCallQueueMissed::class, CallQueueMissed::class]);
+
+        $this->signedPost($this->ringing());
+        // Not a closing event any more: one leg declining leaves the row alone
+        // and says so on its own name.
+        $this->signedPost($this->closing('phone.callee_missed'))->assertOk();
+
+        Event::assertDispatched(
+            AppCallQueueMissed::class,
+            fn(AppCallQueueMissed $event) => $event->callId === 'call-abc-123'
+        );
+        Event::assertNotDispatched(CallQueueMissed::class);
     }
 
     public function test_the_three_classes_are_configured_independently(): void
