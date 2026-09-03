@@ -277,7 +277,11 @@ class VisnsPackagesServiceProvider extends ServiceProvider
         // Register routes
         $this->registerRoutes();
 
-        // Stamp the credential a passkey sign-in used.
+        // Teach the credential model about the column this package's own
+        // migration adds to it...
+        $this->registerPasskeyCasts();
+
+        // ... and stamp the credential a passkey sign-in used.
         $this->registerPasskeyListeners();
 
         // Broadcast channel authorization for the call queue pop.
@@ -802,6 +806,47 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                     'destroy'
                 );
             });
+    }
+
+    /**
+     * Cast `last_used_at` on laragear's credential model.
+     *
+     * The column is this package's, added by the publishable
+     * create_webauthn_credentials_table migration; the library's model knows
+     * nothing about it, so without this it comes back from the database as a
+     * raw string and PasskeyController::present()'s `optional(...)
+     * ->toIso8601String()` silently answers null on every credential that has
+     * ever been used. `customize()` is the library's own hook for exactly
+     * this.
+     *
+     * Deliberately NOT gated on the module being enabled, unlike the routes
+     * and the listener. Those two publish surface an application did not ask
+     * for; a cast on a column the package's own migration adds is inert until
+     * something reads the column - and an application that has the table and
+     * reads it with the module switched off still wants a date rather than a
+     * string.
+     *
+     * One thing to know before adding a second caller: `customize()` holds ONE
+     * closure and replaces it, it does not stack. An application that calls it
+     * itself - to point the model at a differently named table, say - takes
+     * this cast away with it, and has to restate the merge inside its own
+     * callback.
+     *
+     * @return void
+     */
+    protected function registerPasskeyCasts(): void
+    {
+        if (!class_exists(\Laragear\WebAuthn\Models\WebAuthnCredential::class)) {
+            return;
+        }
+
+        \Laragear\WebAuthn\Models\WebAuthnCredential::customize(
+            static function (
+                \Laragear\WebAuthn\Models\WebAuthnCredential $credential
+            ): void {
+                $credential->mergeCasts(['last_used_at' => 'datetime']);
+            }
+        );
     }
 
     /**

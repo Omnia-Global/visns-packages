@@ -192,7 +192,19 @@ class PasskeyController extends \App\Http\Controllers\Controller
         // private key) plus something you are or know (the biometric or PIN
         // that unlocks it) - so a second factor on top would ask for the same
         // assurance twice.
-        $user = $request->login();
+        //
+        // The callback is policy layered on top of the signature check, and it
+        // is not optional: AuthController refuses a disabled account on the
+        // password path, so a passkey must not be a way round that. An account
+        // that has been switched off has a perfectly valid credential sitting
+        // on somebody's phone, and enrolling one before being disabled would
+        // otherwise leave a door open that closing the account was meant to
+        // shut.
+        $user = $request->login(
+            callbacks: static fn($candidate): bool => static::candidateMaySignIn(
+                $candidate
+            )
+        );
 
         if (!$user) {
             return response()->json(
@@ -238,6 +250,26 @@ class PasskeyController extends \App\Http\Controllers\Controller
     }
 
     /* ------------------------------------------------------------------ */
+
+    /**
+     * Whether a verified assertion is allowed to sign this account in.
+     *
+     * The one policy question left once the signature has been checked, and it
+     * is asked of the same column AuthController's password path reads. Kept as
+     * a method rather than an inline closure so an application subclassing this
+     * controller can widen it - a client whose account is suspended, a user
+     * whose licence has lapsed - without restating the ceremony around it.
+     *
+     * `empty()` rather than a strict comparison because `disabled` is a
+     * tinyint on MySQL, a boolean on SQLite and null on a row written before
+     * the column existed, and all three of those mean "not disabled".
+     *
+     * @param  \Laragear\WebAuthn\Contracts\WebAuthnAuthenticatable  $candidate
+     */
+    protected static function candidateMaySignIn($candidate): bool
+    {
+        return empty($candidate->disabled);
+    }
 
     /**
      * Everything the management screen shows about one credential.

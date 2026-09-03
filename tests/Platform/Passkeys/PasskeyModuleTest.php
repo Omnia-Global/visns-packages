@@ -284,6 +284,73 @@ class PasskeyModuleTest extends TestCase
     }
 
     /* ---------------------------------------------------------------------
+     | Who a verified assertion is allowed to sign in
+     * ------------------------------------------------------------------ */
+
+    public function test_a_disabled_account_may_not_be_signed_in_by_a_passkey(): void
+    {
+        // The predicate on its own, because there is no way from here to get
+        // a real signature past the auth provider - see the note at the top of
+        // this class. It is the callback login() hands to laragear, so what is
+        // asserted here is exactly what decides a live sign-in.
+        //
+        // The password path refuses a disabled account; a passkey enrolled
+        // before the account was switched off must not be a way round that.
+        $disabled = $this->makeUser('gone@example.test');
+        $disabled->disabled = true;
+        $disabled->save();
+
+        $this->assertFalse(
+            ExposedPasskeyController::maySignIn($disabled->fresh())
+        );
+
+        $this->assertTrue(
+            ExposedPasskeyController::maySignIn(
+                $this->makeUser('jane@example.test')->fresh()
+            )
+        );
+    }
+
+    /* ---------------------------------------------------------------------
+     | last_used_at
+     * ------------------------------------------------------------------ */
+
+    public function test_last_used_at_comes_back_as_a_date_not_a_raw_string(): void
+    {
+        $jane = $this->makeUser('jane@example.test');
+        $credential = $this->makeCredential($jane, 'jane-key', "Jane's laptop");
+
+        $credential
+            ->newQuery()
+            ->whereKey($credential->getKey())
+            ->update(['last_used_at' => '2026-08-30 04:05:06']);
+
+        // The column is this package's, added by its own migration; laragear's
+        // model does not know about it, so without the cast the provider
+        // registers, present()'s `optional(...)->toIso8601String()` is called
+        // on a plain string and answers null on every credential ever used.
+        $this->actingAs($jane)
+            ->getJson('/ajax/passkeys')
+            ->assertOk()
+            ->assertJsonPath(
+                'passkeys.0.last_used_at',
+                \Illuminate\Support\Carbon::parse('2026-08-30 04:05:06')
+                    ->toIso8601String()
+            );
+    }
+
+    public function test_a_credential_that_has_never_been_used_says_so_rather_than_guessing(): void
+    {
+        $jane = $this->makeUser('jane@example.test');
+        $this->makeCredential($jane, 'jane-key', "Jane's laptop");
+
+        $this->actingAs($jane)
+            ->getJson('/ajax/passkeys')
+            ->assertOk()
+            ->assertJsonPath('passkeys.0.last_used_at', null);
+    }
+
+    /* ---------------------------------------------------------------------
      | The kill switch
      * ------------------------------------------------------------------ */
 
@@ -420,5 +487,23 @@ class PasskeyModuleTest extends TestCase
     private function base64Url(string $binary): string
     {
         return rtrim(strtr(base64_encode($binary), '+/', '-_'), '=');
+    }
+}
+
+/**
+ * The sign-in policy predicate, reachable from a test.
+ *
+ * `candidateMaySignIn()` is protected because it is a hook for a consuming
+ * application to widen, not part of the controller's public surface - and a
+ * subclass is how an application would reach it, so it is also how a test
+ * should. Reflection would assert the same thing while proving nothing about
+ * whether the method is actually overridable.
+ */
+class ExposedPasskeyController extends
+    \Visnsstudio\VisnsPackages\Controllers\PasskeyController
+{
+    public static function maySignIn($candidate): bool
+    {
+        return static::candidateMaySignIn($candidate);
     }
 }
