@@ -428,8 +428,13 @@ class DirectCallPopTest extends TestCase
         $event = new CallQueueMissed('call-direct-1');
 
         $this->assertSame('queue.missed', $event->broadcastAs());
+        // `grace_seconds` rides along so the browser's timer and this server's
+        // `scopeLive()` cutoff are the same number. They were not, and the gap
+        // between them is what left cards on screen: the pop removed the card
+        // first, then a snapshot still listing the call put it back with no
+        // timer behind it.
         $this->assertSame(
-            ['call_id' => 'call-direct-1'],
+            ['call_id' => 'call-direct-1', 'grace_seconds' => 20],
             $event->broadcastWith()
         );
     }

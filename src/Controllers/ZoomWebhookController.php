@@ -526,33 +526,112 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
 
         $call = ZoomLiveQueueCall::where('call_id', $callId)->first();
 
-        if ($call === null) {
-            // Not one of ours (or already cleared) — stay quiet, a stray
-            // broadcast would only make other tabs flicker.
-            $ledger->outcome('closed_no_match');
+        if ($call !== null) {
+            $ledger->queue($call->queue_id, $call->queue_name)
+                ->caller($call->caller_number);
 
-            return response()->json(['status' => 'ignored']);
+            $call->delete();
         }
-
-        $ledger->queue($call->queue_id, $call->queue_name)
-            ->caller($call->caller_number);
-
-        $call->delete();
 
         $class = $kind === 'answered'
             ? $this->eventClass('answered', CallQueueAnswered::class)
             : $this->eventClass('ended', CallQueueEnded::class);
 
-        // 'answered' and 'closed' are kept apart: a queue where every call is
-        // recorded and then closed without ever being answered is a different
-        // fault from one where nothing is recorded at all.
-        $ledger->outcome($kind === 'answered' ? 'answered' : 'closed');
+        /*
+        | A closing event for a call we are no longer holding is still
+        | broadcast — PROVIDED we popped a card for it earlier. That reverses an
+        | earlier decision, and the proviso is the whole of the cost control.
+        |
+        | It used to return here in silence, on the reasoning that a stray
+        | broadcast would make other tabs flicker. It does not: the pop matches
+        | the id against the cards it is showing and a miss changes nothing on
+        | screen. What silence DOES cost is the only rescue a stranded card had.
+        | The row can be gone while the card is still up — a sweep took it, or
+        | the `queue.missed` publish that should have started the browser's
+        | timer never landed — and in every one of those the later
+        | `phone.caller_ended` is the last thing that will ever be said about
+        | this call.
+        |
+        | But `phone.caller_ended` fires for EVERY call in the tenant: outbound
+        | legs, excluded queues, extensions nobody pops for. Broadcasting all of
+        | them would put a synchronous publish to Reverb on the webhook thread
+        | for calls no browser has ever heard of, and Zoom disables endpoints
+        | that answer slowly. So the ledger is asked first — one indexed lookup
+        | on `call_id` — and only a call this deployment actually recorded as
+        | ringing is worth telling anybody about.
+        */
+        $broadcast = $call !== null || $this->wasPopped($callId);
+
+        $ledger->outcome($this->closedOutcome($kind, $call !== null, $broadcast));
+
+        if (! $broadcast) {
+            return response()->json(['status' => 'ignored']);
+        }
 
         $ledger->broadcast(static function () use ($class, $callId) {
             event(new $class($callId));
         });
 
         return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Did this deployment ever put a card up for this call?
+     *
+     * Read off the webhook ledger, which records one row per delivery and keeps
+     * `call_id` indexed. A `ringing_recorded` row is proof a pop was published,
+     * so it is proof a card may still be sitting on somebody's screen — which
+     * is the only reason to announce a call the live table has already let go.
+     *
+     * False on anything that goes wrong, ledger switched off included: the
+     * conservative answer is the behaviour this endpoint had before, which is
+     * to say nothing. The retention window (`diagnostics.retain_days`, 7 days)
+     * is far longer than any card could plausibly still be up for.
+     */
+    private function wasPopped(string $callId): bool
+    {
+        if ($callId === '') {
+            return false;
+        }
+
+        try {
+            return \Visnsstudio\VisnsPackages\Models\ZoomWebhookEvent::where('call_id', $callId)
+                ->whereIn('outcome', [
+                    'ringing_recorded',
+                    'ringing_recorded_direct',
+                ])
+                ->exists();
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    /**
+     * The ledger word for a closing event.
+     *
+     * 'answered' and 'closed' are kept apart: a queue where every call is
+     * recorded and then closed without ever being answered is a different fault
+     * from one where nothing is recorded at all.
+     *
+     * The two `no_*` words below split what used to be one `closed_no_match`,
+     * because they are opposite readings of the same missing row:
+     *
+     *   *_untracked  the row had gone but a card WAS popped for this call, so
+     *                the closing event was announced anyway. A run of these is
+     *                what to look for when somebody reports a card that would
+     *                not clear.
+     *   *_no_match   nothing here ever popped this call — an outbound leg, an
+     *                excluded queue — and it was dropped, as it always was.
+     */
+    private function closedOutcome(string $kind, bool $tracked, bool $broadcast): string
+    {
+        $word = $kind === 'answered' ? 'answered' : 'closed';
+
+        if ($tracked) {
+            return $word;
+        }
+
+        return $word . ($broadcast ? '_untracked' : '_no_match');
     }
 
     /**

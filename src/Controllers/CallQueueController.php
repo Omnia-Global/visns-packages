@@ -3,8 +3,10 @@
 namespace Visnsstudio\VisnsPackages\Controllers;
 
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Visnsstudio\VisnsPackages\Events\CallQueueDiagnosticPing;
+use Visnsstudio\VisnsPackages\Events\CallQueueEnded;
 use Visnsstudio\VisnsPackages\Models\ZoomCallQueueSetting;
 use Visnsstudio\VisnsPackages\Models\ZoomLiveQueueCall;
 use Visnsstudio\VisnsPackages\Models\ZoomWebhookEvent;
@@ -28,11 +30,13 @@ class CallQueueController extends \App\Http\Controllers\Controller
         */
         $staleAfterMinutes = (int) ModuleConfig::get('call_queue.stale_after_minutes', 15);
 
-        ZoomLiveQueueCall::where(
-            'created_at',
-            '<',
-            Carbon::now()->subMinutes($staleAfterMinutes)
-        )->delete();
+        $this->sweep(
+            ZoomLiveQueueCall::where(
+                'created_at',
+                '<',
+                Carbon::now()->subMinutes($staleAfterMinutes)
+            )
+        );
 
         /*
         | And the shorter window: a call every leg gave up on. A miss no longer
@@ -43,7 +47,7 @@ class CallQueueController extends \App\Http\Controllers\Controller
         | opportunistic place, same reasoning: the snapshot is the only thing
         | that reads these rows.
         */
-        ZoomLiveQueueCall::deadAfterMiss()->delete();
+        $this->sweep(ZoomLiveQueueCall::deadAfterMiss());
 
         $calls = ZoomLiveQueueCall::live()
             ->orderBy('started_at')
@@ -58,6 +62,84 @@ class CallQueueController extends \App\Http\Controllers\Controller
             // hardcodes it, it uses whatever is named here.
             'channel' => CallQueueChannel::name(),
         ]);
+    }
+
+    /**
+     * Delete the rows a sweep matched, and TELL EVERY TAB they have gone.
+     *
+     * Both sweeps used to delete in silence, and the silence was the bug behind
+     * "the pop will not go away". This request reconciles the browser that made
+     * it and nobody else, so a card the server had already given up on stayed
+     * on every other open screen — flashing "Incoming call…" in the tab title
+     * for a call that ended twenty minutes ago — until something else happened
+     * to make that browser ask again. On a tab nobody touches, nothing does.
+     *
+     * A `queue.ended` for a call a browser is not showing changes nothing on
+     * screen, so the broadcast is safe to send to everyone; not sending it is
+     * what was not safe.
+     *
+     * Never throws and never fails the snapshot: the rows are read before the
+     * delete so the ids survive it, and a broadcaster that is down costs the
+     * announcement, not the request. The card then clears on the browser's own
+     * next reconcile, which is exactly where it stood before.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder  $query
+     */
+    private function sweep($query): void
+    {
+        try {
+            $callIds = $query->pluck('call_id')->all();
+        } catch (\Throwable $e) {
+            return;
+        }
+
+        $query->delete();
+
+        if ($callIds === []) {
+            return;
+        }
+
+        $class = $this->endedEventClass();
+
+        foreach ($callIds as $callId) {
+            $callId = is_scalar($callId) ? trim((string) $callId) : '';
+
+            if ($callId === '') {
+                continue;
+            }
+
+            try {
+                event(new $class($callId));
+            } catch (\Throwable $e) {
+                // One unreachable broadcaster must not stop the sweep, and must
+                // not stop the snapshot this browser came for.
+                Log::warning('call-queue sweep broadcast failed', [
+                    'call_id' => $callId,
+                    'error' => WebhookLedger::redact($e->getMessage()),
+                ]);
+            }
+        }
+    }
+
+    /**
+     * The class to dispatch for "this call is over".
+     *
+     * `call_queue.events.ended` for the same reason the webhook honours it: an
+     * application whose listeners are written against its own event class can
+     * only be reached by dispatching that class. A name that does not resolve
+     * falls back to the package's own rather than throwing.
+     *
+     * @return class-string
+     */
+    private function endedEventClass(): string
+    {
+        $configured = ModuleConfig::get('call_queue.events.ended');
+
+        if (is_string($configured) && $configured !== '' && class_exists($configured)) {
+            return $configured;
+        }
+
+        return CallQueueEnded::class;
     }
 
     /*

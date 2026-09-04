@@ -3,8 +3,10 @@
 namespace Visnsstudio\VisnsPackages\Tests\Platform\CallQueue;
 
 use App\Models\User;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Spatie\Permission\Models\Permission;
+use Visnsstudio\VisnsPackages\Events\CallQueueEnded;
 use Visnsstudio\VisnsPackages\Models\ZoomCallQueueSetting;
 use Visnsstudio\VisnsPackages\Models\ZoomLiveQueueCall;
 use Visnsstudio\VisnsPackages\Services\Zoom\ZoomCallQueueService;
@@ -377,5 +379,88 @@ class CallQueueSettingsTest extends TestCase
             ->assertJsonCount(0, 'calls');
 
         $this->assertSame(0, ZoomLiveQueueCall::count());
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | The sweeps announce themselves
+    |--------------------------------------------------------------------------
+    |
+    | Both sweeps used to delete in silence, and that silence is what made "the
+    | pop will not go away" permanent: this request reconciles the browser that
+    | made it and nobody else, so a card the server had already given up on sat
+    | on every OTHER open screen — flashing the tab title for a call that ended
+    | twenty minutes ago — until something happened to make that browser ask
+    | again. On a visible tab with a healthy socket, nothing ever does.
+    */
+
+    public function test_the_stale_sweep_tells_every_tab_the_call_is_over(): void
+    {
+        Event::fake([CallQueueEnded::class]);
+
+        $call = ZoomLiveQueueCall::create([
+            'call_id' => 'call-old',
+            'queue_id' => 'queue-1',
+            'status' => 'ringing',
+            'started_at' => now()->subHour(),
+        ]);
+
+        $call->forceFill(['created_at' => now()->subHour()])->save();
+
+        $this->actingAs($this->staffWith('Call Queue Monitor'))
+            ->getJson('/ajax/call-queue/live')
+            ->assertOk();
+
+        Event::assertDispatched(
+            CallQueueEnded::class,
+            fn(CallQueueEnded $event) => $event->callId === 'call-old'
+        );
+    }
+
+    public function test_the_missed_sweep_tells_every_tab_the_call_is_over(): void
+    {
+        Event::fake([CallQueueEnded::class]);
+
+        // Every leg gave up, nothing rang again, and the grace has run out.
+        ZoomLiveQueueCall::create([
+            'call_id' => 'call-missed',
+            'queue_id' => 'queue-1',
+            'status' => 'ringing',
+            'started_at' => now()->subMinutes(2),
+            'last_ringing_at' => now()->subMinutes(2),
+            'last_missed_at' => now()->subMinute(),
+        ]);
+
+        $this->actingAs($this->staffWith('Call Queue Monitor'))
+            ->getJson('/ajax/call-queue/live')
+            ->assertOk()
+            ->assertJsonCount(0, 'calls');
+
+        $this->assertSame(0, ZoomLiveQueueCall::count());
+
+        Event::assertDispatched(
+            CallQueueEnded::class,
+            fn(CallQueueEnded $event) => $event->callId === 'call-missed'
+        );
+    }
+
+    public function test_a_live_call_is_neither_swept_nor_announced(): void
+    {
+        Event::fake([CallQueueEnded::class]);
+
+        ZoomLiveQueueCall::create([
+            'call_id' => 'call-ringing',
+            'queue_id' => 'queue-1',
+            'status' => 'ringing',
+            'started_at' => now(),
+            'last_ringing_at' => now(),
+        ]);
+
+        $this->actingAs($this->staffWith('Call Queue Monitor'))
+            ->getJson('/ajax/call-queue/live')
+            ->assertOk()
+            ->assertJsonCount(1, 'calls');
+
+        Event::assertNotDispatched(CallQueueEnded::class);
     }
 }

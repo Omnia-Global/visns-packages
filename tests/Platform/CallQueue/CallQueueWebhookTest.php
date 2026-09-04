@@ -429,7 +429,7 @@ class CallQueueWebhookTest extends TestCase
         Event::assertNotDispatched(CallQueueEnded::class);
     }
 
-    public function test_a_closing_event_for_an_unknown_call_stays_quiet(): void
+    public function test_a_closing_event_for_a_call_we_never_popped_stays_quiet(): void
     {
         Event::fake([CallQueueEnded::class]);
 
@@ -440,8 +440,43 @@ class CallQueueWebhookTest extends TestCase
             ->assertOk()
             ->assertJsonPath('status', 'ignored');
 
-        // A stray broadcast would only make other tabs flicker.
+        /*
+        | `phone.caller_ended` fires for every call in the tenant — outbound
+        | legs, excluded queues, extensions nobody pops for. Announcing all of
+        | them would put a synchronous publish to Reverb on the webhook thread
+        | for calls no browser has ever heard of.
+        |
+        | A call the pop DID put a card up for is the opposite case and IS
+        | announced even once the live row has gone; that needs the webhook
+        | ledger to answer "was this ever popped", so it is asserted next door
+        | in CallQueueDiagnosticsTest, where the ledger table exists.
+        */
         Event::assertNotDispatched(CallQueueEnded::class);
+    }
+
+    public function test_the_missed_broadcast_carries_the_servers_own_grace(): void
+    {
+        config()->set('visns-packages.call_queue.missed_grace_seconds', 25);
+
+        $this->signedPost($this->ringingPayload());
+
+        $this->signedPost([
+            'event' => 'phone.callee_missed',
+            'payload' => ['object' => ['call_id' => 'call-abc-123']],
+        ])->assertOk();
+
+        /*
+        | The window has to leave the server, because the server is also what
+        | decides when `scopeLive()` stops listing the call. When the browser
+        | picked its own it picked a shorter one, took the card down first, and
+        | the next snapshot — still listing the call as live — put it straight
+        | back with no timer behind it. Nothing was left to remove it after
+        | that.
+        */
+        $payload = (new CallQueueMissed('call-abc-123'))->broadcastWith();
+
+        $this->assertSame('call-abc-123', $payload['call_id']);
+        $this->assertSame(25, $payload['grace_seconds']);
     }
 
     /*

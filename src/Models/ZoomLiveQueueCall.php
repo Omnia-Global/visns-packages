@@ -100,13 +100,25 @@ class ZoomLiveQueueCall extends Model
     }
 
     /**
+     * The grace window itself, in seconds.
+     *
+     * Read here rather than at each call site because it now leaves the server:
+     * `CallQueueMissed` broadcasts it so the browser's timer and this scope's
+     * cutoff are the same number. A browser that removed a card sooner than
+     * this had it put back by the next snapshot, which still listed the call as
+     * live — see the note on CallQueueMissed::broadcastWith().
+     */
+    public static function missedGraceSeconds(): int
+    {
+        return max(0, (int) ModuleConfig::get('call_queue.missed_grace_seconds', 20));
+    }
+
+    /**
      * How long ago a miss stops keeping a card on screen.
      */
     public static function missedCutoff(): Carbon
     {
-        $grace = (int) ModuleConfig::get('call_queue.missed_grace_seconds', 20);
-
-        return Carbon::now()->subSeconds(max(0, $grace));
+        return Carbon::now()->subSeconds(self::missedGraceSeconds());
     }
 
     /**

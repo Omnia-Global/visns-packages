@@ -8,8 +8,10 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Spatie\Permission\Models\Permission;
 use Visnsstudio\VisnsPackages\Events\CallQueueDiagnosticPing;
+use Visnsstudio\VisnsPackages\Events\CallQueueEnded;
 use Visnsstudio\VisnsPackages\Events\CallQueueRinging;
 use Visnsstudio\VisnsPackages\Models\ZoomCallQueueSetting;
+use Visnsstudio\VisnsPackages\Models\ZoomLiveQueueCall;
 use Visnsstudio\VisnsPackages\Models\ZoomWebhookEvent;
 use Visnsstudio\VisnsPackages\Support\CallQueueChannel;
 use Visnsstudio\VisnsPackages\Tests\TestCase;
@@ -259,9 +261,47 @@ class CallQueueDiagnosticsTest extends TestCase
             'payload' => ['object' => ['call_id' => 'never-seen']],
         ])->assertOk();
 
+        // Still `closed_no_match`: nothing here ever popped `never-seen`, so
+        // there is no card anywhere to take down and nothing to announce.
         $this->assertSame(
             ['ringing_recorded', 'answered', 'closed_no_match'],
             ZoomWebhookEvent::orderBy('id')->pluck('outcome')->all()
+        );
+    }
+
+    public function test_a_closing_event_for_a_popped_call_is_announced_after_its_row_has_gone(): void
+    {
+        Event::fake([CallQueueEnded::class]);
+
+        $this->signedPost($this->ringingPayload());
+
+        /*
+        | The state that stranded cards on production. The live row goes — a
+        | sweep took it, or the `queue.missed` publish that should have started
+        | the browser's grace timer never landed — while the card is still up on
+        | every open screen. The later `phone.caller_ended` is then the last
+        | thing that will ever be said about this call, and it used to be
+        | dropped in silence.
+        */
+        ZoomLiveQueueCall::where('call_id', 'call-abc-123')->delete();
+
+        $this->signedPost([
+            'event' => 'phone.caller_ended',
+            'payload' => ['object' => ['call_id' => 'call-abc-123']],
+        ])
+            ->assertOk()
+            ->assertJsonPath('status', 'ok');
+
+        Event::assertDispatched(
+            CallQueueEnded::class,
+            fn(CallQueueEnded $event) => $event->callId === 'call-abc-123'
+        );
+
+        // The ledger keeps the two apart: the row was gone, and we said so
+        // anyway. A run of these is the shape of "the card would not clear".
+        $this->assertSame(
+            'closed_untracked',
+            ZoomWebhookEvent::orderByDesc('id')->first()->outcome
         );
     }
 
