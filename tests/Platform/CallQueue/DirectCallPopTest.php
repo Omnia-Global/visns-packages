@@ -64,6 +64,11 @@ class DirectCallPopTest extends TestCase
         $this->runPackageMigration(
             '2026_09_02_120000_add_kind_and_callee_to_zoom_live_queue_calls_table.php'
         );
+        // The per-leg map. Zoom rings (and ends) one call_id once per leg,
+        // so every ringing webhook writes to this column.
+        $this->runPackageMigration(
+            '2026_09_07_100000_add_legs_to_zoom_live_queue_calls_table.php'
+        );
     }
 
     protected function tearDown(): void

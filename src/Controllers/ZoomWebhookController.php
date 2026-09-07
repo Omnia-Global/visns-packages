@@ -3,8 +3,10 @@
 namespace Visnsstudio\VisnsPackages\Controllers;
 
 use Carbon\Carbon;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Visnsstudio\VisnsPackages\Events\CallQueueAnswered;
 use Visnsstudio\VisnsPackages\Events\CallQueueEnded;
@@ -62,25 +64,50 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
         'phone.callee_answered',
     ];
 
-    /** Events that mean "the call is over / nobody is ringing any more". */
-    private const ENDED_EVENTS = [
-        'phone.callee_ended',
+    /**
+     * Events that mean "the CALLER hung up" — the whole call is over.
+     *
+     * Nobody's phone is ringing after this, whatever the legs say, so it closes
+     * the pop straight away.
+     */
+    private const CALLER_ENDED_EVENTS = [
         'phone.caller_ended',
+    ];
+
+    /**
+     * Events that mean "ONE leg stopped ringing".
+     *
+     * `phone.callee_ended` is per LEG, exactly as `phone.callee_missed` is. A
+     * queue rings every member, and each member's extension rings a desk phone
+     * AND the Zoom app, so a single call routinely produces four, six, ten of
+     * these. Treating the first one as "the call is over" — which is what
+     * sharing an ENDED_EVENTS list with `phone.caller_ended` did — closed the
+     * pop on every screen while the other handsets rang on; on one production
+     * call it beat the answer by a moment.
+     *
+     * So it settles a leg and closes only once NO leg is ringing any more,
+     * which is the rule the office asked for: "if it stops ringing, it should
+     * close for everyone." See handleEndedLeg().
+     */
+    private const CALLEE_ENDED_EVENTS = [
+        'phone.callee_ended',
     ];
 
     /**
      * Events that mean "ONE leg stopped ringing" — declined, or timed out.
      *
-     * `phone.callee_missed` used to sit in ENDED_EVENTS, which was wrong in
+     * `phone.callee_missed` used to sit in the ended list, which was wrong in
      * both directions. Zoom sends it PER LEG: a queue rings four handsets on
      * one call_id, so the first person to wave the call away closed everybody
      * else's pop while their phones were still ringing; and a direct call
      * arrives on two legs (desk phone and mobile app), so it did it to itself
      * the moment the quicker of the two gave up.
      *
-     * So a miss is now recorded, not acted on: the row is stamped and kept,
-     * and ZoomLiveQueueCall::scopeLive() decides whether the call is still
-     * ringing anywhere.
+     * So a miss is recorded, not acted on: the row is stamped, the leg is
+     * settled, and ZoomLiveQueueCall::scopeLive() decides whether the call is
+     * still ringing anywhere. Deliberately NOT closed the moment every leg has
+     * missed — Zoom's queue overflow re-rings the same call_id a second later,
+     * and the grace window is what stops the card flickering off and back on.
      */
     private const MISSED_EVENTS = [
         'phone.callee_missed',
@@ -165,8 +192,12 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
                 return $this->handleClosingEvent($event, $body, 'answered', $ledger);
             }
 
-            if (in_array($event, self::ENDED_EVENTS, true)) {
+            if (in_array($event, self::CALLER_ENDED_EVENTS, true)) {
                 return $this->handleClosingEvent($event, $body, 'ended', $ledger);
+            }
+
+            if (in_array($event, self::CALLEE_ENDED_EVENTS, true)) {
+                return $this->handleEndedLeg($event, $body, $ledger);
             }
 
             if (in_array($event, self::MISSED_EVENTS, true)) {
@@ -345,10 +376,45 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
             $attributes = array_merge($attributes, $direct);
         }
 
-        $call = ZoomLiveQueueCall::updateOrCreate(
-            ['call_id' => $callId],
-            $attributes
-        );
+        /*
+        | Both of a call's legs arrive in the same instant, and each of them
+        | may be the one that creates the row. `updateOrCreate` reads then
+        | inserts; when two workers both read "nothing there", the second
+        | insert trips the unique index on call_id. That must not lose the
+        | leg (a lost leg is a count that reaches zero early — the very bug
+        | the legs column fixes) and must not 500 back to Zoom, so a losing
+        | insert simply re-reads the row the winner made and updates it.
+        */
+        try {
+            $call = ZoomLiveQueueCall::updateOrCreate(
+                ['call_id' => $callId],
+                $attributes
+            );
+        } catch (UniqueConstraintViolationException $e) {
+            $call = ZoomLiveQueueCall::where('call_id', $callId)->first();
+
+            if ($call === null) {
+                throw $e;
+            }
+
+            $call->fill($attributes)->save();
+        }
+
+        /*
+        | Fold this LEG into the row.
+        |
+        | Separate from the updateOrCreate above, and under a row lock, because
+        | it is a read-modify-write of a JSON column rather than an overwrite:
+        | production is PHP-FPM, one worker per request, and a queue fans one
+        | call out to every member at once — two legs' webhooks landing in the
+        | same millisecond would otherwise each read the same map and the second
+        | save would drop the first leg. A dropped leg means the count reaches
+        | zero early, which is the very bug this column exists to fix.
+        */
+        $this->withLockedRow($call, static function (ZoomLiveQueueCall $row) use ($object) {
+            $row->recordRingingLeg((array) Arr::get($object, 'callee', []));
+            $row->save();
+        });
 
         $ringing = $this->eventClass('ringing', CallQueueRinging::class);
 
@@ -409,7 +475,19 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
             ->queue($call->queue_id, $call->queue_name)
             ->caller($call->caller_number);
 
-        $call->forceFill(['last_missed_at' => Carbon::now()])->save();
+        // The leg is settled AND the row stamped, because the two answer
+        // different questions: the leg count says whether anything is still
+        // ringing, and `last_missed_at` drives the grace window that keeps the
+        // card up while Zoom's queue overflow re-offers the same call_id.
+        // Locked for the same reason the ringing path is — see withLockedRow().
+        $this->withLockedRow($call, static function (ZoomLiveQueueCall $row) use ($object) {
+            $row->settleLeg(
+                (array) Arr::get($object, 'callee', []),
+                ZoomLiveQueueCall::LEG_MISSED
+            );
+
+            $row->forceFill(['last_missed_at' => Carbon::now()])->save();
+        });
 
         $missed = $this->eventClass('missed', CallQueueMissed::class);
 
@@ -420,6 +498,116 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
         });
 
         return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * One leg of a call stopped ringing (`phone.callee_ended`).
+     *
+     * The rule, in the office's words: "if it stops ringing, it should close for
+     * everyone." So this settles the leg and then asks the row how many are
+     * left. Still ringing somewhere -> the pop is untouched and NOTHING is
+     * broadcast; a leg ending while other handsets ring is invisible by design,
+     * and a broadcast would only make every tab flicker. Nothing left ringing ->
+     * the ordinary closing path runs, so the event class, the deletion and the
+     * ledger's word for it are exactly what they were.
+     *
+     * A row with no legs recorded falls through to the old behaviour and closes
+     * on the first ended event. That is deliberate: the only way to have no legs
+     * is a row created by the release before this one (or one whose ringing
+     * event we never saw), and "we do not know" must not mean "keep the card up
+     * until the stale sweep".
+     */
+    private function handleEndedLeg(string $event, array $body, WebhookLedger $ledger)
+    {
+        $object = (array) Arr::get($body, 'payload.object', []);
+        $callId = $this->callId($object);
+
+        if ($callId === '') {
+            $ledger->outcome('closed_no_call_id');
+
+            $this->logUnhandled($event, $body, 'closing event without a call_id');
+
+            return response()->json(['status' => 'ignored']);
+        }
+
+        $call = ZoomLiveQueueCall::where('call_id', $callId)->first();
+
+        if ($call === null) {
+            // Not one of ours, or already closed by the leg before this one.
+            $ledger->outcome('closed_no_match');
+
+            return response()->json(['status' => 'ignored']);
+        }
+
+        $stillRinging = $this->withLockedRow(
+            $call,
+            static function (ZoomLiveQueueCall $row) use ($object): bool {
+                if (! $row->hasRecordedLegs()) {
+                    return false;
+                }
+
+                // The return value is ignored on purpose. A delivery Zoom
+                // retried finds its leg already settled and settles nothing —
+                // which must NOT be read as "no leg matched, so close", or a
+                // duplicate would close a call that is still ringing elsewhere.
+                // The count below is the only thing that decides.
+                $row->settleLeg(
+                    (array) Arr::get($object, 'callee', []),
+                    ZoomLiveQueueCall::LEG_ENDED
+                );
+
+                $row->save();
+
+                return $row->ringingLegCount() > 0;
+            },
+            // Deleted between the read and the lock: nothing is ringing.
+            false
+        );
+
+        if ($stillRinging) {
+            $ledger->callId($callId)
+                ->queue($call->queue_id, $call->queue_name)
+                ->caller($call->caller_number);
+
+            // Its own word, so the diagnostics screen shows plainly that a call
+            // shed a leg without closing — that is the fix working, not a
+            // dropped event.
+            $ledger->outcome('ended_leg');
+
+            return response()->json(['status' => 'ok']);
+        }
+
+        return $this->handleClosingEvent($event, $body, 'ended', $ledger);
+    }
+
+    /**
+     * Mutate one live-call row under a row lock.
+     *
+     * Every leg-bookkeeping write is a read-modify-write of a JSON column, and
+     * production runs a PHP-FPM worker per request while a queue fans one call
+     * out to every member at once. Without the lock two legs arriving in the
+     * same millisecond would each read the same map and the second save would
+     * silently drop the first leg — and a lost leg makes the count reach zero
+     * early, which is precisely the bug the column was added to fix.
+     *
+     * @param  callable(ZoomLiveQueueCall): mixed  $mutate
+     * @param  mixed  $whenGone  Returned when the row was deleted before the
+     *                           lock could be taken.
+     * @return mixed
+     */
+    private function withLockedRow(ZoomLiveQueueCall $call, callable $mutate, $whenGone = null)
+    {
+        return DB::transaction(function () use ($call, $mutate, $whenGone) {
+            $locked = ZoomLiveQueueCall::whereKey($call->getKey())
+                ->lockForUpdate()
+                ->first();
+
+            if ($locked === null) {
+                return $whenGone;
+            }
+
+            return $mutate($locked);
+        });
     }
 
     /**

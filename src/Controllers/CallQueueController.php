@@ -45,6 +45,16 @@ class CallQueueController extends \App\Http\Controllers\Controller
         */
         ZoomLiveQueueCall::deadAfterMiss()->delete();
 
+        /*
+        | And the stale-ring window: a call nothing has rung in
+        | `max_ringing_seconds`. Now that a `phone.callee_ended` closes the pop
+        | only once every LEG has stopped ringing, a closing event Zoom never
+        | delivered leaves a phantom row behind. scopeLive() already refuses to
+        | show one; this stops it sitting in the table for the whole
+        | `stale_after_minutes` window as well.
+        */
+        ZoomLiveQueueCall::staleRinging()->delete();
+
         $calls = ZoomLiveQueueCall::live()
             ->orderBy('started_at')
             ->get()
@@ -57,7 +67,39 @@ class CallQueueController extends \App\Http\Controllers\Controller
             // The Echo channel the pop subscribes to; the frontend never
             // hardcodes it, it uses whatever is named here.
             'channel' => CallQueueChannel::name(),
+            /*
+            | The two server-side windows, in milliseconds, so the browser can
+            | age a card out on exactly the same rules the snapshot does rather
+            | than on numbers of its own. A pop that disagrees with the server
+            | about when a call stops being live is the flicker this whole
+            | mechanism exists to avoid — and these are configuration, so
+            | hardcoding them in the component would drift the first time an
+            | operator changed one.
+            */
+            'missed_grace_ms' => $this->missedGraceSeconds() * 1000,
+            'max_ringing_ms' => $this->maxRingingSeconds() * 1000,
         ]);
+    }
+
+    /**
+     * How long a missed leg keeps its card on screen. Read here as well as in
+     * the model so the browser is told the same number the query uses.
+     */
+    private function missedGraceSeconds(): int
+    {
+        return max(0, (int) ModuleConfig::get(
+            'call_queue.missed_grace_seconds',
+            20
+        ));
+    }
+
+    /** How long a call may go unrung before the pop drops it. */
+    private function maxRingingSeconds(): int
+    {
+        return max(1, (int) ModuleConfig::get(
+            'call_queue.max_ringing_seconds',
+            120
+        ));
     }
 
     /*

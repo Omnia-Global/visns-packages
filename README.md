@@ -965,6 +965,22 @@ the monitor permission; set `register_broadcast_channel => false` to do it
 yourself in `routes/channels.php`. The front end should read the channel name
 from `/ajax/call-queue/live` rather than hardcoding it.
 
+`GET /ajax/call-queue/live` answers with what is ringing right now plus the
+settings the pop needs to behave like the server:
+
+| Key | What it is |
+| --- | --- |
+| `calls` | The live calls, each in the same shape the `ringing` broadcast carries |
+| `pickup_codes` | Dial strings keyed by `pickup_key` (a queue id, or `direct`) |
+| `channel` | The Echo channel to subscribe to — never hardcode it |
+| `missed_grace_ms` | `missed_grace_seconds` in milliseconds |
+| `max_ringing_ms` | `max_ringing_seconds` in milliseconds |
+
+The last two are published because the browser ages cards out too, and a pop
+that disagrees with the server about when a call stopped being live is the
+flicker the leg bookkeeping exists to avoid. They are configuration, so the
+component reads them rather than carrying numbers of its own.
+
 **Dispatching your own event classes.** An application that already has
 `App\Events\CallQueue*` — with listeners and tests written against them — cannot
 be reached by dispatching the package's classes. Laravel's `Event::fake()` and
@@ -1008,6 +1024,30 @@ Behaviour worth knowing before you point Zoom at it:
   rather than open while the Zoom app does not exist yet.
 - Zoom's queue events arrive in two shapes — sometimes the callee *is* the queue,
   sometimes the queue only appears under `forwarded_by`. Both match.
+- **Zoom's events are per LEG, not per call.** One `call_id` rings every queue
+  member, and each member's extension rings a desk phone *and* the Zoom app — so
+  a single call produces several `phone.callee_ringing`, several
+  `phone.callee_missed` and several `phone.callee_ended`. Treating any one of
+  them as "the call is over" closes the pop on every screen while the other
+  handsets ring on, which is exactly what used to happen (on one production call
+  it beat the answer by a moment). The live-call row therefore keeps a `legs`
+  map, and the rule is the office's own: *if it stops ringing, it should close
+  for everyone.* The card closes the instant the number of legs still ringing
+  reaches zero, and not before.
+  - `phone.caller_ended` is the caller ringing off — the whole call is over, so
+    it closes regardless of legs. `phone.callee_answered` closes it too.
+  - `missed_grace_seconds` (default **20**) is how long a leg that timed out or
+    was declined keeps its card up. Zoom's queue overflow re-offers the same
+    `call_id` a second later, and a card that blinks off and back on is worse
+    than one that lingers.
+  - `max_ringing_seconds` (default **120**) is the safety net for the other
+    direction: a closing event Zoom never delivered. A row nothing has rung in
+    that long stops being live and is pruned on the next snapshot read, rather
+    than sitting there as a phantom pop until the far longer
+    `stale_after_minutes` sweep notices.
+  - A row written before this existed has no legs recorded, and still closes on
+    the first `phone.callee_ended` it sees — "we do not know" must not mean
+    "keep the card up".
 - Caller enrichment runs once, on the webhook thread, not in each watching
   browser. Implement `Visnsstudio\VisnsPackages\Contracts\CallerEnrichment`; a
   hook that throws costs the pop its client block, never the pop.

@@ -2,13 +2,18 @@
 
 namespace Visnsstudio\VisnsPackages\Tests\Platform\CallQueue;
 
+use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Hash;
+use Spatie\Permission\Models\Permission;
 use Visnsstudio\VisnsPackages\Events\CallQueueAnswered;
 use Visnsstudio\VisnsPackages\Events\CallQueueEnded;
 use Visnsstudio\VisnsPackages\Events\CallQueueMissed;
 use Visnsstudio\VisnsPackages\Events\CallQueueRinging;
 use Visnsstudio\VisnsPackages\Models\ZoomCallQueueSetting;
 use Visnsstudio\VisnsPackages\Models\ZoomLiveQueueCall;
+use Visnsstudio\VisnsPackages\Models\ZoomWebhookEvent;
 use Visnsstudio\VisnsPackages\Support\CallQueueChannel;
 use Visnsstudio\VisnsPackages\Tests\Fixtures\CallQueue\StubCallerEnrichment;
 use Visnsstudio\VisnsPackages\Tests\TestCase;
@@ -26,6 +31,13 @@ class CallQueueWebhookTest extends TestCase
         parent::setUp();
 
         StubCallerEnrichment::reset();
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
     }
 
     protected function defineEnvironment($app)
@@ -52,8 +64,18 @@ class CallQueueWebhookTest extends TestCase
         $this->runPackageMigration(
             '2026_09_02_120000_add_kind_and_callee_to_zoom_live_queue_calls_table.php'
         );
+        // The per-leg map. Zoom rings (and ends) one call_id once per leg,
+        // so every ringing webhook writes to this column.
+        $this->runPackageMigration(
+            '2026_09_07_100000_add_legs_to_zoom_live_queue_calls_table.php'
+        );
         $this->runPackageMigration(
             '2026_08_19_210100_create_zoom_call_queue_settings_table.php'
+        );
+        // The webhook ledger, so the per-leg tests can assert on the word the
+        // diagnostics screen shows for each delivery.
+        $this->runPackageMigration(
+            '2026_09_02_100000_create_zoom_webhook_events_table.php'
         );
     }
 
@@ -107,6 +129,64 @@ class CallQueueWebhookTest extends TestCase
                 ], $overrides),
             ],
         ];
+    }
+
+    /**
+     * One LEG of a queue call, shaped the way production sends it: the callee is
+     * the member's own extension and the queue only appears under forwarded_by.
+     */
+    private function queueLegPayload(array $callee): array
+    {
+        return $this->ringingPayload([
+            'callee' => $callee,
+            'forwarded_by' => [
+                'extension_type' => 'call_queue',
+                'extension_id' => 'queue-1',
+                'name' => 'Reception',
+            ],
+        ]);
+    }
+
+    /** `phone.callee_ended` for one leg. Zoom often names no callee at all. */
+    private function calleeEndedPayload(array $callee = []): array
+    {
+        return [
+            'event' => 'phone.callee_ended',
+            'payload' => [
+                'object' => array_merge(
+                    ['call_id' => 'call-abc-123'],
+                    $callee === [] ? [] : ['callee' => $callee]
+                ),
+            ],
+        ];
+    }
+
+    /** The ledger's word for each delivery, in order. */
+    private function outcomes(): array
+    {
+        return ZoomWebhookEvent::orderBy('id')->pluck('outcome')->all();
+    }
+
+    private function staffWith(string ...$permissions): User
+    {
+        $user = User::create([
+            'firstname' => 'Sam',
+            'email' => 'sam@example.test',
+            'password' => Hash::make('x'),
+        ]);
+
+        foreach ($permissions as $name) {
+            Permission::findOrCreate($name, 'web');
+            $user->givePermissionTo($name);
+        }
+
+        return $user;
+    }
+
+    private function snapshot()
+    {
+        return $this->actingAs($this->staffWith('Call Queue Monitor'))
+            ->getJson('/ajax/call-queue/live');
     }
 
     /*
@@ -446,6 +526,304 @@ class CallQueueWebhookTest extends TestCase
 
     /*
     |--------------------------------------------------------------------------
+    | Ending, one leg at a time
+    |--------------------------------------------------------------------------
+    |
+    | `phone.callee_ended` is per LEG, exactly as `phone.callee_missed` is. On a
+    | real call (7681211823904341133) production saw ringing(204), ringing(204),
+    | callee_ended, callee_answered, callee_ended — and the FIRST ended closed
+    | the pop on every screen, a moment before somebody actually picked the call
+    | up. The rule the office asked for: if it stops ringing, it should close for
+    | everyone — so the pop closes when the LAST leg stops, not the first.
+    */
+
+    public function test_one_leg_ending_does_not_close_a_call_the_others_are_ringing(): void
+    {
+        Event::fake([CallQueueEnded::class, CallQueueAnswered::class]);
+
+        // One extension, two handsets (desk phone and Zoom app): two ringing
+        // events on one call_id, and Zoom named no device on either.
+        $this->signedPost($this->queueLegPayload([
+            'extension_type' => 'user',
+            'extension_id' => '204',
+        ]));
+        $this->signedPost($this->queueLegPayload([
+            'extension_type' => 'user',
+            'extension_id' => '204',
+        ]));
+
+        $this->signedPost($this->calleeEndedPayload([
+            'extension_type' => 'user',
+            'extension_id' => '204',
+        ]))->assertOk()->assertJsonPath('status', 'ok');
+
+        $call = ZoomLiveQueueCall::firstWhere('call_id', 'call-abc-123');
+
+        $this->assertNotNull($call);
+        $this->assertSame(1, $call->ringingLegCount());
+
+        // Nothing is broadcast at all: a leg ending while other handsets ring is
+        // invisible to the pop by design, and an event here would only make
+        // every watching tab flicker.
+        Event::assertNotDispatched(CallQueueEnded::class);
+
+        // Its own ledger word, so the diagnostics screen shows the fix working
+        // rather than an event that went missing.
+        $this->assertContains('ended_leg', $this->outcomes());
+    }
+
+    public function test_the_last_leg_ending_closes_the_call_for_everyone(): void
+    {
+        Event::fake([CallQueueEnded::class]);
+
+        $this->signedPost($this->queueLegPayload([
+            'extension_type' => 'user',
+            'extension_id' => '204',
+        ]));
+        $this->signedPost($this->queueLegPayload([
+            'extension_type' => 'user',
+            'extension_id' => '204',
+        ]));
+
+        $this->signedPost($this->calleeEndedPayload([
+            'extension_type' => 'user',
+            'extension_id' => '204',
+        ]));
+        $this->signedPost($this->calleeEndedPayload([
+            'extension_type' => 'user',
+            'extension_id' => '204',
+        ]))->assertOk();
+
+        $this->assertSame(0, ZoomLiveQueueCall::count());
+
+        // Once, on the leg that took the count to zero — the closing path is the
+        // same one an answer or a caller hangup goes through, so the event class
+        // and the ledger's word for it are unchanged.
+        Event::assertDispatchedTimes(CallQueueEnded::class, 1);
+        $this->assertContains('closed', $this->outcomes());
+    }
+
+    public function test_legs_are_keyed_by_the_device_when_zoom_names_one(): void
+    {
+        Event::fake([CallQueueEnded::class]);
+
+        foreach (['device-desk', 'device-app'] as $device) {
+            $this->signedPost($this->queueLegPayload([
+                'extension_type' => 'user',
+                'extension_id' => '204',
+                'device_id' => $device,
+            ]));
+        }
+
+        $call = ZoomLiveQueueCall::firstWhere('call_id', 'call-abc-123');
+
+        // Zoom said which handset, so the map says so too — no `#2` suffix
+        // needed. This is the only field that distinguishes the two.
+        $this->assertSame(
+            ['device-desk', 'device-app'],
+            array_map('strval', array_keys($call->legs))
+        );
+
+        $this->signedPost($this->calleeEndedPayload([
+            'extension_type' => 'user',
+            'extension_id' => '204',
+            'device_id' => 'device-desk',
+        ]));
+
+        $call->refresh();
+        $this->assertSame(1, $call->ringingLegCount());
+        $this->assertSame('ended', $call->legs['device-desk']['state']);
+        Event::assertNotDispatched(CallQueueEnded::class);
+
+        $this->signedPost($this->calleeEndedPayload([
+            'extension_type' => 'user',
+            'extension_id' => '204',
+            'device_id' => 'device-app',
+        ]));
+
+        $this->assertSame(0, ZoomLiveQueueCall::count());
+        Event::assertDispatchedTimes(CallQueueEnded::class, 1);
+    }
+
+    public function test_a_retried_ended_delivery_does_not_take_a_second_leg_down(): void
+    {
+        Event::fake([CallQueueEnded::class]);
+
+        foreach (['device-desk', 'device-app'] as $device) {
+            $this->signedPost($this->queueLegPayload([
+                'extension_type' => 'user',
+                'extension_id' => '204',
+                'device_id' => $device,
+            ]));
+        }
+
+        $ended = $this->calleeEndedPayload([
+            'extension_type' => 'user',
+            'extension_id' => '204',
+            'device_id' => 'device-desk',
+        ]);
+
+        $this->signedPost($ended);
+        // Zoom retries. The second delivery finds its leg already settled and
+        // must settle nothing else — otherwise a retry closes a call that is
+        // still ringing on the other handset.
+        $this->signedPost($ended)->assertOk();
+
+        $call = ZoomLiveQueueCall::firstWhere('call_id', 'call-abc-123');
+
+        $this->assertNotNull($call);
+        $this->assertSame(1, $call->ringingLegCount());
+        Event::assertNotDispatched(CallQueueEnded::class);
+    }
+
+    public function test_the_caller_hanging_up_closes_the_call_whatever_the_legs_say(): void
+    {
+        Event::fake([CallQueueEnded::class]);
+
+        $this->signedPost($this->queueLegPayload([
+            'extension_type' => 'user',
+            'extension_id' => '204',
+        ]));
+        $this->signedPost($this->queueLegPayload([
+            'extension_type' => 'user',
+            'extension_id' => '206',
+        ]));
+
+        // `phone.caller_ended` is the caller ringing off. Every handset in the
+        // queue stops at once, so the leg count is beside the point.
+        $this->signedPost([
+            'event' => 'phone.caller_ended',
+            'payload' => ['object' => ['call_id' => 'call-abc-123']],
+        ])->assertOk();
+
+        $this->assertSame(0, ZoomLiveQueueCall::count());
+        Event::assertDispatchedTimes(CallQueueEnded::class, 1);
+    }
+
+    public function test_an_answer_after_a_leg_ended_still_closes_the_call(): void
+    {
+        Event::fake([CallQueueAnswered::class, CallQueueEnded::class]);
+
+        $this->signedPost($this->queueLegPayload([
+            'extension_type' => 'user',
+            'extension_id' => '204',
+        ]));
+        $this->signedPost($this->queueLegPayload([
+            'extension_type' => 'user',
+            'extension_id' => '206',
+        ]));
+
+        // The production ordering that started this: one leg ends, and the
+        // answer follows. The card has to survive the end and then close as an
+        // ANSWER, not as a hangup.
+        $this->signedPost($this->calleeEndedPayload([
+            'extension_type' => 'user',
+            'extension_id' => '204',
+        ]));
+
+        $this->assertSame(1, ZoomLiveQueueCall::count());
+
+        $this->signedPost([
+            'event' => 'phone.callee_answered',
+            'payload' => ['object' => ['call_id' => 'call-abc-123']],
+        ])->assertOk();
+
+        $this->assertSame(0, ZoomLiveQueueCall::count());
+        Event::assertDispatchedTimes(CallQueueAnswered::class, 1);
+        Event::assertNotDispatched(CallQueueEnded::class);
+    }
+
+    public function test_a_missed_leg_leaves_the_other_leg_ringing(): void
+    {
+        Event::fake([CallQueueEnded::class, CallQueueMissed::class]);
+
+        $this->signedPost($this->queueLegPayload([
+            'extension_type' => 'user',
+            'extension_id' => '204',
+        ]));
+        $this->signedPost($this->queueLegPayload([
+            'extension_type' => 'user',
+            'extension_id' => '206',
+        ]));
+
+        // 204 declined; 206 is still ringing. A miss settles its leg exactly as
+        // an end does — it just also stamps the row, because a call every leg
+        // has missed keeps its card for the grace window rather than closing.
+        $this->signedPost([
+            'event' => 'phone.callee_missed',
+            'payload' => ['object' => [
+                'call_id' => 'call-abc-123',
+                'callee' => ['extension_type' => 'user', 'extension_id' => '204'],
+            ]],
+        ])->assertOk();
+
+        $call = ZoomLiveQueueCall::firstWhere('call_id', 'call-abc-123');
+
+        $this->assertSame(1, $call->ringingLegCount());
+        $this->assertSame('missed', $call->legs['204']['state']);
+        $this->assertNotNull($call->last_missed_at);
+
+        Event::assertDispatched(CallQueueMissed::class);
+        Event::assertNotDispatched(CallQueueEnded::class);
+    }
+
+    public function test_a_row_from_before_the_leg_map_still_closes_on_the_first_ended(): void
+    {
+        Event::fake([CallQueueEnded::class]);
+
+        // Written by the previous release: no legs at all. "We do not know"
+        // must not mean "keep the card up until the stale sweep", so the old
+        // behaviour stands for these.
+        ZoomLiveQueueCall::create([
+            'call_id' => 'call-abc-123',
+            'queue_id' => 'queue-1',
+            'queue_name' => 'Reception',
+            'status' => 'ringing',
+            'started_at' => Carbon::now(),
+            'last_ringing_at' => Carbon::now(),
+        ]);
+
+        $this->signedPost($this->calleeEndedPayload())->assertOk();
+
+        $this->assertSame(0, ZoomLiveQueueCall::count());
+        Event::assertDispatchedTimes(CallQueueEnded::class, 1);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | The stale-ring safety net
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_a_call_nothing_has_rung_for_minutes_stops_being_live(): void
+    {
+        $this->signedPost($this->ringingPayload());
+
+        $this->assertSame(1, ZoomLiveQueueCall::live()->count());
+
+        // Now that the pop closes on the leg count reaching zero rather than on
+        // the first ended event, a closing event Zoom never delivered would
+        // otherwise leave a phantom card ringing on every screen.
+        Carbon::setTestNow(Carbon::now()->addMinutes(3));
+
+        $this->assertSame(0, ZoomLiveQueueCall::live()->count());
+    }
+
+    public function test_the_snapshot_publishes_the_windows_the_pop_ages_cards_on(): void
+    {
+        // The browser has to age a card out on exactly the server's rules, or
+        // the two disagree about when a call stopped being live — which is the
+        // flicker the whole mechanism exists to avoid. Milliseconds, because
+        // that is what a browser timer takes.
+        $this->snapshot()
+            ->assertOk()
+            ->assertJsonPath('channel', CallQueueChannel::name())
+            ->assertJsonPath('missed_grace_ms', 20000)
+            ->assertJsonPath('max_ringing_ms', 120000);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
     | Robustness
     |--------------------------------------------------------------------------
     */
@@ -477,5 +855,8 @@ class CallQueueWebhookTest extends TestCase
             'call-queue-monitor',
             $shipped['call_queue']['channel']
         );
+        // The stale-ring safety net, comfortably longer than any queue's ring
+        // timeout so it only ever catches a closing event Zoom lost.
+        $this->assertSame(120, $shipped['call_queue']['max_ringing_seconds']);
     }
 }

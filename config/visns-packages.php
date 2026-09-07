@@ -1133,6 +1133,20 @@ return [
         'missed_grace_seconds' => 20,
 
         /*
+        | The stale-ring safety net: how long a call may go without a single
+        | ringing event before the pop stops showing it.
+        |
+        | `phone.callee_ended` is per LEG too, so the pop now closes on the leg
+        | COUNT reaching zero rather than on the first one - which means a
+        | closing event Zoom never delivered would otherwise leave a phantom
+        | card ringing on every screen until the far longer
+        | `stale_after_minutes` sweep noticed. Two minutes is comfortably longer
+        | than any queue's ring timeout, so this only ever catches a call whose
+        | end was genuinely lost.
+        */
+        'max_ringing_seconds' => 120,
+
+        /*
         | Zoom prefixes every call queue pickup code with a fixed *99, so the
         | stored code 8781 is dialled *998781. Codes are stored bare.
         */

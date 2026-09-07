@@ -61,6 +61,11 @@ class PhonePresenceTest extends TestCase
         $this->runPackageMigration(
             '2026_09_02_120000_add_kind_and_callee_to_zoom_live_queue_calls_table.php'
         );
+        // The per-leg map. Zoom rings (and ends) one call_id once per leg,
+        // so every ringing webhook writes to this column.
+        $this->runPackageMigration(
+            '2026_09_07_100000_add_legs_to_zoom_live_queue_calls_table.php'
+        );
         $this->runPackageMigration(
             '2026_08_19_210100_create_zoom_call_queue_settings_table.php'
         );

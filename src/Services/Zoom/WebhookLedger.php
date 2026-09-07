@@ -268,6 +268,14 @@ class WebhookLedger
                     Arr::get($node, 'extension_number'),
                     32
                 ),
+                // WHICH handset, when Zoom says. One extension rings a desk
+                // phone AND the Zoom app on a single call_id, and this is the
+                // only field that tells those two legs apart — the live-call
+                // table's leg map keys on it when it is there. Recorded so
+                // production can confirm after deploy whether Zoom sends it at
+                // all, rather than us inferring it from one sample. An opaque
+                // device handle: it names no human being.
+                'device_id' => self::text(Arr::get($node, 'device_id'), 120),
             ], static fn($value) => $value !== null);
 
             return $fields === [] ? null : $fields;
