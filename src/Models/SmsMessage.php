@@ -4,6 +4,7 @@ namespace Visnsstudio\VisnsPackages\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
+use Visnsstudio\VisnsPackages\Support\SmsText;
 
 /**
  * One SMS, in or out.
@@ -69,6 +70,16 @@ class SmsMessage extends Model
     public function user()
     {
         return $this->belongsTo(ModuleConfig::userModel('messaging'), 'user_id');
+    }
+
+    /**
+     * Read with Zoom's escaping undone, so a body stored before the webhook
+     * handler learned to decode it (literal `\n`, emoji as `\uXXXX` pairs)
+     * still reads as the text the client sent. The column is left as is.
+     */
+    public function getBodyAttribute($value): string
+    {
+        return SmsText::unescape($value === null ? null : (string) $value);
     }
 
     public function isInbound(): bool

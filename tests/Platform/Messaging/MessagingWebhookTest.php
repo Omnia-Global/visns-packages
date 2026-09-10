@@ -190,6 +190,25 @@ class MessagingWebhookTest extends MessagingTestCase
         );
     }
 
+    public function test_rows_stored_before_the_decoding_existed_read_decoded(): void
+    {
+        $member = $this->member();
+        $this->line([$member], ['phone_number' => self::LINE_NUMBER]);
+
+        // A reply that arrived before the handler decoded Zoom's escapes was
+        // stored verbatim, and its thread preview copied from it. Neither row
+        // is repaired; both read as the emoji through the model.
+        $this->signedPost($this->receivedPayload(['message' => 'placeholder']))->assertOk();
+
+        $message = SmsMessage::first();
+        SmsMessage::whereKey($message->id)->update(['body' => 'Thanks \\uD83D\\uDC4D\\nsee you']);
+        SmsThread::whereKey($message->thread_id)->update(['last_message_preview' => 'Thanks \\uD83D\\uDC4D\\nsee you']);
+
+        $this->assertSame("Thanks \u{1F44D}\nsee you", SmsMessage::first()->body);
+        $this->assertSame("Thanks \u{1F44D}\nsee you", SmsThread::first()->last_message_preview);
+        $this->assertStringContainsString('\\uD83D', SmsMessage::first()->getRawOriginal('body'));
+    }
+
     public function test_an_inbound_text_resolves_the_client_through_the_configured_hook(): void
     {
         $this->app['config']->set(

@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 use Visnsstudio\VisnsPackages\Support\PhoneNumber;
+use Visnsstudio\VisnsPackages\Support\SmsText;
 
 /**
  * One conversation between a line and an outside number.
@@ -51,6 +52,15 @@ class SmsThread extends Model
     public function reads()
     {
         return $this->hasMany(SmsThreadRead::class, 'thread_id');
+    }
+
+    /**
+     * The same decoding SmsMessage applies to its body - the preview is a copy
+     * of that body, taken before the escaping was understood on older rows.
+     */
+    public function getLastMessagePreviewAttribute($value): ?string
+    {
+        return $value === null ? null : SmsText::unescape((string) $value);
     }
 
     public function getDisplayNumberAttribute(): string
