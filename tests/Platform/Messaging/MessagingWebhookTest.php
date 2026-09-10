@@ -169,6 +169,27 @@ class MessagingWebhookTest extends MessagingTestCase
         $this->assertStringNotContainsString('\\n', $message->body);
     }
 
+    public function test_zooms_escaped_emoji_are_stored_as_the_emoji(): void
+    {
+        $member = $this->member();
+        $this->line([$member], ['phone_number' => self::LINE_NUMBER]);
+
+        // Observed live: a client's thumbs-up reply to a meeting reminder
+        // arrived as the JSON escapes of its UTF-16 surrogate pair, and the
+        // inbox showed the staff member `\uD83D\uDC4D`. The handler decodes
+        // the run back into one code point; a lone surrogate is left alone.
+        $this->signedPost($this->receivedPayload([
+            'message' => 'Thanks \uD83D\uDC4D see you then \u2013 J\nlone \uD83D end',
+        ]))->assertOk();
+
+        $message = SmsMessage::first();
+
+        $this->assertSame(
+            "Thanks \u{1F44D} see you then \u{2013} J\nlone \\uD83D end",
+            $message->body
+        );
+    }
+
     public function test_an_inbound_text_resolves_the_client_through_the_configured_hook(): void
     {
         $this->app['config']->set(

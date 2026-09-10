@@ -419,20 +419,36 @@ class SmsWebhookHandler
     /**
      * The message text, with Zoom's escaping undone.
      *
-     * Zoom's SMS webhooks carry newlines as the two characters `\` `n` rather
-     * than as newlines — observed live: a text sent with real line breaks came
-     * back in phone.sms_sent with literal `\n\n` in `message`, and was stored
-     * (and displayed) that way. The handset showed the breaks correctly, so
-     * this is the webhook's encoding, not the message's content. Undo `\r\n`,
-     * `\n` and `\r` here, in the one place webhook text is read. The body a
-     * client who really typed a backslash-n loses is vanishingly rarer than
-     * the login codes and multi-line texts this mends.
+     * Zoom's SMS webhooks carry the text JSON-escaped a second time — observed
+     * live twice over. A text sent with real line breaks came back in
+     * phone.sms_sent with literal `\n\n` in `message`, and a client's 👍 reply
+     * arrived as the six-character sequences `\uD83D\uDC4D` — the emoji's
+     * UTF-16 surrogate pair — and was stored (and displayed) exactly that way.
+     * The handset showed both correctly, so this is the webhook's encoding,
+     * not the message's content. Undo it here, in the one place webhook text
+     * is read: `\r\n`, `\n` and `\r` become newlines, and every `\uXXXX` run
+     * is decoded as the JSON string it is, which is what pairs the surrogates
+     * back into one code point. The body a client who really typed a
+     * backslash-n loses is vanishingly rarer than the login codes, multi-line
+     * texts and emoji replies this mends.
      */
     private function messageText(array $object): string
     {
         $text = (string) (Arr::get($object, 'message') ?? '');
 
-        return str_replace(['\\r\\n', '\\n', '\\r'], "\n", $text);
+        $text = str_replace(['\\r\\n', '\\n', '\\r'], "\n", $text);
+
+        return (string) preg_replace_callback(
+            '/(?:\\\\u[0-9a-fA-F]{4})+/',
+            static function (array $match): string {
+                $decoded = json_decode('"'.$match[0].'"');
+
+                // A lone surrogate is not valid JSON; leave it as it came
+                // rather than replace it with nothing.
+                return is_string($decoded) ? $decoded : $match[0];
+            },
+            $text
+        );
     }
 
     private function messageId(array $object): ?string
