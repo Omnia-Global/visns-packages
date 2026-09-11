@@ -1716,6 +1716,51 @@ return [
             */
             'per_minute' => 30,
 
+            /*
+            | Milliseconds to wait after every send attempt before making the
+            | next one. 0 turns the pacing off.
+            |
+            | THE CONSTRAINT IS NOT ZOOM'S PUBLISHED RATE LIMIT. Zoom Phone
+            | endpoints allow 20 requests a second (Light) or 10 (Medium) on a
+            | Pro account, and sending anywhere near that would sit inside every
+            | published limit and still be the wrong thing to do: Zoom applies
+            | an UNPUBLISHED per-user daily SMS cap, and carriers filter on
+            | shape - a burst of near-identical messages from one mobile number
+            | is what a spam run looks like from the network's side, and the
+            | number gets filtered rather than the messages refused, so there is
+            | no error anywhere to read.
+            |
+            | Two seconds is a guess and deliberately a conservative one: it is
+            | roughly the pace of a person texting, and at the shipped
+            | `per_minute` it is the difference between 30 a minute and 25.
+            |
+            | It also CAPS the run: no run may attempt more than
+            | floor(50_000 / this), so its sends and its sleeps fit inside the
+            | scheduler's minute with ten seconds to spare. Overshooting is
+            | worse than it sounds - `withoutOverlapping()` makes the next tick
+            | skip entirely rather than queue behind it.
+            */
+            'send_interval_ms' => 2000,
+
+            /*
+            | The most one LINE may send in a day, counted across every campaign
+            | on it. 0 = unlimited.
+            |
+            | Zoom does not publish its per-user daily SMS cap. Community
+            | reports put it between 20 and 100; a 429 does say whether it was
+            | the per-second or the daily limit that was hit, but by then the
+            | messages have stopped. 100 is a guess at the generous end of what
+            | has been reported, and it is the number to revise once a real
+            | campaign has been through and the tenant has shown what it allows.
+            |
+            | Reaching it does NOT pause the campaign. The recipients stay
+            | pending, the campaign stays `sending`, and the first run after
+            | local midnight carries on - because nobody should have to come in
+            | the next morning and press Resume on four campaigns because a line
+            | filled up at half past four.
+            */
+            'per_day' => 100,
+
             // Per campaign, refused above. A list longer than this is a mail
             // merge, not a text message, and it should be looked at by a human
             // before it is cut into pieces.

@@ -30,8 +30,25 @@ class ZoomSmsTransport implements SmsTransport
      */
     private const ID_KEYS = ['message_id', 'id', 'data.message_id', 'data.id'];
 
+    /** The HTTP status of the last send this instance made, 0 if it never completed. */
+    private int $lastStatus = 0;
+
+    /**
+     * The response headers of the last send, lower-cased keys, values as arrays.
+     *
+     * @var array<string, array<int, string>>
+     */
+    private array $lastHeaders = [];
+
+    /** `Retry-After` off those headers, in seconds. Null when it was not there. */
+    private ?int $lastRetryAfter = null;
+
     public function send(SmsMessage $message): SmsSendResult
     {
+        $this->lastStatus = 0;
+        $this->lastHeaders = [];
+        $this->lastRetryAfter = null;
+
         $thread = $message->thread;
         $line = $thread?->line;
 
@@ -66,11 +83,21 @@ class ZoomSmsTransport implements SmsTransport
 
         $raw = is_array($result['data'] ?? null) ? $result['data'] : [];
 
+        $this->lastStatus = (int) ($result['http_code'] ?? 0);
+        $this->lastHeaders = $this->normaliseHeaders($result['headers'] ?? []);
+        $this->lastRetryAfter = $this->readRetryAfter($this->lastHeaders);
+
         if (! ($result['success'] ?? false)) {
             return SmsSendResult::failed(
                 $client->errorMessage($result),
                 $raw,
-                $this->retryable($result)
+                $this->retryable($result),
+                // Only a 429 carries a wait worth honouring. A `Retry-After` on
+                // a 503 is Zoom's load balancer talking about the whole account
+                // and reading it as an instruction about SMS would stop a
+                // campaign for as long as an edge node felt like.
+                $this->lastStatus === 429 ? $this->lastRetryAfter : null,
+                $this->lastStatus === 429
             );
         }
 
@@ -80,6 +107,106 @@ class ZoomSmsTransport implements SmsTransport
     public function name(): string
     {
         return 'zoom';
+    }
+
+    /**
+     * The HTTP status of the last send this instance made.
+     *
+     * Instance state, and useless to anybody who did not make the call: the
+     * service resolves a transport out of the container per send. It is here
+     * for the transport's own decisions and for a test that wants to look.
+     */
+    public function lastStatus(): int
+    {
+        return $this->lastStatus;
+    }
+
+    /**
+     * @return array<string, array<int, string>>
+     */
+    public function lastHeaders(): array
+    {
+        return $this->lastHeaders;
+    }
+
+    /**
+     * Seconds the provider asked us to wait after the last send, or null.
+     */
+    public function lastRetryAfter(): ?int
+    {
+        return $this->lastRetryAfter;
+    }
+
+    /**
+     * `Retry-After` in the two forms RFC 9110 allows, in seconds.
+     *
+     *   Retry-After: 120                                (delay-seconds)
+     *   Retry-After: Wed, 11 Sep 2026 15:42:00 GMT      (an HTTP-date)
+     *
+     * Both are read because both are legal and nothing says which Zoom sends;
+     * a date already in the past answers null rather than a negative, since
+     * "wait for -3 seconds" would silently become the default wait somewhere
+     * downstream and look like a header we had failed to read.
+     *
+     * @param  array<string, array<int, string>>  $headers
+     */
+    private function readRetryAfter(array $headers): ?int
+    {
+        $value = trim((string) ($headers['retry-after'][0] ?? ''));
+
+        if ($value === '') {
+            return null;
+        }
+
+        if (ctype_digit($value)) {
+            $seconds = (int) $value;
+
+            return $seconds > 0 ? $seconds : null;
+        }
+
+        $at = strtotime($value);
+
+        if ($at === false) {
+            Log::info('sms.zoom sent an unreadable Retry-After', ['value' => $value]);
+
+            return null;
+        }
+
+        $seconds = $at - time();
+
+        return $seconds > 0 ? $seconds : null;
+    }
+
+    /**
+     * Header names lower-cased and every value an array, whichever shape the
+     * client handed back - Laravel's HTTP client answers `[name => [values]]`
+     * and the curl path builds the same thing by hand, but a header name's case
+     * is not guaranteed by either and `Retry-After` is exactly the header a
+     * provider spells differently.
+     *
+     * @param  mixed  $headers
+     * @return array<string, array<int, string>>
+     */
+    private function normaliseHeaders($headers): array
+    {
+        if (! is_array($headers)) {
+            return [];
+        }
+
+        $out = [];
+
+        foreach ($headers as $name => $values) {
+            if (! is_string($name)) {
+                continue;
+            }
+
+            $out[strtolower($name)] = array_values(array_map(
+                fn ($value) => (string) $value,
+                is_array($values) ? $values : [$values]
+            ));
+        }
+
+        return $out;
     }
 
     /**

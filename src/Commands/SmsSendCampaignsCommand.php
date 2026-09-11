@@ -72,14 +72,22 @@ class SmsSendCampaignsCommand extends Command
             return self::SUCCESS;
         }
 
+        // The budget REPORTED is the one the run was actually held to, not the
+        // one it was asked for: SmsBulkPacing clamps it so a run's sends and
+        // its sleeps fit inside the scheduler's minute, and a line reading
+        // "budget 30" after a run that could only ever attempt 25 would send
+        // somebody looking for five messages that were never due.
+        $effective = (int) ($counts['budget'] ?? $budget);
+
         $this->info(sprintf(
-            'Campaigns %d · sent %d · failed %d · skipped %d · waiting to retry %d (budget %d).',
+            'Campaigns %d · sent %d · failed %d · skipped %d · waiting to retry %d (budget %d%s).',
             (int) ($counts['campaigns'] ?? 0),
             (int) ($counts['sent'] ?? 0),
             (int) ($counts['failed'] ?? 0),
             (int) ($counts['skipped'] ?? 0),
             (int) ($counts['retry_wait'] ?? 0),
-            $budget
+            $effective,
+            $effective === $budget ? '' : ' of ' . $budget . ', paced'
         ));
 
         return self::SUCCESS;

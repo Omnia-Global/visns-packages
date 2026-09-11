@@ -7,6 +7,7 @@ use Visnsstudio\VisnsPackages\Models\SmsCampaignRecipient;
 use Visnsstudio\VisnsPackages\Models\SmsMessage;
 use Visnsstudio\VisnsPackages\Models\SmsOptOut;
 use Visnsstudio\VisnsPackages\Models\SmsThread;
+use Visnsstudio\VisnsPackages\Services\Sms\SmsBulkPacing;
 use Visnsstudio\VisnsPackages\Services\Sms\SmsOptOuts;
 use Visnsstudio\VisnsPackages\Support\PhoneNumber;
 
@@ -115,11 +116,20 @@ class SmsPayload
      * end of every run (SmsCampaign::syncCounts), which is what makes reading
      * them here honest.
      *
+     * @param  \Visnsstudio\VisnsPackages\Services\Sms\SmsBulkPacing|null  $pacing
+     *         Pass one shared instance when serialising a LIST. The pacing
+     *         object memoises each line's daily count for its own lifetime, so
+     *         one instance across twenty campaigns is one COUNT per line rather
+     *         than twenty; a caller serialising a single campaign passes none
+     *         and gets a fresh instance, which is the answer it wants.
      * @return array<string, mixed>
      */
-    public static function campaign(SmsCampaign $campaign): array
+    public static function campaign(SmsCampaign $campaign, ?SmsBulkPacing $pacing = null): array
     {
         $counts = $campaign->counts();
+        $pacing = $pacing ?? app(SmsBulkPacing::class);
+
+        $minutes = $pacing->minutesRemaining($campaign, $counts['pending']);
 
         return [
             'id' => $campaign->id,
@@ -146,7 +156,23 @@ class SmsPayload
             'started_at' => $campaign->started_at?->toIso8601String(),
             'completed_at' => $campaign->completed_at?->toIso8601String(),
             'created_at' => $campaign->created_at?->toIso8601String(),
-            'estimated_minutes_remaining' => self::minutesRemaining($campaign, $counts),
+            // Kept, and kept meaning exactly what it always did, because a
+            // front end is already reading it. What changed is that it now
+            // knows about the interval and the daily allowance, so a campaign
+            // that will take five days no longer claims twenty minutes.
+            'estimated_minutes_remaining' => $minutes,
+            // The same number in the two other forms a screen wants: a sentence
+            // it can print without doing arithmetic of its own, and a time it
+            // can put a clock against. Both null exactly when the minutes are.
+            'eta' => [
+                'minutes' => $minutes,
+                'label' => $pacing->etaLabel($minutes),
+                'at' => $minutes === null ? null : now()->addMinutes($minutes)->toIso8601String(),
+            ],
+            // Why this campaign is not sending AT THIS INSTANT, or null. Always
+            // present, because a missing key reads to a front end exactly like
+            // a null and the two must not be told apart by accident.
+            'waiting' => $pacing->waitingFor($campaign),
         ];
     }
 
@@ -219,34 +245,6 @@ class SmsPayload
         }
 
         return min(99, (int) floor($done * 100 / $counts['total']));
-    }
-
-    /**
-     * Roughly how long the rest of this will take, in minutes.
-     *
-     * Pending over the per-minute budget, rounded up. Null unless the campaign
-     * is actually sending, because for a draft or a paused one the honest answer
-     * is "until somebody presses start", and a number there would be read as a
-     * countdown that had stalled.
-     *
-     * An ESTIMATE and nothing more: the budget is shared between every campaign
-     * that is sending, and a retryable failure costs a minute.
-     *
-     * @param  array{total: int, pending: int, sent: int, failed: int, skipped: int}  $counts
-     */
-    private static function minutesRemaining(SmsCampaign $campaign, array $counts): ?int
-    {
-        if ($campaign->status !== SmsCampaign::STATUS_SENDING) {
-            return null;
-        }
-
-        $perMinute = (int) ModuleConfig::get('messaging.bulk.per_minute', 30);
-
-        if ($perMinute < 1) {
-            $perMinute = 1;
-        }
-
-        return (int) ceil($counts['pending'] / $perMinute);
     }
 
     /**

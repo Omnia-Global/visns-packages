@@ -38,13 +38,26 @@ class SmsSendResult
      * @param  string|null  $error              Human-readable; shown next to a failed message.
      * @param  array        $raw                The provider's response, kept verbatim.
      * @param  bool         $retryable          Whether the same send, later, might work.
+     * @param  int|null     $retryAfter         Seconds the provider asked us to wait, when it
+     *                                          said so - `Retry-After` on a 429. Null means it
+     *                                          did not say, which is NOT the same as zero: a
+     *                                          caller reading null falls back to a default wait
+     *                                          rather than to no wait at all.
+     * @param  bool         $rateLimited        The provider said we are going too fast - a 429,
+     *                                          specifically, and not merely a failure worth
+     *                                          retrying. `retryable` is true for a 5xx as well,
+     *                                          and a 5xx is Zoom having a bad morning rather
+     *                                          than an instruction about our own pace, so the
+     *                                          two cannot be one flag.
      */
     public function __construct(
         public readonly ?string $providerMessageId,
         public readonly string $status,
         public readonly ?string $error = null,
         public readonly array $raw = [],
-        public readonly bool $retryable = false
+        public readonly bool $retryable = false,
+        public readonly ?int $retryAfter = null,
+        public readonly bool $rateLimited = false
     ) {
     }
 
@@ -63,10 +76,29 @@ class SmsSendResult
      * transport that has not thought about the question says "do not try this
      * again", and the cost of being wrong is a campaign recipient marked failed
      * rather than a client texted twice.
+     *
+     * `$retryAfter` travels with the result rather than being read back off the
+     * transport, and that is not tidiness: SmsService resolves a transport out
+     * of the container per send, so the instance that answered a 429 is not the
+     * instance a later caller would get hold of. The result is the only thing
+     * that crosses that boundary.
      */
-    public static function failed(string $error, array $raw = [], bool $retryable = false): self
-    {
-        return new self(null, SmsMessage::STATUS_FAILED, $error, $raw, $retryable);
+    public static function failed(
+        string $error,
+        array $raw = [],
+        bool $retryable = false,
+        ?int $retryAfter = null,
+        bool $rateLimited = false
+    ): self {
+        return new self(
+            null,
+            SmsMessage::STATUS_FAILED,
+            $error,
+            $raw,
+            $retryable,
+            $retryAfter,
+            $rateLimited
+        );
     }
 
     /**

@@ -573,6 +573,11 @@ class ZoomSmsClient extends ZoomApiClient
             'success' => $response->successful(),
             'http_code' => $response->status(),
             'data' => $response->json() ?? null,
+            // Carried so ZoomSmsTransport can read `Retry-After` off a 429 and
+            // cool the line for as long as Zoom actually asked for rather than
+            // for a number we invented. An EXTRA key: every existing reader of
+            // this shape takes `success`, `http_code` and `data` by name.
+            'headers' => $response->headers(),
         ];
     }
 

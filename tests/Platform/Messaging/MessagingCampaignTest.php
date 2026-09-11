@@ -26,6 +26,14 @@ class MessagingCampaignTest extends MessagingTestCase
         parent::defineEnvironment($app);
 
         $app['config']->set('visns-packages.messaging.bulk.enabled', true);
+
+        // The pacing OFF for the tests that are not about it: the shipped
+        // interval is two seconds a send, and a suite that sends a few dozen
+        // messages would spend a minute asleep proving nothing. The pacing has
+        // its own file (MessagingCampaignPacingTest) where it is turned on
+        // deliberately and its sleeps are counted rather than taken.
+        $app['config']->set('visns-packages.messaging.bulk.send_interval_ms', 0);
+        $app['config']->set('visns-packages.messaging.bulk.per_day', 0);
     }
 
     protected function setUp(): void
@@ -918,10 +926,16 @@ class MessagingCampaignTest extends MessagingTestCase
         $this->useZoom();
         $this->app['config']->set('visns-packages.messaging.bulk.max_retries', 2);
 
+        // A 503 rather than the 429 this used to use, and the difference is the
+        // point of the pacing: a 429 now COOLS THE LINE, so the second run
+        // would skip this campaign without attempting anybody and the retry
+        // budget would never be spent. That behaviour is asserted next door in
+        // MessagingCampaignPacingTest; this test is about the budget, and a
+        // provider having a bad morning is what spends it.
         FakeZoomSmsClient::$response = [
             'success' => false,
-            'http_code' => 429,
-            'data' => ['message' => 'Too many requests'],
+            'http_code' => 503,
+            'data' => ['message' => 'Service unavailable'],
         ];
 
         $admin = $this->admin();

@@ -49,6 +49,29 @@ use Visnsstudio\VisnsPackages\Support\ModuleConfig;
  *    same request to the same rate-limited account.
  *
  * Everything else is about one recipient and costs that recipient only.
+ *
+ * ## Pacing
+ *
+ * Three mechanisms, all of them Services\Sms\SmsBulkPacing's - see that class
+ * for why sending as fast as Zoom's published limits allow would be the wrong
+ * thing to do. What they mean HERE is:
+ *
+ *  - **an interval between sends.** The run sleeps `send_interval_ms` after
+ *    every attempt that reached the transport. A skip does not sleep: nothing
+ *    left the building, and pausing two seconds per opted-out number would
+ *    make a run spend its minute on people it is not texting.
+ *  - **a per-line cooldown.** A 429 cools the line for as long as `Retry-After`
+ *    asked. Later runs SKIP a campaign on a cooling line, counting it
+ *    `retry_wait` - without touching its recipients, because nothing was
+ *    attempted and a cooldown is not an attempt. The skip is per LINE, so a
+ *    campaign on another number carries on.
+ *  - **a daily allowance.** `per_day` texts per line per day, counted across
+ *    every campaign on it. Reaching it stops that line for the day; the
+ *    campaign stays `sending` and resumes on the first run after midnight.
+ *
+ * **None of the three pauses a campaign.** Pausing needs a human to press
+ * Resume, and nobody should have to do that because a line ran out of allowance
+ * at half past four.
  */
 class SmsCampaignSender
 {
@@ -61,33 +84,56 @@ class SmsCampaignSender
     /** What a paused-by-the-sender campaign says happened to it. */
     public const NOT_CONNECTED = 'Messaging is not connected, so nothing can be sent.';
 
+    /**
+     * Has this run made a request to the transport yet?
+     *
+     * The interval is a gap BETWEEN requests, so the first one of a run does
+     * not wait and every one after it does - across campaigns as well as within
+     * one, because two campaigns on one account are a single stream of requests
+     * as far as Zoom and the carrier are concerned.
+     */
+    private bool $attempted = false;
+
     public function __construct(
         private SmsService $sms,
         private SmsOptOuts $optOuts,
-        private SmsCampaignRenderer $renderer
+        private SmsCampaignRenderer $renderer,
+        private SmsBulkPacing $pacing
     ) {
     }
 
     /**
      * Send up to `$budget` messages, across as many campaigns as that reaches.
      *
-     * @param  int  $budget  Sends this run. A skipped recipient costs none of it:
-     *                       skipping is a database write, and spending the
+     * @param  int  $budget  Sends this run, BEFORE the interval is taken into
+     *                       account - the effective figure is
+     *                       SmsBulkPacing::effectiveBudget() and is what comes
+     *                       back as `budget`. A skipped recipient costs none of
+     *                       it: skipping is a database write, and spending the
      *                       minute's budget on a list of opted-out numbers would
      *                       leave a campaign apparently stuck.
-     * @return array{locked: bool, campaigns: int, sent: int, failed: int, skipped: int, retry_wait: int}
+     * @return array{locked: bool, budget: int, campaigns: int, sent: int, failed: int, skipped: int, retry_wait: int}
      */
     public function run(int $budget): array
     {
+        // Clamped HERE rather than in the command, so every caller is held to
+        // it: a run that overshoots its minute does not merely finish late, it
+        // makes `withoutOverlapping()` skip the next tick entirely.
+        $budget = $this->pacing->effectiveBudget(max(0, $budget));
+
         $counts = [
             'locked' => false,
+            // What this run was actually allowed to attempt. Reported because
+            // it is not necessarily what was asked for, and a run that sent 25
+            // of a configured 30 should not look like a run that stopped short.
+            'budget' => $budget,
             'campaigns' => 0,
             'sent' => 0,
             'failed' => 0,
             'skipped' => 0,
             // How many recipients this run left `pending` for a later attempt
-            // because the provider asked us to wait. Never more than one, since
-            // the first stops the run - but a count rather than a flag, because
+            // because somebody asked us to wait: the provider, via a retryable
+            // failure, or our own pacing. A count rather than a flag, because
             // it is a number of people who have not been texted yet.
             'retry_wait' => 0,
         ];
@@ -99,7 +145,7 @@ class SmsCampaignSender
         }
 
         try {
-            $counts = $this->work(max(0, $budget), $counts);
+            $counts = $this->work($budget, $counts);
         } finally {
             $lock->release();
         }
@@ -117,6 +163,11 @@ class SmsCampaignSender
      */
     private function work(int $budget, array $counts): array
     {
+        // Reset rather than assumed: a caller holding one sender and running it
+        // twice would otherwise make its second run wait before its first send,
+        // for a request made a minute ago.
+        $this->attempted = false;
+
         foreach (SmsCampaign::dueQuery()->get() as $campaign) {
             if ($budget <= 0) {
                 break;
@@ -135,9 +186,37 @@ class SmsCampaignSender
                 continue;
             }
 
+            // Is anything holding this line up? Asked once per campaign rather
+            // than once per recipient: neither answer can change mid-campaign
+            // in a way that matters, since a fresh cooldown ends the run and
+            // the allowance is counted down in `$allowance` below.
+            $waiting = $this->pacing->waitingFor($campaign);
+
+            if ($waiting !== null) {
+                // NOT paused, NOT failed, and the recipients are not touched at
+                // all - `retries` least of all, because nothing was attempted.
+                // A cooldown or a spent allowance is a wait, and the next run
+                // after it picks up exactly this recipient.
+                $counts['retry_wait'] += 1;
+
+                Log::info('sms.campaign waiting', [
+                    'campaign_id' => $campaign->id,
+                    'line_id' => $line->id,
+                    'reason' => $waiting['reason'],
+                    'until' => $waiting['until'],
+                ]);
+
+                continue;
+            }
+
+            // What is left of this line's day. PHP_INT_MAX when `per_day` is
+            // off. Counted down as we go, so two campaigns on one number share
+            // the allowance rather than each getting the whole of it.
+            $allowance = $this->pacing->remainingToday((int) $line->id);
+
             $touched = false;
 
-            while ($budget > 0) {
+            while ($budget > 0 && $allowance > 0) {
                 $recipient = $campaign->recipients()
                     ->where('status', SmsCampaignRecipient::STATUS_PENDING)
                     ->orderBy('id')
@@ -145,6 +224,18 @@ class SmsCampaignSender
 
                 if ($recipient === null) {
                     break;
+                }
+
+                // The interval, taken BEFORE a send rather than after one, and
+                // only when a send has already happened in this run. Taken
+                // after, it would also be taken after the last message of a run
+                // - a second or two of the minute spent asleep on nobody - and
+                // getting that right by looking ahead means asking "is there
+                // another one" twice. The flag is the run's, not the
+                // campaign's: two campaigns on one account are one stream of
+                // requests as far as Zoom and the carrier are concerned.
+                if ($this->attempted) {
+                    $this->sleepBetweenSends($this->pacing->intervalMs());
                 }
 
                 $outcome = $this->deliver($campaign, $recipient);
@@ -172,14 +263,41 @@ class SmsCampaignSender
 
                 $counts[$outcome] = (int) ($counts[$outcome] ?? 0) + 1;
 
-                // A skip costs no budget - see the parameter's docblock.
+                // A skip costs no budget - see the parameter's docblock - and
+                // costs no allowance and no interval either, for the same
+                // reason: nothing was sent and nothing reached Zoom.
                 if ($outcome !== 'skipped') {
                     $budget--;
+
+                    // Whatever came back, a request was made - so the next one
+                    // waits. A refusal is a request the carrier and the rate
+                    // limiter both saw.
+                    $this->attempted = true;
+
+                    if ($outcome === 'sent') {
+                        $allowance--;
+
+                        $this->pacing->recordSend((int) $line->id);
+                    }
                 }
             }
 
             if ($touched) {
                 $counts['campaigns'] += 1;
+            }
+
+            // The line used up its day mid-campaign. Said out loud for the same
+            // reason the skip above is: somebody looking at the command's output
+            // has to be able to tell "there was nothing to send" from "there was
+            // plenty and the line has had enough for today".
+            if ($allowance <= 0 && $campaign->pendingCount() > 0) {
+                $counts['retry_wait'] += 1;
+
+                Log::info('sms.campaign line has used its daily allowance', [
+                    'campaign_id' => $campaign->id,
+                    'line_id' => $line->id,
+                    'per_day' => $this->pacing->perDay(),
+                ]);
             }
 
             // Recomputed from the recipients rather than trusted: the loop above
@@ -250,6 +368,14 @@ class SmsCampaignSender
         $result = $this->sms->lastResult();
 
         if ($message->status === SmsMessage::STATUS_FAILED && $result !== null && $result->retryable) {
+            if ($result->rateLimited && $campaign->line !== null) {
+                // Zoom has said, in so many words, that we are going too fast.
+                // Cool the LINE rather than the campaign: the limit is about the
+                // Zoom user behind the number, so a second campaign on the same
+                // number must wait too and one on another number must not.
+                $this->pacing->cool((int) $campaign->line->id, $result->retryAfter);
+            }
+
             return $this->waitAndRetry($campaign, $recipient, (string) ($message->error ?? 'The provider could not be reached.'));
         }
 
@@ -293,6 +419,14 @@ class SmsCampaignSender
      * Out of retries, it becomes an ordinary failure. `max_retries` at one
      * attempt a minute is a window measured in minutes, which is longer than
      * any rate limit and shorter than a person's patience.
+     *
+     * **The attempt that MET a 429 still costs a retry**, and the runs skipped
+     * afterwards because the line is cooling cost nothing. That split is the
+     * point: a real request was made here and something has to bound how many
+     * of those one recipient may make, while a run that never opened a socket
+     * on their behalf must not spend their budget. Without the second half a
+     * two-minute cooldown would burn two of thirty retries per recipient and a
+     * long one would fail the whole list without ever asking Zoom again.
      */
     private function waitAndRetry(SmsCampaign $campaign, SmsCampaignRecipient $recipient, string $error): string
     {
@@ -330,6 +464,31 @@ class SmsCampaignSender
         ]);
 
         return 'stop';
+    }
+
+    /**
+     * Wait between two sends.
+     *
+     * `usleep`, and it blocks the run - which is the whole intent. There is no
+     * worker to hand the delay to and there must not be one: the scheduler's
+     * minute IS the unit of work, and the budget is sized (SmsBulkPacing::
+     * effectiveBudget) so that a run's sends plus its sleeps fit inside it with
+     * ten seconds to spare.
+     *
+     * `protected` and named for what it does, rather than `pause()`, which on
+     * this class already means "stop this campaign and tell somebody why" - two
+     * methods called pause, one of which sleeps and one of which changes a
+     * status, is a mistake waiting to be made at four in the morning. A test
+     * subclasses this to count the calls without spending the seconds; a
+     * deployment that wants no delay sets `send_interval_ms` to 0.
+     */
+    protected function sleepBetweenSends(int $ms): void
+    {
+        if ($ms <= 0) {
+            return;
+        }
+
+        usleep($ms * 1000);
     }
 
     /**

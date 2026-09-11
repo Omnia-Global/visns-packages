@@ -100,6 +100,12 @@ class ZoomApiClient
 
     /**
      * Make an authenticated request to the Zoom API.
+     *
+     * The result carries `headers` alongside `success`, `http_code` and `data`.
+     * Nothing that reads a Zoom result is obliged to look at them - they are
+     * there for the one caller that must: Services\Sms\ZoomSmsTransport reads
+     * `Retry-After` off a 429 so a rate-limited line waits for as long as Zoom
+     * asked rather than for a number we invented.
      */
     protected function request(string $method, string $endpoint, ?array $body = null): array
     {
@@ -113,10 +119,13 @@ class ZoomApiClient
             'Content-Type: application/json',
         ];
 
+        $received = [];
+
         $opts = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_HTTPHEADER => $headers,
             CURLOPT_CUSTOMREQUEST => strtoupper($method),
+            CURLOPT_HEADERFUNCTION => $this->headerCollector($received),
         ];
 
         if ($body !== null && in_array(strtoupper($method), ['POST', 'PATCH', 'PUT'])) {
@@ -135,6 +144,7 @@ class ZoomApiClient
                 'success' => true,
                 'http_code' => $httpCode,
                 'data' => $response ? json_decode($response, true) : null,
+                'headers' => $received,
             ];
         }
 
@@ -145,7 +155,11 @@ class ZoomApiClient
 
             $headers[0] = 'Authorization: Bearer ' . $token;
             $ch = curl_init($url);
+            // The retry's own headers, not the dead token's - a bag left
+            // holding both would report whichever response spoke last per name.
+            $received = [];
             $opts[CURLOPT_HTTPHEADER] = $headers;
+            $opts[CURLOPT_HEADERFUNCTION] = $this->headerCollector($received);
             curl_setopt_array($ch, $opts);
 
             $response = curl_exec($ch);
@@ -157,6 +171,7 @@ class ZoomApiClient
                     'success' => true,
                     'http_code' => $httpCode,
                     'data' => $response ? json_decode($response, true) : null,
+                    'headers' => $received,
                 ];
             }
         }
@@ -172,6 +187,41 @@ class ZoomApiClient
             'success' => false,
             'http_code' => $httpCode,
             'data' => $response ? json_decode($response, true) : null,
+            'headers' => $received,
         ];
+    }
+
+    /**
+     * A `CURLOPT_HEADERFUNCTION` that files each response header into `$bag`,
+     * in the shape Laravel's HTTP client uses: `['Name' => ['value', …]]`.
+     *
+     * curl hands the callback one line at a time, status line included, and
+     * **its return value must be the number of bytes it was given** - anything
+     * else aborts the transfer, which is the one way a header collector can
+     * break a request that was otherwise fine.
+     *
+     * A header sent twice (Set-Cookie, and several of Zoom's rate-limit
+     * headers) keeps both values rather than the last, which is why every
+     * entry is a list.
+     *
+     * @param  array<string, array<int, string>>  $bag
+     */
+    private function headerCollector(array &$bag): callable
+    {
+        return function ($ch, $line) use (&$bag) {
+            $length = strlen($line);
+
+            $parts = explode(':', $line, 2);
+
+            if (count($parts) === 2) {
+                $name = trim($parts[0]);
+
+                if ($name !== '') {
+                    $bag[$name][] = trim($parts[1]);
+                }
+            }
+
+            return $length;
+        };
     }
 }

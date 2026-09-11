@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Visnsstudio\VisnsPackages\Models\SmsCampaign;
 use Visnsstudio\VisnsPackages\Models\SmsCampaignRecipient;
 use Visnsstudio\VisnsPackages\Models\SmsLine;
+use Visnsstudio\VisnsPackages\Services\Sms\SmsBulkPacing;
 use Visnsstudio\VisnsPackages\Services\Sms\SmsCampaignRenderer;
 use Visnsstudio\VisnsPackages\Services\Sms\SmsOptOuts;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
@@ -76,12 +77,26 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
             ->orderByDesc('id')
             ->get();
 
+        // ONE pacing instance for the whole list: it memoises each line's daily
+        // send count, so three campaigns on one number cost one COUNT rather
+        // than three. Built here rather than injected, because a memo about
+        // what has been sent today must not outlive the request that made it.
+        $pacing = app(SmsBulkPacing::class);
+
         return response()->json([
             'campaigns' => $campaigns
-                ->map(fn (SmsCampaign $campaign) => SmsPayload::campaign($campaign))
+                ->map(fn (SmsCampaign $campaign) => SmsPayload::campaign($campaign, $pacing))
                 ->values(),
             'settings' => [
                 'per_minute' => $this->perMinute(),
+                // What a run may ACTUALLY attempt once the interval is taken
+                // into account, and the number a screen should quote: at 2000ms
+                // a configured 30 is 25, and a composer promising 30 a minute
+                // would be wrong from the first campaign.
+                'per_run' => $pacing->effectiveBudget($this->perMinute()),
+                'send_interval_ms' => $pacing->intervalMs(),
+                // 0 = unlimited, said plainly rather than as a large number.
+                'per_day' => $pacing->perDay(),
                 'max_recipients' => $this->maxRecipients(),
                 'footer' => $this->footer(),
                 'footer_required' => (bool) ModuleConfig::get('messaging.bulk.footer_required', true),

@@ -1840,6 +1840,8 @@ below — without it, archiving would be a way of losing answers.
     'enabled' => false,
     'permission' => null,          // null = messaging.permissions.manage
     'per_minute' => 30,            // sends per scheduler run (the command's default --budget)
+    'send_interval_ms' => 2000,    // the gap between two sends; also caps a run at floor(50_000 / this)
+    'per_day' => 100,              // per LINE per day, across every campaign on it; 0 = unlimited
     'max_recipients' => 500,       // per campaign, refused above
     'footer' => 'Reply STOP to opt out.',
     'footer_required' => true,     // the server appends the footer unless the body already contains it
@@ -1896,6 +1898,36 @@ about the transport rather than about a recipient:
 every transport that has not thought about the question — including an
 application's own — behaves exactly as it did.
 
+###### Pacing (4.15.1)
+
+**Zoom's published rate limits are not the constraint.** Phone endpoints allow
+20 requests a second on a Pro account (10 on a Medium endpoint), and sending
+anywhere near that would sit inside every published limit and still be wrong:
+Zoom applies an **unpublished per-user daily SMS cap** — community reports put
+it between 20 and 100 — and carriers filter on shape, dropping a burst of
+near-identical texts from one mobile number *silently*. The sender is therefore
+paced to look like a person texting, by `Services\Sms\SmsBulkPacing`:
+
+- **`send_interval_ms`** — the gap between two sends (a skipped recipient costs
+  none: nothing reached the provider). It also caps a run at
+  `floor(50_000 / interval)`, so its sends and its sleeps fit inside the
+  scheduler's minute — overshooting makes `withoutOverlapping()` skip the next
+  tick entirely. `sleepBetweenSends()` is `protected` so a test can count the
+  delays instead of taking them.
+- **a per-line cooldown on a 429** — `Retry-After` honoured (seconds or an
+  HTTP-date), 60 s when absent, capped at 15 minutes, at
+  `messaging:bulk:cooldown:{line_id}`. Later runs skip that line's campaigns as
+  `retry_wait` **without touching a recipient or their `retries`**. A 5xx cools
+  nothing.
+- **`per_day`** — per line, across every campaign on it, counted off the
+  recipients' `sent_at` in the application's timezone. Reaching it **never
+  pauses** a campaign: it stays `sending` and resumes after local midnight.
+
+Every campaign payload carries **`waiting`** — null, or
+`{reason: 'cooldown'|'daily_allowance', until, message}` with the sentence built
+server-side — and **`eta`** (`{minutes, label, at}`), whose minutes account for
+both the interval and the allowance.
+
 ##### Rendering, and the footer
 
 `{name}`, `{first_name}`, `{last_name}`, and `{any_column}` from the imported
@@ -1938,7 +1970,7 @@ undoable.
 
 | Method | URI | What it does |
 | --- | --- | --- |
-| GET | `{base}/campaigns` | `{campaigns: [], settings: {per_minute, max_recipients, footer, footer_required, max_body_length}}` |
+| GET | `{base}/campaigns` | `{campaigns: [], settings: {per_minute, per_run, send_interval_ms, per_day, max_recipients, footer, footer_required, max_body_length}}` |
 | POST | `{base}/campaigns` | `{line_id, name, body, recipients: [{name?, number, extra?}]}` → 201 `{campaign, report}` |
 | POST | `{base}/campaigns/preview` | `{body, recipients}` → `{previews: [{name, number, body, segments}]}` — the first 3, rendered exactly as the sender would |
 | GET | `{base}/campaigns/{id}` | `{campaign}` |
