@@ -10,6 +10,7 @@ use Visnsstudio\VisnsPackages\Commands\VaultPruneLogCommand;
 use Visnsstudio\VisnsPackages\Commands\VaultReencryptCommand;
 use Visnsstudio\VisnsPackages\Commands\VaultStripClientTitlesCommand;
 use Visnsstudio\VisnsPackages\Commands\SmsPruneCommand;
+use Visnsstudio\VisnsPackages\Commands\SmsSendCampaignsCommand;
 use Visnsstudio\VisnsPackages\Commands\SmsSimulateInboundCommand;
 use Visnsstudio\VisnsPackages\Commands\SmsSyncLinesCommand;
 use Visnsstudio\VisnsPackages\Commands\InstallChromiumCommand;
@@ -48,8 +49,10 @@ use Visnsstudio\VisnsPackages\Controllers\PhonePresenceController;
 use Visnsstudio\VisnsPackages\Controllers\VaultController;
 use Visnsstudio\VisnsPackages\Controllers\VaultPublicShareController;
 use Visnsstudio\VisnsPackages\Controllers\VaultShareController;
+use Visnsstudio\VisnsPackages\Controllers\SmsCampaignController;
 use Visnsstudio\VisnsPackages\Controllers\SmsController;
 use Visnsstudio\VisnsPackages\Controllers\SmsLineSettingsController;
+use Visnsstudio\VisnsPackages\Controllers\SmsOptOutController;
 use Visnsstudio\VisnsPackages\Controllers\SmsTemplateController;
 use Visnsstudio\VisnsPackages\Services\FilePathResolver;
 use Visnsstudio\VisnsPackages\Services\OAuthManager;
@@ -83,6 +86,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             SmsSimulateInboundCommand::class,
             SmsPruneCommand::class,
             SmsSyncLinesCommand::class,
+            SmsSendCampaignsCommand::class,
         ];
 
         // Only register MeiliSearch commands if dependencies are available
@@ -1563,6 +1567,133 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                 Route::post($base . '/threads/{id}/simulate-inbound', [
                     SmsController::class,
                     'simulateInbound',
+                ])->whereNumber('id');
+            });
+
+        $this->registerMessagingOptOutRoutes($routeMiddleware, $prefix, $base);
+        $this->registerMessagingBulkRoutes($routeMiddleware, $prefix, $base);
+    }
+
+    /**
+     * The opt-out register.
+     *
+     * Registered whenever MESSAGING is enabled, not behind `bulk.enabled`, and
+     * that placement is the whole point. An unsubscribe facility is the module's
+     * compliance floor rather than a feature of the bulk sub-module: the Spam
+     * Act requires a functional one on a commercial electronic message, Zoom
+     * performs no keyword handling for Australian numbers, and a practice that
+     * never sends a campaign still texts clients. The keyword reading happens in
+     * SmsService::recordInbound for the same reason; these routes are only the
+     * screen over it.
+     *
+     * Gated in the MIDDLEWARE on the manage permission, unlike the templates and
+     * the line settings, which carry `access` and check `manage` in the
+     * controller so that a user without it keeps a working inbox. There is no
+     * partial view of this one worth having: it is a list of every client who
+     * has asked not to be contacted, plus a button that takes somebody off it.
+     *
+     * A null manage permission removes the gate, exactly as withPermission()
+     * does everywhere else - which for this means everybody with access
+     * administers, and is a decision an application makes knowingly.
+     *
+     * @return void
+     */
+    protected function registerMessagingOptOutRoutes(array $routeMiddleware, string $prefix, string $base)
+    {
+        $manage = config(
+            'visns-packages.messaging.permissions.manage',
+            'Messaging Manage'
+        );
+
+        Route::middleware($this->withPermission($routeMiddleware, $manage))
+            ->prefix($prefix)
+            ->group(function () use ($base) {
+                Route::get($base . '/opt-outs', [SmsOptOutController::class, 'index']);
+                Route::post($base . '/opt-outs', [SmsOptOutController::class, 'store']);
+                Route::delete($base . '/opt-outs/{id}', [
+                    SmsOptOutController::class,
+                    'destroy',
+                ])->whereNumber('id');
+            });
+    }
+
+    /**
+     * Bulk campaigns: an opt-in sub-module that ships disabled.
+     *
+     * No routes at all unless `messaging.bulk.enabled` is true, so an
+     * application that upgrades without touching config gains nothing it did not
+     * ask for - and gains no endpoint through which four hundred clients could
+     * be texted.
+     *
+     * The permission is `messaging.bulk.permission`, falling back to the manage
+     * permission when it is null. Worth separating where a practice wants "may
+     * run the inbox" and "may text every client at once" to be different grants:
+     * they are different risks, and the second one is not undoable.
+     *
+     * `{base}/campaigns/preview` is a POST and `{base}/campaigns/{id}` is a GET,
+     * so they cannot collide - but the literal is registered first and the
+     * wildcard is constrained to digits anyway, which is the rule the rest of
+     * this module follows and the one that stops a future `{base}/campaigns/foo`
+     * quietly landing somewhere.
+     *
+     * @return void
+     */
+    protected function registerMessagingBulkRoutes(array $routeMiddleware, string $prefix, string $base)
+    {
+        if (!config('visns-packages.messaging.bulk.enabled', false)) {
+            return;
+        }
+
+        $permission = config('visns-packages.messaging.bulk.permission');
+
+        if (!is_string($permission) || $permission === '') {
+            $permission = config(
+                'visns-packages.messaging.permissions.manage',
+                'Messaging Manage'
+            );
+        }
+
+        Route::middleware($this->withPermission($routeMiddleware, $permission))
+            ->prefix($prefix)
+            ->group(function () use ($base) {
+                Route::get($base . '/campaigns', [SmsCampaignController::class, 'index']);
+                Route::post($base . '/campaigns', [SmsCampaignController::class, 'store']);
+
+                // Before the wildcard, always.
+                Route::post($base . '/campaigns/preview', [
+                    SmsCampaignController::class,
+                    'preview',
+                ]);
+
+                Route::get($base . '/campaigns/{id}', [
+                    SmsCampaignController::class,
+                    'show',
+                ])->whereNumber('id');
+                Route::get($base . '/campaigns/{id}/recipients', [
+                    SmsCampaignController::class,
+                    'recipients',
+                ])->whereNumber('id');
+
+                Route::post($base . '/campaigns/{id}/start', [
+                    SmsCampaignController::class,
+                    'start',
+                ])->whereNumber('id');
+                Route::post($base . '/campaigns/{id}/pause', [
+                    SmsCampaignController::class,
+                    'pause',
+                ])->whereNumber('id');
+                Route::post($base . '/campaigns/{id}/cancel', [
+                    SmsCampaignController::class,
+                    'cancel',
+                ])->whereNumber('id');
+                Route::post($base . '/campaigns/{id}/retry-failed', [
+                    SmsCampaignController::class,
+                    'retryFailed',
+                ])->whereNumber('id');
+
+                Route::delete($base . '/campaigns/{id}', [
+                    SmsCampaignController::class,
+                    'destroy',
                 ])->whereNumber('id');
             });
     }

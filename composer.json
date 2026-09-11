@@ -47,7 +47,7 @@
             ]
         },
         "branch-alias": {
-            "dev-main": "4.11.x-dev"
+            "dev-main": "4.15.x-dev"
         }
     },
     "scripts": {

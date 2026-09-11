@@ -9,6 +9,7 @@ use Visnsstudio\VisnsPackages\Events\SmsMessageUpdated;
 use Visnsstudio\VisnsPackages\Events\SmsReceived;
 use Visnsstudio\VisnsPackages\Models\SmsLine;
 use Visnsstudio\VisnsPackages\Models\SmsMessage;
+use Visnsstudio\VisnsPackages\Models\SmsOptOut;
 use Visnsstudio\VisnsPackages\Models\SmsThread;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 use Visnsstudio\VisnsPackages\Support\PhoneNumber;
@@ -32,6 +33,22 @@ class SmsService
         'log' => LogSmsTransport::class,
         'null' => NullSmsTransport::class,
     ];
+
+    /**
+     * What the transport said about the last send THIS INSTANCE made.
+     *
+     * The stored row records what happened to the message; the result carries
+     * one thing the row cannot - whether asking again later would be worth
+     * anything (SmsSendResult::$retryable). That is advice about the transport,
+     * not a property of the message, so it has no column and never should have
+     * one: it would be a stale answer to a question about the future.
+     *
+     * Written by send(); read by Services\Sms\SmsCampaignSender immediately
+     * after the call it just made, on the instance it made it with. Nothing
+     * else reads it, and nothing should treat it as the state of anything -
+     * the very next send overwrites it.
+     */
+    private ?SmsSendResult $lastResult = null;
 
     /**
      * The configured transport.
@@ -123,6 +140,8 @@ class SmsService
 
         $result = $this->transport()->send($message);
 
+        $this->lastResult = $result;
+
         $message->status = $result->status;
         $message->error = $result->error;
         $message->provider_message_id = $result->providerMessageId;
@@ -155,6 +174,15 @@ class SmsService
         $this->dispatch('updated', SmsMessageUpdated::class, $thread, $message);
 
         return $message;
+    }
+
+    /**
+     * The transport's answer to the last send this instance made, or null if it
+     * has not made one. See the property.
+     */
+    public function lastResult(): ?SmsSendResult
+    {
+        return $this->lastResult;
     }
 
     /**
@@ -265,6 +293,25 @@ class SmsService
      * Returns null when the message already existed and nothing changed, so the
      * caller can skip the broadcast - a redelivery must not pop a notification
      * twice.
+     *
+     * THIS IS THE ONE PLACE AN INBOUND IS WRITTEN, which is why two things that
+     * look like somebody else's job happen here:
+     *
+     *  - **An archived thread is un-archived.** A campaign archives the threads
+     *    it creates so four hundred one-way texts do not bury the conversations
+     *    somebody is actually having - and the whole bargain of doing that is
+     *    that a REPLY brings the thread straight back. A client who answers and
+     *    is not seen is worse than the clutter that was being avoided.
+     *
+     *  - **STOP is read.** Zoom does no keyword handling for Australian
+     *    numbers, so an unsubscribe arrives as an ordinary inbound message and
+     *    nothing else. Doing it anywhere but here would mean an inbound written
+     *    by some other path - the simulator, the dev transport's auto-reply, an
+     *    application's own importer - silently did not count as an opt-out.
+     *
+     * Neither may throw. The caller is a webhook, Zoom disables an endpoint that
+     * errors, and a message that is stored but not acted on is recoverable where
+     * a dropped delivery is not.
      */
     public function recordInbound(SmsThread $thread, string $body, array $attributes = []): ?SmsMessage
     {
@@ -292,11 +339,104 @@ class SmsService
             'received_at' => $attributes['received_at'] ?? now(),
         ]);
 
+        // Before the summary is re-stamped, so the thread list and the archive
+        // view can never disagree about a thread that has just spoken.
+        $this->unarchive($thread);
+
         $thread->touchLastMessage($message);
 
         $this->dispatch('received', SmsReceived::class, $thread, $message);
 
+        // Last, and deliberately after the broadcast: the message is a client
+        // communication and is already safely stored, and the keyword reading is
+        // the part that may want to SEND something back.
+        $this->readOptOutKeyword($thread, $body, $message);
+
         return $message;
+    }
+
+    /**
+     * Bring an archived thread back into the inbox because somebody answered.
+     *
+     * Its own method rather than three lines inline, because the campaign
+     * sender's `archive_threads` setting is only defensible while this exists -
+     * the two are one decision written in two places, and a reader of either
+     * needs to find the other.
+     */
+    private function unarchive(SmsThread $thread): void
+    {
+        if ($thread->archived_at === null) {
+            return;
+        }
+
+        $thread->forceFill(['archived_at' => null])->save();
+    }
+
+    /**
+     * Read an inbound message as STOP or START, if it is one.
+     *
+     * Everything here is best effort and NOTHING may escape: the caller is a
+     * webhook that has to answer Zoom 200, and Zoom disables a subscription
+     * whose endpoint errors. An opt-out that failed to record is a bug worth a
+     * log line; a webhook that 500s is a whole practice's messaging turned off
+     * by a provider.
+     *
+     * A sender ID (`Apple`, `ANZ`, a short code) is skipped entirely - both
+     * halves of it. There is no number to unsubscribe, and the confirmation
+     * would be billed and read by nobody.
+     */
+    private function readOptOutKeyword(SmsThread $thread, string $body, SmsMessage $message): void
+    {
+        try {
+            $address = (string) $thread->external_number;
+
+            if (PhoneNumber::isSenderId($address)) {
+                return;
+            }
+
+            $optOuts = app(SmsOptOuts::class);
+
+            $direction = $optOuts->keywordIn($body);
+
+            if ($direction === null) {
+                return;
+            }
+
+            $e164 = $optOuts->normalise($address);
+
+            if ($e164 === null) {
+                return;
+            }
+
+            if ($direction === SmsOptOuts::OUT) {
+                $optOuts->record(
+                    $e164,
+                    SmsOptOut::SOURCE_KEYWORD,
+                    $thread->line_id === null ? null : (int) $thread->line_id,
+                    (int) $message->id
+                );
+            } else {
+                $optOuts->release($e164);
+            }
+
+            $reply = $optOuts->confirmation($direction);
+
+            if ($reply === null) {
+                return;
+            }
+
+            // On the same thread, through the ordinary send path, so it is a
+            // visible message in the conversation rather than something that
+            // happened invisibly. Attributed to nobody: no staff member wrote
+            // it.
+            $this->send($thread, $reply, null);
+        } catch (\Throwable $e) {
+            Log::warning('sms.opt-out keyword handling failed; the message is stored', [
+                'thread_id' => $thread->id,
+                'message_id' => $message->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**

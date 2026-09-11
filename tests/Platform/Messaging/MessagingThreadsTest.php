@@ -692,6 +692,10 @@ class MessagingThreadsTest extends MessagingTestCase
                     'client' => ['id' => 42, 'name' => 'Client, Cleo (Ms)'],
                     'contact_name' => null,
                     'can_reply' => true,
+                    // On every thread, like `can_reply`: a key that appeared on
+                    // some rows and not others would read as false wherever it
+                    // was missing.
+                    'opted_out' => false,
                     'last_message' => null,
                     'unread_count' => 0,
                     'archived_at' => null,

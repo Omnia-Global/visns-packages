@@ -55,6 +55,10 @@ class MessagingDisabledTest extends TestCase
             '/ajax/sms/threads',
             '/ajax/sms/templates',
             '/ajax/sms/settings/lines',
+            // The opt-out register is part of the module rather than of the bulk
+            // sub-module, so it goes when messaging goes - and not before.
+            '/ajax/sms/opt-outs',
+            '/ajax/sms/campaigns',
         ] as $uri) {
             $this->getJson($uri)->assertStatus(404);
         }

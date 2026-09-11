@@ -44,6 +44,16 @@ abstract class MessagingTestCase extends TestCase
             '2026_08_21_120040_create_sms_thread_reads_table.php',
             '2026_08_21_120050_create_sms_templates_table.php',
             '2026_08_21_120060_create_sms_system_messages_table.php',
+
+            // The opt-out register is part of the module whenever messaging is
+            // on - every thread payload asks it whether the number has
+            // unsubscribed - so it belongs in the shared harness rather than in
+            // the opt-out suite alone. The two campaign tables ride along
+            // because building them costs nothing, and the alternative is a
+            // second harness differing from this one by two lines.
+            '2026_09_11_120000_create_sms_opt_outs_table.php',
+            '2026_09_11_120010_create_sms_campaigns_table.php',
+            '2026_09_11_120020_create_sms_campaign_recipients_table.php',
         ] as $migration) {
             $this->runPackageMigration($migration);
         }

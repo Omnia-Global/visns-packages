@@ -1480,6 +1480,14 @@ return [
             'thread_reads' => 'sms_thread_reads',
             'templates' => 'sms_templates',
             'system_messages' => 'sms_system_messages',
+
+            // Bulk campaigns and the opt-out register. The register is part of
+            // the module whenever messaging is on; the two campaign tables are
+            // only ever read when `bulk.enabled` is true, so an application that
+            // leaves the sub-module off never touches them.
+            'campaigns' => 'sms_campaigns',
+            'campaign_recipients' => 'sms_campaign_recipients',
+            'opt_outs' => 'sms_opt_outs',
         ],
 
         /*
@@ -1607,6 +1615,156 @@ return [
         | segments, which is where every carrier stops being reliable.
         */
         'max_body_length' => 1600,
+
+        /*
+        |----------------------------------------------------------------------
+        | Opt-outs
+        |----------------------------------------------------------------------
+        |
+        | ALWAYS ON when messaging is on, and that is deliberate: it is the
+        | module's compliance floor, not a feature. Australian law (the Spam Act
+        | 2003, s18) requires a FUNCTIONAL unsubscribe facility on a commercial
+        | electronic message, honoured within five working days - and Zoom does
+        | no STOP handling for Australian numbers, so a text arriving at a Zoom
+        | Phone line saying "STOP" is a webhook payload and nothing else. If this
+        | module did not read it, nobody would.
+        |
+        | The register is per NUMBER rather than per line or per campaign,
+        | because that is what the person who typed STOP meant: "stop texting
+        | me", not "stop texting me from this number about this campaign". A
+        | narrower reading is the kind that ends up in front of the ACMA.
+        |
+        | Nothing here blocks a staff member's own reply in the inbox. An opt-out
+        | is about unsolicited bulk; a person answering a client who has written
+        | in is a conversation, and refusing that would be a worse failure than
+        | the one this is protecting against. Campaigns refuse; the composer only
+        | says so.
+        |
+        | Matching is Services\Sms\SmsOptOuts::keywordIn(): the whole message, or
+        | its first word (or first two, for the two-word entries), after trimming
+        | and stripping surrounding punctuation, case-insensitively. "stop
+        | please" opts out; "Please stop" does NOT - a sentence containing the
+        | word is a client talking to somebody, and unsubscribing them for it
+        | would be acting on a guess.
+        */
+        'opt_out' => [
+            // Whole message, or its first word, case-insensitive after trimming
+            // punctuation. `OPT OUT` is matched as two words; `OPTOUT` is the
+            // one-word spelling people actually type.
+            'keywords' => ['STOP', 'UNSUBSCRIBE', 'END', 'CANCEL', 'QUIT', 'OPT OUT', 'OPTOUT'],
+
+            // The way back in. Worth having: an opt-out is irreversible from the
+            // client's side otherwise, and "STOP" is pressed by accident.
+            'opt_in_keywords' => ['START', 'UNSTOP', 'SUBSCRIBE'],
+
+            /*
+            | Sent back on the same thread when a keyword is recognised. This is
+            | the "functional" half of a functional unsubscribe - silence leaves
+            | the person with no way of knowing whether it worked, and the next
+            | thing they do is ring the practice.
+            |
+            | Null (or an empty string) sends no confirmation, for a deployment
+            | whose provider bills for it or whose compliance team would rather
+            | say nothing. The opt-out is still recorded either way.
+            |
+            | Never sent to a sender ID (`Apple`, a short code): there is no
+            | handset behind one, so a reply is billed and read by nobody.
+            */
+            'reply' => 'You have been unsubscribed and will not receive further messages from this number. Reply START to opt back in.',
+            'opt_in_reply' => 'You are subscribed again and may receive messages from this number.',
+        ],
+
+        /*
+        |----------------------------------------------------------------------
+        | Bulk campaigns
+        |----------------------------------------------------------------------
+        |
+        | SHIPS DISABLED. A list of names and mobiles, one body with
+        | placeholders, and one ordinary thread per recipient - so a reply lands
+        | in the inbox beside every other conversation rather than in a
+        | broadcast tool nobody opens.
+        |
+        | Sending is drip-fed by `sms:send-campaigns`, which the APPLICATION
+        | schedules (this package registers no schedule):
+        |
+        |     $schedule->command('sms:send-campaigns')
+        |              ->everyMinute()
+        |              ->withoutOverlapping();
+        |
+        | One recipient at a time, through the same transport a staff member's
+        | own send goes through. There is no batch endpoint at Zoom and there
+        | must not be one here: a per-recipient send is what gives every
+        | recipient a thread, a status and a place for their answer to arrive.
+        */
+        'bulk' => [
+            'enabled' => false,
+
+            /*
+            | Null = `messaging.permissions.manage`. Set a name of its own where
+            | the practice wants "may run the inbox" and "may text four hundred
+            | clients at once" to be different grants - they are different risks.
+            */
+            'permission' => null,
+
+            /*
+            | Sends per scheduler run, i.e. the command's default --budget.
+            |
+            | A ceiling on damage as much as on throughput: a mistake caught two
+            | minutes in has cost 60 texts rather than the whole list, and every
+            | carrier in the country treats a sudden burst from a mobile number
+            | as spam.
+            */
+            'per_minute' => 30,
+
+            // Per campaign, refused above. A list longer than this is a mail
+            // merge, not a text message, and it should be looked at by a human
+            // before it is cut into pieces.
+            'max_recipients' => 500,
+
+            /*
+            | Appended to every rendered body unless it is already in there - see
+            | `footer_required`. The unsubscribe instruction IS the compliance
+            | requirement; it is snapshotted onto the campaign at create time so
+            | a later config change cannot rewrite what was actually sent.
+            */
+            'footer' => 'Reply STOP to opt out.',
+
+            /*
+            | True: the SERVER appends the footer, so a body that forgot it still
+            | goes out compliant. The containment check is case-insensitive, so
+            | somebody who typed their own "reply stop to opt out" is not given
+            | it twice.
+            |
+            | False only for a deployment whose messages are genuinely not
+            | commercial (an appointment reminder to an existing client is
+            | arguably exempt) - and that is a decision for the practice's
+            | compliance people, not a default.
+            */
+            'footer_required' => true,
+
+            /*
+            | A thread created by a campaign send is archived immediately, so 400
+            | one-way texts do not bury the conversations somebody is actually
+            | having. An inbound message un-archives it (SmsService::recordInbound),
+            | which is the whole point: the reply surfaces, the send does not.
+            |
+            | Only ever applied to a thread with NO inbound message - an existing
+            | conversation is never archived by a campaign.
+            */
+            'archive_threads' => true,
+
+            /*
+            | Retryable transport failures per recipient before it is marked
+            | failed. Retryable means a 429 or a 5xx from the provider, or a
+            | request that never completed - "ask again later", never "this
+            | number is wrong".
+            |
+            | 30 at one attempt a minute is half an hour of provider trouble,
+            | which is longer than any rate limit and shorter than a person's
+            | patience.
+            */
+            'max_retries' => 30,
+        ],
 
         'zoom' => [
             /*

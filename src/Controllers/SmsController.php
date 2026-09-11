@@ -8,6 +8,7 @@ use Visnsstudio\VisnsPackages\Models\SmsLine;
 use Visnsstudio\VisnsPackages\Models\SmsMessage;
 use Visnsstudio\VisnsPackages\Models\SmsThread;
 use Visnsstudio\VisnsPackages\Models\SmsThreadRead;
+use Visnsstudio\VisnsPackages\Services\Sms\SmsOptOuts;
 use Visnsstudio\VisnsPackages\Services\Sms\SmsService;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 use Visnsstudio\VisnsPackages\Support\PhoneNumber;
@@ -172,8 +173,10 @@ class SmsController extends \App\Http\Controllers\Controller
             $threads->pluck('id')->map(fn ($id) => (int) $id)->all()
         );
 
+        $optedOut = $this->optedOutAmong($threads->pluck('external_number')->all());
+
         return response()->json(
-            $threads->through(fn (SmsThread $thread) => $this->threadRow($thread, $unread))
+            $threads->through(fn (SmsThread $thread) => $this->threadRow($thread, $unread, $optedOut))
         );
     }
 
@@ -594,18 +597,43 @@ class SmsController extends \App\Http\Controllers\Controller
     }
 
     /**
-     * @param  array<int, int>  $unread  thread id => count
+     * @param  array<int, int>      $unread    thread id => count
+     * @param  array<string, bool>  $optedOut  number => true, for the whole page
      * @return array<string, mixed>
      */
-    private function threadRow(SmsThread $thread, array $unread): array
+    private function threadRow(SmsThread $thread, array $unread, array $optedOut = []): array
     {
-        $row = SmsPayload::thread($thread);
+        // The opt-out flag is passed in rather than looked up, for the same
+        // reason the unread count is: one query per row on a fifty-row list is
+        // the N+1 that makes an inbox feel broken.
+        $row = SmsPayload::thread(
+            $thread,
+            null,
+            isset($optedOut[(string) $thread->external_number])
+        );
 
         // Overwritten rather than computed per row: the payload's own
         // unread_count would be one query each.
         $row['unread_count'] = $unread[$thread->id] ?? 0;
 
         return $row;
+    }
+
+    /**
+     * Which of these numbers have asked not to be texted.
+     *
+     * One `whereIn` for the whole page. Kept here rather than inside the payload
+     * because the payload serialises one row at a time and has nowhere to put a
+     * batch - see SmsPayload::thread()'s `$optedOut` parameter.
+     *
+     * @param  array<int, mixed>  $numbers
+     * @return array<string, bool>
+     */
+    private function optedOutAmong(array $numbers): array
+    {
+        return app(SmsOptOuts::class)->optedOutAmong(
+            array_map(fn ($number) => (string) $number, $numbers)
+        );
     }
 
     /**
@@ -669,11 +697,16 @@ class SmsController extends \App\Http\Controllers\Controller
             $query->whereNull('archived_at');
         }
 
-        return $query
+        $page = $query
             ->orderByDesc('last_message_at')
             ->orderByDesc('id')
-            ->paginate($perPage)
-            ->through(fn (SmsThread $thread) => $this->threadRow($thread, $unread));
+            ->paginate($perPage);
+
+        $optedOut = $this->optedOutAmong($page->pluck('external_number')->all());
+
+        return $page->through(
+            fn (SmsThread $thread) => $this->threadRow($thread, $unread, $optedOut)
+        );
     }
 
     private function perPage(Request $request): int

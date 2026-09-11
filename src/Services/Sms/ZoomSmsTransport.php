@@ -58,7 +58,10 @@ class ZoomSmsTransport implements SmsTransport
                 'error' => $e->getMessage(),
             ]);
 
-            return SmsSendResult::failed('Could not reach Zoom: ' . $e->getMessage());
+            // Retryable: nothing reached Zoom. A DNS failure, a timeout, a
+            // socket closed mid-request - the message was not sent, so sending
+            // it again is not sending it twice.
+            return SmsSendResult::failed('Could not reach Zoom: ' . $e->getMessage(), [], true);
         }
 
         $raw = is_array($result['data'] ?? null) ? $result['data'] : [];
@@ -66,7 +69,8 @@ class ZoomSmsTransport implements SmsTransport
         if (! ($result['success'] ?? false)) {
             return SmsSendResult::failed(
                 $client->errorMessage($result),
-                $raw
+                $raw,
+                $this->retryable($result)
             );
         }
 
@@ -76,6 +80,35 @@ class ZoomSmsTransport implements SmsTransport
     public function name(): string
     {
         return 'zoom';
+    }
+
+    /**
+     * Is this refusal worth asking about again in a minute?
+     *
+     * Read off the HTTP status ZoomSmsClient already surfaces as `http_code` on
+     * every result - both its curl path and its user-token path put it there,
+     * and the curl one reports 0 when the request never completed at all.
+     *
+     * Three shapes, and only three:
+     *
+     *   429   Zoom's rate limiter. Waiting is the ENTIRE remedy; a campaign
+     *         hitting it has done nothing wrong except go quickly.
+     *   5xx   Zoom is having a bad morning. Nothing about this message is wrong.
+     *   0     the request never completed. The message was not sent.
+     *
+     * Everything else is a 4xx: a malformed body, a number Zoom will not
+     * accept, a scope the app does not hold, the 7639 identity refusal. Every
+     * one of those is exactly as true in a minute's time, and retrying them
+     * would keep a whole campaign stuck behind one bad row for half an hour
+     * while nothing else went out.
+     *
+     * @param  array{success: bool, http_code: int, data: mixed}  $result
+     */
+    private function retryable(array $result): bool
+    {
+        $status = (int) ($result['http_code'] ?? 0);
+
+        return $status === 429 || $status >= 500 || $status === 0;
     }
 
     /**

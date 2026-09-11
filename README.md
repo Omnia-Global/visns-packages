@@ -1235,6 +1235,7 @@ All relative to `vault.uris.base` (default `ajax/vault`); all carry
 | GET | `{base}/{id}/log` | manage | That entry's access log, newest first. |
 | GET | `{base}/log` | manage | The whole log; filters `user_id`, `action`. |
 
+
 #### Things a front end has to know
 
 - **No list or detail payload ever contains a password or a TOTP seed.** They are
@@ -1404,6 +1405,9 @@ numbers the CRM does not recognise.
         'thread_reads' => 'sms_thread_reads',
         'templates' => 'sms_templates',
         'system_messages' => 'sms_system_messages',
+        'campaigns' => 'sms_campaigns',
+        'campaign_recipients' => 'sms_campaign_recipients',
+        'opt_outs' => 'sms_opt_outs',
     ],
     'transport' => 'null',          // 'zoom' | 'log' | 'null' | a class-string
     'default_country' => 'AU',      // 04xx -> +614xx
@@ -1422,10 +1426,15 @@ numbers the CRM does not recognise.
     'max_body_length' => 1600,
     'zoom' => ['api' => null, 'send_path' => '/phone/sms/messages'],
     'user_model' => null,
+
+    // See "Bulk campaigns and opt-outs" below. `opt_out` is always live;
+    // `bulk` ships disabled and registers no routes until it is turned on.
+    'opt_out' => [...],
+    'bulk' => ['enabled' => false, ...],
 ],
 ```
 
-Then publish and run the migrations — the module needs seven tables:
+Then publish and run the migrations — the module needs ten tables:
 
 ```bash
 php artisan vendor:publish --tag=visns-packages-migrations
@@ -1752,6 +1761,7 @@ asked to retype it.
 php artisan sms:simulate-inbound "+61893752549" "0412 345 678" "Running late"
 php artisan sms:prune --days=180 [--dry-run]   # ARCHIVES threads; deletes nothing
 php artisan sms:sync-lines [--dry-run]         # no-op unless transport is zoom
+php artisan sms:send-campaigns [--budget=30]   # bulk; schedule it every minute
 ```
 
 `sms:simulate-inbound` takes the line as an id or as its number and goes through
@@ -1759,6 +1769,211 @@ the same service a webhook does, so the thread, client match, unread count and
 broadcast all behave identically. It refuses to run while the Zoom transport is
 connected — on a live system it would write a message into a client's
 conversation that the client never sent.
+
+#### Bulk campaigns and opt-outs
+
+Added in 4.15.0. Two pieces, and they are deliberately separate:
+
+| | |
+| --- | --- |
+| **Opt-outs** | part of the messaging module itself. On whenever messaging is. |
+| **Campaigns** | an opt-in sub-module, `messaging.bulk`, shipping **disabled**. |
+
+##### Why opt-outs are not part of the campaign feature
+
+Because the obligation is not part of the campaign feature either. The
+Australian Spam Act 2003 requires a **functional unsubscribe facility** on a
+commercial electronic message and requires it to be honoured — and **Zoom does
+no STOP handling for Australian numbers**, so a client texting STOP to a Zoom
+Phone line produces a webhook payload and nothing else. If this module did not
+read it, nobody would. A practice that never sends a campaign still texts
+clients, so the register, the keyword reading and the `/opt-outs` endpoints are
+live whenever `messaging.enabled` is true.
+
+```php
+'opt_out' => [
+    // Whole message, or its first word, case-insensitive after trimming punctuation.
+    'keywords' => ['STOP', 'UNSUBSCRIBE', 'END', 'CANCEL', 'QUIT', 'OPT OUT', 'OPTOUT'],
+    'opt_in_keywords' => ['START', 'UNSTOP', 'SUBSCRIBE'],
+    // Sent back on the same thread when a keyword is recognised. Null = no confirmation.
+    'reply' => 'You have been unsubscribed and will not receive further messages from this number. Reply START to opt back in.',
+    'opt_in_reply' => 'You are subscribed again and may receive messages from this number.',
+],
+```
+
+**The keyword rule is the whole message, or its first word** (or its first two,
+for the two-word entries), after trimming and stripping surrounding punctuation,
+case-insensitively:
+
+| | |
+| --- | --- |
+| `STOP` · `stop.` · `stop please` · `opt out` | unsubscribed |
+| `START` · `subscribe` | subscribed again |
+| `Please stop sending these on a Sunday` | **nothing** |
+
+That last row is the design. A sentence containing the word is a person talking
+to the practice; unsubscribing them for it would be acting on a guess that
+silently removes somebody from every future communication, and nobody would
+notice for months.
+
+Three consequences worth knowing:
+
+- **The register is per NUMBER**, not per line and not per campaign. Somebody
+  who types STOP means "stop texting me".
+- **It stops BULK, and labels everything else.** Every thread payload carries
+  `opted_out`, and the compose box should say so — but a staff member answering
+  somebody who has written in is a conversation, and the endpoint does not refuse
+  it.
+- **The reading happens in `SmsService::recordInbound`**, which is the one place
+  an inbound is written, so the simulator and the dev transport count too. It can
+  never throw into the webhook: Zoom disables a subscription whose endpoint
+  errors.
+
+**An inbound message also un-archives its thread.** That behaviour lives here
+rather than with campaigns because it is the other half of `archive_threads`
+below — without it, archiving would be a way of losing answers.
+
+##### Campaigns
+
+```php
+'bulk' => [
+    'enabled' => false,
+    'permission' => null,          // null = messaging.permissions.manage
+    'per_minute' => 30,            // sends per scheduler run (the command's default --budget)
+    'max_recipients' => 500,       // per campaign, refused above
+    'footer' => 'Reply STOP to opt out.',
+    'footer_required' => true,     // the server appends the footer unless the body already contains it
+    'archive_threads' => true,     // a thread created by a campaign send is archived until the client replies
+    'max_retries' => 30,           // retryable transport failures per recipient before it is marked failed
+],
+```
+
+Three new tables (`sms_campaigns`, `sms_campaign_recipients`, `sms_opt_outs` —
+all named through `messaging.tables`), so re-publish and migrate:
+
+```bash
+php artisan vendor:publish --tag=visns-packages-migrations
+php artisan migrate
+```
+
+**THE PACKAGE REGISTERS NO SCHEDULE.** Nothing sends until the application
+schedules the command, which is the right way round — a package that scheduled
+work in somebody else's application would be texting clients from a deployment
+that had only meant to upgrade a dependency:
+
+```php
+$schedule->command('sms:send-campaigns')->everyMinute()->withoutOverlapping();
+```
+
+`withoutOverlapping()` is belt to the sender's own braces: it holds
+`Cache::lock('sms:send-campaigns')` for the length of a run precisely so a
+deployment that forgets the scheduler option still cannot text anybody twice.
+
+##### One recipient at a time, into an ordinary thread
+
+Every send goes through `SmsService::sendToNumber` — the same path a staff
+member's own message takes — so each recipient gets a **real thread**, and their
+reply lands in the inbox beside every other conversation rather than in a
+broadcast tool nobody opens.
+
+Drip-feeding is a **ceiling on damage** as much as on throughput: a mistake
+spotted two minutes in has cost sixty texts rather than four hundred, and Pause
+is exact because nothing is in flight anywhere else.
+
+A campaign's life is `draft → sending ⇄ paused → completed`, plus `cancelled`
+from any of the first three. Two things stop a run early, and both are statements
+about the transport rather than about a recipient:
+
+- **not connected** — the campaign is paused with a sentence saying so. Nothing
+  is marked failed, because nothing was tried.
+- **a retryable failure** — a 429, a 5xx, or a request that never completed. The
+  recipient stays `pending`, `retries` goes up, and the run ends; next minute
+  tries again, up to `max_retries`. Everything else (a 4xx, a number Zoom will
+  not take) fails that recipient and the run carries on, because a 4xx is exactly
+  as true in a minute's time.
+
+`SmsSendResult` gained a `retryable` flag for this, defaulting to **false**, so
+every transport that has not thought about the question — including an
+application's own — behaves exactly as it did.
+
+##### Rendering, and the footer
+
+`{name}`, `{first_name}`, `{last_name}`, and `{any_column}` from the imported
+row's `extra` (matched case-insensitively, with spaces folded to underscores, so
+a `Renewal Date` header answers both `{Renewal Date}` and `{renewal_date}`). An
+**unknown placeholder resolves to an empty string** rather than being left on
+screen: `Hi , your review` reads as a typo, `Hi {frist_name}, your review` reads
+as an organisation that does not know what it is doing — and the preview endpoint
+exists so the typo is caught before four hundred people see it.
+
+**The footer is appended by the SERVER**, on a line of its own, unless the
+rendered body already contains it (case-insensitively). It is snapshotted onto
+the campaign at create time, so a config change next month cannot rewrite what
+was sent last month — and the body cap is `max_body_length` **minus the footer
+and its newline**, enforced at create rather than discovered from the transport
+one recipient at a time.
+
+`Support\SmsSegments` counts what the carrier will bill: **GSM-7 160/153**, or
+**UCS-2 70/67** the moment one character is outside the basic GSM alphabet. One
+curly apostrophe takes a 158-character message from one segment to three, which
+is the single most useful thing the preview says. The GSM escape table
+(`^{}[]~|\` and €) is deliberately counted as UCS-2 — an over-count tells
+somebody their message is dearer than it is; an under-count is a bill they did
+not expect.
+
+##### Archived until they reply
+
+With `archive_threads` on, a thread a campaign **creates** is archived
+immediately, so four hundred one-way texts do not bury the conversations somebody
+is actually having. An inbound message un-archives it. A thread that already has
+an inbound message — somebody the practice has been texting all week, who happens
+to be on the list — is never archived by a campaign.
+
+##### Endpoints
+
+`/opt-outs` carries the **manage** permission; `/campaigns` carries
+`bulk.permission`, falling back to manage. Worth separating: "may run the inbox"
+and "may text every client at once" are different risks, and only one of them is
+undoable.
+
+| Method | URI | What it does |
+| --- | --- | --- |
+| GET | `{base}/campaigns` | `{campaigns: [], settings: {per_minute, max_recipients, footer, footer_required, max_body_length}}` |
+| POST | `{base}/campaigns` | `{line_id, name, body, recipients: [{name?, number, extra?}]}` → 201 `{campaign, report}` |
+| POST | `{base}/campaigns/preview` | `{body, recipients}` → `{previews: [{name, number, body, segments}]}` — the first 3, rendered exactly as the sender would |
+| GET | `{base}/campaigns/{id}` | `{campaign}` |
+| GET | `{base}/campaigns/{id}/recipients` | `?status=&page=`, 50 a page, with `meta` |
+| POST | `{base}/campaigns/{id}/start` | draft\|paused → sending. `started_at` is stamped once. |
+| POST | `{base}/campaigns/{id}/pause` | sending → paused |
+| POST | `{base}/campaigns/{id}/cancel` | → cancelled; pending recipients become `skipped` |
+| POST | `{base}/campaigns/{id}/retry-failed` | failed → pending, retries reset; a completed campaign goes back to sending |
+| DELETE | `{base}/campaigns/{id}` | **drafts only** (422 otherwise) |
+| GET | `{base}/opt-outs` | `?search=`, newest first, 200 max |
+| POST | `{base}/opt-outs` | `{number, note?}` → 201 |
+| DELETE | `{base}/opt-outs/{id}` | opt a number back in |
+
+**The `report` is returned on SUCCESS, not as an error**, and it is the point of
+the create endpoint: a list of four hundred rows out of a spreadsheet contains a
+landline, a blank and somebody who unsubscribed last month, and none of those
+should stop the other 397 — but every one has to be named, or somebody texts 397
+people believing they texted 400.
+
+```json
+{ "accepted": 397,
+  "invalid": [{ "row": 3, "name": "Larry", "number": "08 9375 2549", "reason": "not a mobile number" }],
+  "duplicates": 1,
+  "opted_out": [{ "name": "Gone Away", "number": "+61411111111" }] }
+```
+
+`row` is 1-based and names the row in the person's own spreadsheet. An
+opted-out number is **not stored as a recipient at all** — a skipped row on the
+list would look exactly like somebody the practice intended to text. Nothing is
+written until the whole list has been judged: zero usable rows, or more than
+`max_recipients`, is a 422 and leaves no campaign behind.
+
+Illegal transitions answer **422 with a sentence** naming what the campaign is
+("A completed campaign cannot be started."), never a silent no-op.
+
 
 #### Things a front end has to know
 
@@ -1776,6 +1991,9 @@ conversation that the client never sent.
 - **`unread_count` is null in a broadcast payload and a number everywhere else.**
 - **A thread you cannot see is a 404**, never a 403 — including on PUT and on the
   message endpoints.
+- **`opted_out` rides every thread payload** and is a LABEL, not a gate. Say so
+  above the compose box; do not disable it. An opt-out stops bulk, and a staff
+  member answering somebody who has written in is a conversation.
 
 ### Middleware aliases
 
