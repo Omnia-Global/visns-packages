@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Log;
 use Visnsstudio\VisnsPackages\Models\OAuthConnection;
 use Visnsstudio\VisnsPackages\Services\OAuthManager;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
+use Visnsstudio\VisnsPackages\Support\ZoomSmsErrors;
 
 /**
  * The Zoom Phone SMS endpoints, and the phone-user list the settings page needs.
@@ -287,12 +288,29 @@ class ZoomSmsClient extends ZoomApiClient
     }
 
     /**
-     * Zoom's own error text, when it gave one.
+     * What went wrong, in words somebody can act on.
+     *
+     * A code we recognise WINS over Zoom's own text, because Zoom's own text is
+     * not always text: a 7037 arrives as `{"code": 7037, "message":
+     * "61415033181"}` - the recipient's number, and nothing else - and putting
+     * that in a message row's `error` draws **Failed - 61415033181** in the
+     * inbox over a refusal that is working exactly as designed.
+     * Support\ZoomSmsErrors holds the table and the reasoning.
+     *
+     * An unrecognised code falls through to `data.message` exactly as it always
+     * did: Zoom's own sentence beats a guess of ours, and the whole body is
+     * kept verbatim on the result's `raw` either way.
      *
      * @param  array{success: bool, http_code: int, data: mixed}  $result
      */
     public function errorMessage(array $result): string
     {
+        $known = ZoomSmsErrors::sentence(ZoomSmsErrors::codeIn($result));
+
+        if ($known !== null) {
+            return $known;
+        }
+
         $message = Arr::get($result, 'data.message');
 
         if (is_string($message) && trim($message) !== '') {

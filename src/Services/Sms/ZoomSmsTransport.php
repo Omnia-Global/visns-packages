@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Log;
 use Visnsstudio\VisnsPackages\Contracts\SmsTransport;
 use Visnsstudio\VisnsPackages\Models\SmsMessage;
 use Visnsstudio\VisnsPackages\Services\Zoom\ZoomSmsClient;
+use Visnsstudio\VisnsPackages\Support\ZoomSmsErrors;
 
 /**
  * The real transport: Zoom Phone SMS.
@@ -88,6 +89,8 @@ class ZoomSmsTransport implements SmsTransport
         $this->lastRetryAfter = $this->readRetryAfter($this->lastHeaders);
 
         if (! ($result['success'] ?? false)) {
+            $code = ZoomSmsErrors::codeIn($result);
+
             return SmsSendResult::failed(
                 $client->errorMessage($result),
                 $raw,
@@ -97,7 +100,14 @@ class ZoomSmsTransport implements SmsTransport
                 // and reading it as an instruction about SMS would stop a
                 // campaign for as long as an edge node felt like.
                 $this->lastStatus === 429 ? $this->lastRetryAfter : null,
-                $this->lastStatus === 429
+                $this->lastStatus === 429,
+                $code,
+                // 7037: Zoom is enforcing a STOP the recipient sent it, and will
+                // go on enforcing it until they send START. Carried as its own
+                // flag rather than left for a caller to match on the code,
+                // because a caller reading codes is a caller that has to know
+                // Zoom's vocabulary to ask a question about its own message.
+                ZoomSmsErrors::blocksTheNumber($code)
             );
         }
 

@@ -2,11 +2,15 @@
 
 namespace Visnsstudio\VisnsPackages\Tests\Platform\Messaging;
 
+use Illuminate\Support\Facades\Log;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Visnsstudio\VisnsPackages\Models\SmsMessage;
 use Visnsstudio\VisnsPackages\Models\SmsOptOut;
 use Visnsstudio\VisnsPackages\Services\Sms\SmsOptOuts;
 use Visnsstudio\VisnsPackages\Services\Sms\SmsService;
+use Visnsstudio\VisnsPackages\Services\Zoom\ZoomSmsClient;
+use Visnsstudio\VisnsPackages\Support\ZoomSmsErrors;
+use Visnsstudio\VisnsPackages\Tests\Fixtures\Messaging\FakeZoomSmsClient;
 
 /**
  * Opt-outs: the keyword rule, what an inbound STOP does, and the register.
@@ -17,9 +21,50 @@ use Visnsstudio\VisnsPackages\Services\Sms\SmsService;
  */
 class MessagingOptOutTest extends MessagingTestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        FakeZoomSmsClient::reset();
+    }
+
     private function optOuts(): SmsOptOuts
     {
         return app(SmsOptOuts::class);
+    }
+
+    /**
+     * The Zoom transport with a fake client bound in its place - the seam the
+     * real transport resolves through, so nothing can reach a live tenant.
+     */
+    private function useZoom(): void
+    {
+        $this->app['config']->set('visns-packages.messaging.transport', 'zoom');
+        $this->app->instance(ZoomSmsClient::class, new FakeZoomSmsClient());
+    }
+
+    /**
+     * What Zoom answers to a send to a number it has blocked for STOP.
+     *
+     * Copied from production, 11 Sep 2026, verbatim - and the `message` really
+     * is the recipient's own number with nothing else in it. That is the whole
+     * reason Support\ZoomSmsErrors exists.
+     */
+    private function blockedResponse(string $number = '61412345678'): array
+    {
+        return [
+            'success' => false,
+            'http_code' => 400,
+            'data' => ['code' => ZoomSmsErrors::OPTED_OUT, 'message' => $number],
+        ];
+    }
+
+    private function outbound(): ?SmsMessage
+    {
+        return SmsMessage::query()
+            ->where('direction', SmsMessage::DIRECTION_OUT)
+            ->orderByDesc('id')
+            ->first();
     }
 
     /*
@@ -421,5 +466,188 @@ class MessagingOptOutTest extends MessagingTestCase
 
         $this->assertSame(['+61412345678' => true], $among);
         $this->assertSame([], $this->optOuts()->optedOutAmong([]));
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Zoom's own STOP block - code 7037
+    |--------------------------------------------------------------------------
+    |
+    | Zoom blocks every outbound message to a number the moment that number
+    | texts STOP, and refuses ours with `{"code": 7037, "message": "<their
+    | number>"}`. So the confirmation this module composes IN ANSWER to a STOP
+    | is refused as a matter of course - and on 11 Sep 2026 that refusal drew a
+    | red **Failed - 61415033181** bubble in a production inbox, which reads as
+    | the application being broken over it doing exactly its job.
+    */
+
+    public function test_a_stop_confirmation_zoom_blocks_leaves_no_failed_message(): void
+    {
+        Log::spy();
+
+        $this->useZoom();
+
+        FakeZoomSmsClient::$response = $this->blockedResponse();
+
+        $line = $this->line();
+        $thread = $this->thread($line, '+61412345678');
+
+        app(SmsService::class)->recordInbound($thread, 'STOP');
+
+        // The opt-out is recorded first and is not affected by what Zoom said
+        // about the confirmation. It is the half that matters.
+        $this->assertSame(1, SmsOptOut::count());
+        $this->assertTrue($this->optOuts()->isOptedOut('+61412345678'));
+
+        // The send WAS attempted - suppressing it in advance would mean never
+        // confirming an opt-out on any transport.
+        $this->assertCount(1, FakeZoomSmsClient::$sends);
+
+        // And nothing is left in the conversation. Not a failed row, not a
+        // queued one: words nobody was ever shown must not sit in the thread
+        // looking like a fault.
+        $this->assertSame(
+            0,
+            SmsMessage::query()->where('direction', SmsMessage::DIRECTION_OUT)->count()
+        );
+
+        // The thread's own summary still names the message that caused all this,
+        // rather than a row that no longer exists.
+        $fresh = $thread->fresh();
+
+        $this->assertSame(SmsMessage::DIRECTION_IN, $fresh->last_direction);
+        $this->assertSame('STOP', $fresh->last_message_preview);
+
+        Log::shouldHaveReceived('info')
+            ->withArgs(fn ($message, $context = []) => $message === 'sms.opt_out confirmation suppressed'
+                && ($context['code'] ?? null) === ZoomSmsErrors::OPTED_OUT
+                && ($context['number'] ?? null) === '+61412345678')
+            ->once();
+    }
+
+    public function test_a_stop_confirmation_zoom_accepts_is_still_stored(): void
+    {
+        $this->useZoom();
+
+        $line = $this->line();
+        $thread = $this->thread($line, '+61412345678');
+
+        app(SmsService::class)->recordInbound($thread, 'STOP');
+
+        $reply = $this->outbound();
+
+        // The suppression is for the one refusal that means "this can never be
+        // delivered" - never for a send that worked.
+        $this->assertNotNull($reply);
+        $this->assertSame(SmsMessage::STATUS_SENT, $reply->status);
+        $this->assertStringContainsString('unsubscribed', (string) $reply->body);
+        $this->assertNull($reply->user_id);
+    }
+
+    public function test_a_stop_confirmation_refused_for_any_other_reason_still_fails_visibly(): void
+    {
+        $this->useZoom();
+
+        FakeZoomSmsClient::$response = [
+            'success' => false,
+            'http_code' => 500,
+            'data' => ['code' => 5000, 'message' => 'Internal error'],
+        ];
+
+        $line = $this->line();
+        $thread = $this->thread($line, '+61412345678');
+
+        app(SmsService::class)->recordInbound($thread, 'STOP');
+
+        $reply = $this->outbound();
+
+        // Zoom having a bad morning IS a fault, and the practice is entitled to
+        // see that its confirmation did not go.
+        $this->assertNotNull($reply);
+        $this->assertSame(SmsMessage::STATUS_FAILED, $reply->status);
+        $this->assertSame('Internal error', $reply->error);
+    }
+
+    public function test_a_start_confirmation_is_never_suppressed(): void
+    {
+        $this->useZoom();
+
+        $line = $this->line();
+        $thread = $this->thread($line, '+61412345678');
+
+        $this->optOuts()->record('+61412345678', SmsOptOut::SOURCE_KEYWORD);
+
+        // A 7037 on a START is not a state Zoom should reach - releasing the
+        // number is exactly what lifts the block - so if it ever happens it is
+        // news and must be visible. The asymmetry is the point: only the STOP
+        // confirmation is expected to be refused.
+        FakeZoomSmsClient::$response = $this->blockedResponse();
+
+        app(SmsService::class)->recordInbound($thread, 'START');
+
+        $this->assertSame(0, SmsOptOut::count());
+
+        $reply = $this->outbound();
+
+        $this->assertNotNull($reply);
+        $this->assertSame(SmsMessage::STATUS_FAILED, $reply->status);
+        $this->assertStringContainsString('replies START', (string) $reply->error);
+    }
+
+    public function test_a_manual_reply_to_a_blocked_number_stores_the_sentence_not_the_number(): void
+    {
+        $this->useZoom();
+
+        FakeZoomSmsClient::$response = $this->blockedResponse('61415033181');
+
+        $line = $this->line();
+        $thread = $this->thread($line, '+61415033181');
+
+        $sms = app(SmsService::class);
+
+        // The inbox never blocks a person from answering somebody who wrote in,
+        // so this send is made and is allowed to fail - what changed is that it
+        // fails in words.
+        $message = $sms->send($thread, 'Understood, you are off the list.', $this->member());
+
+        $this->assertSame(SmsMessage::STATUS_FAILED, $message->status);
+        $this->assertNotSame('61415033181', $message->error);
+        $this->assertStringContainsString('opted out', (string) $message->error);
+        $this->assertStringContainsString('START', (string) $message->error);
+
+        $result = $sms->lastResult();
+
+        $this->assertTrue($result->optedOut);
+        $this->assertSame(ZoomSmsErrors::OPTED_OUT, $result->code);
+        // Never retryable: Zoom will answer this identically for as long as the
+        // block stands.
+        $this->assertFalse($result->retryable);
+        $this->assertFalse($result->rateLimited);
+        // The provider's own body is kept verbatim beside the sentence.
+        $this->assertSame('61415033181', $message->raw_payload['message'] ?? null);
+    }
+
+    public function test_an_unrecognised_code_still_falls_back_to_zooms_own_message(): void
+    {
+        $this->useZoom();
+
+        FakeZoomSmsClient::$response = [
+            'success' => false,
+            'http_code' => 400,
+            'data' => ['code' => 999999, 'message' => 'Something Zoom explained perfectly well'],
+        ];
+
+        $line = $this->line();
+        $thread = $this->thread($line, '+61412345678');
+
+        $sms = app(SmsService::class);
+
+        $message = $sms->send($thread, 'Hello', $this->member());
+
+        // Zoom's own sentence beats a guess of ours. The table is short on
+        // purpose.
+        $this->assertSame('Something Zoom explained perfectly well', $message->error);
+        $this->assertSame(999999, $sms->lastResult()->code);
+        $this->assertFalse($sms->lastResult()->optedOut);
     }
 }

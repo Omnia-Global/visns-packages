@@ -5,6 +5,66 @@ Notable changes to `visnsstudio/visns-packages`.
 Entries before 4.15.0 were not kept in a file; the git log and the README's
 per-module sections are the record for those.
 
+## 4.15.2
+
+### Fixed — Messaging: Zoom's own STOP block, and the red bubble it drew
+
+Production, 11 Sep 2026 15:37. A campaign recipient replied "Stop". The module
+recorded the opt-out correctly and sent the configured confirmation — and Zoom
+refused it with
+
+```json
+{ "code": 7037, "message": "61415033181" }
+```
+
+The `message` is the recipient's own number and nothing else, so the inbox drew
+**Failed — 61415033181** with a Retry link beside it: the module doing exactly
+its job, rendered as the application being broken.
+
+**Zoom does handle STOP, and the module's note said it did not.** The one thing
+it does is block: once a recipient texts STOP, Zoom refuses every further
+outbound message from that Zoom number to that recipient until they text START.
+There is no endpoint that lists it and nothing tells us it happened, so the
+`sms_opt_outs` register is still the only thing that knows who has unsubscribed
+and is still what stops bulk — Zoom's block is the backstop underneath it. The
+consequence is that the confirmation we compose **in answer to** a STOP is
+refused as a matter of course, on every send, for ever.
+
+- **`Support\ZoomSmsErrors`** — a short table of Zoom Phone codes to the
+  sentence each one means, consulted by `ZoomSmsClient::errorMessage()` **before**
+  `data.message`. `7037` ("This number has opted out of texts from this line
+  with Zoom, so nothing can be sent to it until it replies START") and `7639`
+  (the identity refusal a Server-to-Server token gets for any sender but the
+  account owner). An unrecognised code falls through to Zoom's own text exactly
+  as before — Zoom's sentence beats a guess of ours — and the whole body is kept
+  verbatim on the result's `raw` either way. The table is deliberately short: a
+  register of half-remembered codes eventually contradicts the provider.
+- **`SmsSendResult` gained `code` (int|null) and `optedOut` (bool)**, beside
+  `retryAfter`/`rateLimited` and appended for the same reason — a transport that
+  has not thought about the question keeps behaving exactly as it did.
+  `optedOut` is a fact about the NUMBER, not about the request: it is the
+  opposite of `retryable` (7037 arrives on a 4xx and is never retried) and is
+  the one refusal a caller may want to treat as expected.
+- **The STOP confirmation is the one message in the module allowed to
+  disappear.** `SmsService::deliver()` — `send()`'s body, with one flag — deletes
+  the row and returns null when a suppressible send comes back `optedOut`,
+  **before** the thread pointer is re-stamped and before the broadcast goes out.
+  Deleting it afterwards would leave every open tab holding a red bubble until
+  it happened to refetch, and there is no removal event on the wire to take one
+  back with. One `Log::info('sms.opt_out confirmation suppressed', …)` carries
+  the code, the number and the inbound message that caused it. Any other
+  refusal — a 5xx, a dead line — fails visibly as it always has, because that is
+  a fault.
+- **START is never suppressed**: releasing the number is what lifts Zoom's
+  block, so that confirmation can be delivered and should be.
+- **A staff member answering somebody who wrote in is still never blocked.** The
+  inbox does not refuse a reply to an opted-out number and did not start to;
+  what changed is that when Zoom refuses it, the row's `error` is a sentence
+  rather than a phone number.
+
+Tests: six added to `MessagingOptOutTest` (52 in the file, 329 in
+`tests/Platform/Messaging`).
+
 ## 4.15.1
 
 ### Added — Messaging: pacing the bulk sender

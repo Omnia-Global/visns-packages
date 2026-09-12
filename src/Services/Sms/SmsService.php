@@ -125,6 +125,33 @@ class SmsService
      */
     public function send(SmsThread $thread, string $body, $user = null): SmsMessage
     {
+        // Never suppressed: a message somebody typed is a message somebody is
+        // owed an answer about, whatever the provider said. Only the module's
+        // own opt-out confirmation may vanish - see deliver().
+        return $this->deliver($thread, $body, $user, false);
+    }
+
+    /**
+     * The body of send(), plus the one caller that may want its message to
+     * disappear rather than to fail.
+     *
+     * `$suppressWhenBlocked` is for a message the MODULE composed on its own
+     * behalf and that the provider has blocked the recipient from receiving -
+     * Zoom's 7037, which is Zoom enforcing the very STOP that caused us to
+     * compose it. Such a message was never read by anybody and never will be,
+     * so the row is removed here, BEFORE the thread pointer is re-stamped and
+     * before the broadcast goes out. Deleting it afterwards would leave every
+     * open tab holding a red bubble until it happened to refetch, and there is
+     * no removal event on the wire to take it back with.
+     *
+     * The row is created first all the same. It has to be: the transport reads
+     * a saved SmsMessage, and a provider that accepts the text and then times
+     * out on the response must still leave the practice with a record of it.
+     *
+     * @return SmsMessage|null  Null only when the send was suppressed.
+     */
+    private function deliver(SmsThread $thread, string $body, $user, bool $suppressWhenBlocked): ?SmsMessage
+    {
         $message = SmsMessage::create([
             'thread_id' => $thread->id,
             'direction' => SmsMessage::DIRECTION_OUT,
@@ -141,6 +168,15 @@ class SmsService
         $result = $this->transport()->send($message);
 
         $this->lastResult = $result;
+
+        if ($suppressWhenBlocked && $result->optedOut) {
+            // Nothing was sent and nothing ever will be. The thread's pointer
+            // still names the inbound message that caused this, because
+            // touchLastMessage() below never ran.
+            $message->delete();
+
+            return null;
+        }
 
         $message->status = $result->status;
         $message->error = $result->error;
@@ -429,7 +465,32 @@ class SmsService
             // visible message in the conversation rather than something that
             // happened invisibly. Attributed to nobody: no staff member wrote
             // it.
-            $this->send($thread, $reply, null);
+            //
+            // The STOP half is the one send in this module allowed to vanish.
+            // Zoom blocks a number the moment it texts STOP (code 7037), which
+            // means the confirmation we compose IN ANSWER TO that STOP is
+            // refused by the provider as a matter of course - and on 11 Sep 2026
+            // that refusal drew a red **Failed - 61415033181** bubble in a
+            // production inbox, over the module doing exactly its job. Words
+            // nobody was ever shown must not sit in the conversation looking
+            // like a fault. Anything else - a 5xx, a dead line - fails visibly
+            // as it always has, because that IS a fault.
+            //
+            // START is never suppressed: releasing the number is what lifts
+            // Zoom's block, so the confirmation can be delivered and should be.
+            $sent = $this->deliver($thread, $reply, null, $direction === SmsOptOuts::OUT);
+
+            if ($sent === null) {
+                Log::info('sms.opt_out confirmation suppressed', [
+                    'thread_id' => $thread->id,
+                    'message_id' => $message->id,
+                    'number' => $e164,
+                    // The provider's own code, so a future refusal that behaves
+                    // like this one can be told from 7037 in the log.
+                    'code' => $this->lastResult?->code,
+                    'reason' => 'the provider has blocked this number and would not deliver it',
+                ]);
+            }
         } catch (\Throwable $e) {
             Log::warning('sms.opt-out keyword handling failed; the message is stored', [
                 'thread_id' => $thread->id,

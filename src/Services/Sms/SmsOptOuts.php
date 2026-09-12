@@ -15,9 +15,23 @@ use Visnsstudio\VisnsPackages\Support\PhoneNumber;
  * sub-module is. It is not a feature of campaigns; it is the module's
  * compliance floor. The Spam Act 2003 requires a functional unsubscribe
  * facility on a commercial electronic message and requires it to be honoured,
- * and Zoom performs no STOP handling for Australian numbers - so a client
- * texting STOP to a Zoom Phone line produces a webhook payload and nothing
- * else. If this class did not read it, nobody would.
+ * and a client texting STOP to a Zoom Phone line produces a webhook payload and
+ * nothing else this application can see. If this class did not read it, nobody
+ * would.
+ *
+ * ## What Zoom does with a STOP - corrected 12 Sep 2026
+ *
+ * It was written here that Zoom performs no STOP handling at all. It does one
+ * thing, and only one: once a recipient texts STOP, **Zoom refuses every
+ * further outbound message from that Zoom number to that recipient** with code
+ * 7037 (Support\ZoomSmsErrors), until the recipient texts START. That is a
+ * block on OUR sending, not a register we can read - no endpoint lists it,
+ * nothing tells us it happened, and it says nothing about the other lines a
+ * practice owns or about what a campaign is entitled to do. So this table is
+ * still the only thing that knows who has unsubscribed and is still what stops
+ * bulk; Zoom's block is the backstop underneath it, and the reason the
+ * confirmation sent back to a STOP is the one message in this module allowed to
+ * disappear rather than fail (Services\Sms\SmsService::readOptOutKeyword).
  *
  * ## What it does and does not stop
  *

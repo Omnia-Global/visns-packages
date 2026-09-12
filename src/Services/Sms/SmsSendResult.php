@@ -49,6 +49,20 @@ class SmsSendResult
      *                                          and a 5xx is Zoom having a bad morning rather
      *                                          than an instruction about our own pace, so the
      *                                          two cannot be one flag.
+     * @param  int|null     $code               The provider's own numeric code, when it gave
+     *                                          one - Zoom's `data.code`. Kept beside `error`
+     *                                          rather than parsed back out of it, because
+     *                                          `error` is a sentence for a person and is
+     *                                          allowed to change wording.
+     * @param  bool         $optedOut           The provider has BLOCKED this recipient, and
+     *                                          will answer identically for ever until the
+     *                                          recipient opts back in - Zoom's 7037. Not a
+     *                                          flavour of `retryable` (it is the opposite of
+     *                                          retryable) and not a flavour of `rateLimited`:
+     *                                          it is a fact about the NUMBER rather than about
+     *                                          this request, and the one refusal a caller may
+     *                                          want to treat as expected rather than as a
+     *                                          failure worth showing anybody.
      */
     public function __construct(
         public readonly ?string $providerMessageId,
@@ -57,7 +71,9 @@ class SmsSendResult
         public readonly array $raw = [],
         public readonly bool $retryable = false,
         public readonly ?int $retryAfter = null,
-        public readonly bool $rateLimited = false
+        public readonly bool $rateLimited = false,
+        public readonly ?int $code = null,
+        public readonly bool $optedOut = false
     ) {
     }
 
@@ -88,7 +104,9 @@ class SmsSendResult
         array $raw = [],
         bool $retryable = false,
         ?int $retryAfter = null,
-        bool $rateLimited = false
+        bool $rateLimited = false,
+        ?int $code = null,
+        bool $optedOut = false
     ): self {
         return new self(
             null,
@@ -97,7 +115,9 @@ class SmsSendResult
             $raw,
             $retryable,
             $retryAfter,
-            $rateLimited
+            $rateLimited,
+            $code,
+            $optedOut
         );
     }
 
