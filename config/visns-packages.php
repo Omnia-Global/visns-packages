@@ -1115,6 +1115,19 @@ return [
         // year.
         'settings_cache_ttl' => 60,
 
+        /*
+        | How long the queue-id map is held.
+        |
+        | Zoom's ringing payload names a call queue WITHOUT identifying it (no
+        | `id`, no `extension_id` — verified on production), so the webhook turns
+        | its extension number or its name back into a queue id through a map of
+        | the settings table. Ten minutes rather than the sixty seconds above
+        | because it answers "which queue is this", which changes when a queue is
+        | created or renamed; a settings save forgets it anyway, so this is
+        | housekeeping rather than correctness.
+        */
+        'queue_id_cache_ttl' => 600,
+
         // A ringing row older than this is treated as abandoned: Zoom does not
         // guarantee a closing event for every call.
         'stale_after_minutes' => 15,

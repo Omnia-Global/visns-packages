@@ -69,6 +69,12 @@ class PhonePresenceTest extends TestCase
         $this->runPackageMigration(
             '2026_08_19_210100_create_zoom_call_queue_settings_table.php'
         );
+        /* The queue's extension number. Zoom's ringing payload names a queue
+           without identifying it, so the webhook resolves an id out of this
+           column — see `ZoomCallQueueSetting::idsByExtensionAndName()`. */
+        $this->runPackageMigration(
+            '2026_09_16_100000_add_extension_number_to_zoom_call_queue_settings_table.php'
+        );
         $this->runPackageMigration(
             '2026_08_27_090000_create_zoom_phone_live_calls_table.php'
         );

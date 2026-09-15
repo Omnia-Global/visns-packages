@@ -72,6 +72,12 @@ class CallQueueWebhookTest extends TestCase
         $this->runPackageMigration(
             '2026_08_19_210100_create_zoom_call_queue_settings_table.php'
         );
+        /* The queue's extension number. Zoom's ringing payload names a queue
+           without identifying it, so the webhook resolves an id out of this
+           column — see `ZoomCallQueueSetting::idsByExtensionAndName()`. */
+        $this->runPackageMigration(
+            '2026_09_16_100000_add_extension_number_to_zoom_call_queue_settings_table.php'
+        );
         // The webhook ledger, so the per-leg tests can assert on the word the
         // diagnostics screen shows for each delivery.
         $this->runPackageMigration(
@@ -380,6 +386,162 @@ class CallQueueWebhookTest extends TestCase
             ->assertJsonPath('status', 'ignored');
 
         $this->assertSame(0, ZoomLiveQueueCall::count());
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Zoom names the queue and does not identify it
+    |--------------------------------------------------------------------------
+    |
+    | The payload production actually sends for a queue-distributed leg, verified
+    | after the first successful pop:
+    |
+    |   forwarded_by: {name, extension_type: "callQueue", extension_number}
+    |
+    | No `id` and no `extension_id`. The live row stored `queue_id` null, so the
+    | pop had nothing to key the pickup-code map with and drew no Pick up button —
+    | the product owner's report — and the exclusion check was blind for the same
+    | reason. The id now comes out of the settings table.
+    */
+
+    /** The node production sends: a name and an extension number, and no id. */
+    private function unidentifiedQueueLeg(array $overrides = []): array
+    {
+        return $this->ringingPayload([
+            'callee' => ['extension_type' => 'user', 'extension_id' => 'user-9'],
+            'forwarded_by' => array_merge([
+                'name' => 'Test Dev Call Queue',
+                'extension_type' => 'callQueue',
+                'extension_number' => '805',
+            ], $overrides),
+        ]);
+    }
+
+    public function test_a_queue_named_without_an_id_is_resolved_by_its_extension_number(): void
+    {
+        ZoomCallQueueSetting::create([
+            'queue_id' => '-pi2RsyBTTmgvi128QR9Bg',
+            'queue_name' => 'Test Dev Call Queue',
+            'extension_number' => '805',
+            'pickup_code' => '3288',
+        ]);
+        ZoomCallQueueSetting::flushCache();
+
+        $this->signedPost($this->unidentifiedQueueLeg())->assertOk();
+
+        $call = ZoomLiveQueueCall::firstWhere('call_id', 'call-abc-123');
+
+        // THE REAL ZOOM ID, off the settings row — not the name, not null.
+        $this->assertSame('-pi2RsyBTTmgvi128QR9Bg', $call->queue_id);
+        $this->assertSame('queue', $call->kind);
+
+        /* And therefore a Pick up button: the card looks its code up by the
+           `pickup_key` the call carries, which is that same id. */
+        $this->snapshot()
+            ->assertOk()
+            ->assertJsonPath('calls.0.pickup_key', '-pi2RsyBTTmgvi128QR9Bg')
+            ->assertJsonPath('pickup_codes.-pi2RsyBTTmgvi128QR9Bg', '*993288');
+    }
+
+    public function test_an_extension_number_is_matched_exactly_and_not_as_a_number(): void
+    {
+        // An extension number is an identifier, so `0805` is not `805`. Compared
+        // as integers these would be the same queue.
+        ZoomCallQueueSetting::create([
+            'queue_id' => 'queue-padded',
+            'queue_name' => 'Padded',
+            'extension_number' => '0805',
+            'pickup_code' => '1111',
+        ]);
+        ZoomCallQueueSetting::flushCache();
+
+        $this->signedPost($this->unidentifiedQueueLeg())->assertOk();
+
+        // No extension match and no name match: today's behaviour, unchanged.
+        $this->assertNull(ZoomLiveQueueCall::firstWhere('call_id', 'call-abc-123')->queue_id);
+    }
+
+    public function test_a_queue_with_no_stored_extension_number_is_resolved_by_its_name(): void
+    {
+        /* Every settings row that predates the `extension_number` column has
+           none until the settings page is next opened while Zoom is reachable, so
+           the name is the fallback — better than no Pick up button in the
+           meantime. Case-insensitively, because a display name's case is not
+           meaningful and MySQL would fold it while SQLite would not. */
+        ZoomCallQueueSetting::create([
+            'queue_id' => 'queue-by-name',
+            'queue_name' => 'test dev CALL queue',
+            'pickup_code' => '4444',
+        ]);
+        ZoomCallQueueSetting::flushCache();
+
+        $this->signedPost($this->unidentifiedQueueLeg(['extension_number' => '999']))->assertOk();
+
+        $this->assertSame(
+            'queue-by-name',
+            ZoomLiveQueueCall::firstWhere('call_id', 'call-abc-123')->queue_id
+        );
+    }
+
+    public function test_a_queue_matching_neither_an_extension_nor_a_name_keeps_todays_behaviour(): void
+    {
+        ZoomCallQueueSetting::create([
+            'queue_id' => 'queue-other',
+            'queue_name' => 'Reception',
+            'extension_number' => '700',
+        ]);
+        ZoomCallQueueSetting::flushCache();
+
+        $this->signedPost($this->unidentifiedQueueLeg())->assertOk();
+
+        $call = ZoomLiveQueueCall::firstWhere('call_id', 'call-abc-123');
+
+        /* It STILL POPS, named. That is the point of the fallback being null
+           rather than a refusal: a queue nobody has configured has no pickup code
+           to offer anyway, and dropping the card would be worse than a card with
+           one fewer button. */
+        $this->assertNotNull($call);
+        $this->assertNull($call->queue_id);
+        $this->assertSame('Test Dev Call Queue', $call->queue_name);
+
+        $this->snapshot()->assertOk()->assertJsonPath('calls.0.pickup_key', null);
+    }
+
+    public function test_a_queue_excluded_by_the_operator_is_dropped_even_when_zoom_sends_no_id(): void
+    {
+        /* THE OTHER HALF OF THE SAME FAULT. `isExcludedQueue()` is asked about an
+           id, so a queue Zoom did not identify was never recognised as excluded
+           and popped anyway — against the operator's explicit setting. */
+        ZoomCallQueueSetting::create([
+            'queue_id' => '-pi2RsyBTTmgvi128QR9Bg',
+            'queue_name' => 'Test Dev Call Queue',
+            'extension_number' => '805',
+            'excluded' => true,
+        ]);
+        ZoomCallQueueSetting::flushCache();
+
+        $this->signedPost($this->unidentifiedQueueLeg())
+            ->assertOk()
+            ->assertJsonPath('status', 'ignored');
+
+        $this->assertSame(0, ZoomLiveQueueCall::count());
+    }
+
+    public function test_the_direct_pseudo_row_never_answers_for_a_real_queue(): void
+    {
+        /* `direct` is not a Zoom queue and has no extension number Zoom will ever
+           send. A queue genuinely called "Direct calls" must not resolve to the
+           pseudo-row and inherit the account-wide direct pickup code. */
+        ZoomCallQueueSetting::create([
+            'queue_id' => 'direct',
+            'queue_name' => 'Direct calls',
+            'pickup_code' => '9999',
+        ]);
+        ZoomCallQueueSetting::flushCache();
+
+        $this->signedPost($this->unidentifiedQueueLeg(['name' => 'Direct calls']))->assertOk();
+
+        $this->assertNull(ZoomLiveQueueCall::firstWhere('call_id', 'call-abc-123')->queue_id);
     }
 
     public function test_an_excluded_queue_is_dropped_silently(): void

@@ -753,6 +753,38 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
      * member's extension and the queue only appears under `forwarded_by`. Both
      * are accepted, first one wins.
      *
+     * ==========================================================================
+     *  AND THE NODE OFTEN CARRIES NO ID AT ALL — SO ONE IS RESOLVED LOCALLY.
+     * ==========================================================================
+     *
+     * Verified on production after the first successful queue pop. The
+     * `forwarded_by` node on a queue-distributed leg is, in its entirety:
+     *
+     *   `{"name": "Test Dev Call Queue", "extension_type": "callQueue",
+     *     "extension_number": "805"}`
+     *
+     * No `id` and no `extension_id`. Reading only those two left `queue_id` null
+     * on the live row, which left `ZoomLiveQueueCall::present()` with nothing to
+     * key the pickup-code map with, which left the card with no Pick up button —
+     * the product owner's report, *"can we look into picking up the call with the
+     * call pop"*. `isExcludedQueue()` was blind for the same reason, so a queue
+     * the operator had opted out of popped anyway.
+     *
+     * So where the node names a queue without identifying it, the id comes from
+     * the SETTINGS TABLE: by extension number first, then by name.
+     * `ZoomCallQueueSetting::idsByExtensionAndName()` holds both maps behind a
+     * ten-minute cache, so this costs no Zoom API call and, nearly always, no
+     * query — which matters here more than anywhere else in the package, because
+     * Zoom retries a webhook it is not answered promptly and disables the
+     * subscription after enough failures.
+     *
+     * THE RESOLVED ID IS THE REAL ONE AND FEEDS EVERYTHING. It is stored as
+     * `queue_id`, it becomes the `pickup_key`, and it is what the exclusion check
+     * is asked about — so a queue identified this way behaves in every respect
+     * like one Zoom identified for us. A node matching neither an extension nor
+     * a name keeps exactly today's behaviour: the name alone, no key, no Pick up
+     * button.
+     *
      * @return array{queue: ?array{id: ?string, name: string}, excluded: bool}
      *         `excluded` is true when the only queue found is opted out in
      *         Settings -> Call Queues — the caller drops it silently rather
@@ -771,6 +803,12 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
 
             $id = $this->trim(Arr::get($node, 'extension_id'))
                 ?: $this->trim(Arr::get($node, 'id'));
+
+            if ($id === '') {
+                // Zoom named the queue and did not identify it — see the
+                // docblock. Resolved from the settings table, never from Zoom.
+                $id = $this->queueIdFromSettings($node);
+            }
 
             if ($id !== '' && $this->isExcludedQueue($id)) {
                 // Keep looking: a call forwarded through an excluded queue may
@@ -791,6 +829,40 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
         }
 
         return ['queue' => null, 'excluded' => $excluded];
+    }
+
+    /**
+     * A queue id out of the settings table, for a node that carries none.
+     *
+     * TWO LOOKUPS IN ONE ORDER, and the order is the whole of the reasoning.
+     * An extension number is unique in a Zoom account and is what the payload
+     * actually carries, so it is asked first and compared EXACTLY — an extension
+     * number is an identifier, and `805` is not `0805`. A display name is neither
+     * unique nor stable (two queues may share one, and either can be renamed in
+     * the Zoom admin UI without telling us), so it is the fallback, compared
+     * case-insensitively because a name's case is not meaningful.
+     *
+     * The name lookup earns its place on exactly one population: every settings
+     * row that predates the `extension_number` column has no number until the
+     * settings page is next opened while Zoom is reachable, and a name match is
+     * better than no Pick up button in the meantime.
+     *
+     * Returns '' when neither matches, which the caller treats as it always
+     * treated a missing id.
+     */
+    private function queueIdFromSettings(array $node): string
+    {
+        $map = ZoomCallQueueSetting::idsByExtensionAndName();
+
+        $extension = $this->trim(Arr::get($node, 'extension_number'));
+
+        if ($extension !== '' && isset($map['extensions'][$extension])) {
+            return $map['extensions'][$extension];
+        }
+
+        $name = strtolower($this->trim(Arr::get($node, 'name')));
+
+        return $name !== '' ? (string) ($map['names'][$name] ?? '') : '';
     }
 
     private function isCallQueueNode(array $node): bool

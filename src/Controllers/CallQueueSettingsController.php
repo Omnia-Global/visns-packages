@@ -112,7 +112,7 @@ class CallQueueSettingsController extends \App\Http\Controllers\Controller
             $seen[] = $queueId;
             $setting = $local->get($queueId);
 
-            $this->cacheQueueName($queueId, trim((string) Arr::get($queue, 'name', '')), $setting);
+            $this->cacheQueueFacts($queue, $setting);
 
             $queues[] = $this->row($queueId, $queue, $setting);
         }
@@ -281,7 +281,15 @@ class CallQueueSettingsController extends \App\Http\Controllers\Controller
             'name' => $name !== ''
                 ? $name
                 : (trim((string) ($setting->queue_name ?? '')) ?: null),
-            'extension_number' => Arr::get($queue, 'extension_number'),
+            /*
+             * ZOOM'S OWN ANSWER WHERE WE HAVE IT, THE STORED COPY OTHERWISE. The
+             * unreachable fallback above passes `[]` as the queue, so without the
+             * second half this column would empty out on exactly the day the page
+             * has nothing else to show — and it is now a fact the webhook depends
+             * on, so a reader should be able to see whether we hold it.
+             */
+            'extension_number' => Arr::get($queue, 'extension_number')
+                ?: (trim((string) ($setting->extension_number ?? '')) ?: null),
             'number' => $number !== '' ? $number : null,
             'status' => trim((string) Arr::get($queue, 'status', '')) ?: null,
             'pickup_code' => $this->normaliseCode($setting->pickup_code ?? null),
@@ -290,17 +298,61 @@ class CallQueueSettingsController extends \App\Http\Controllers\Controller
     }
 
     /**
-     * Keep the local name cache in step with Zoom, so the table is still
-     * readable on the day the API is down. Only writes when something changed.
+     * Keep the local copies of Zoom's own facts in step, so the table is still
+     * readable on the day the API is down — and so the WEBHOOK can identify a
+     * queue Zoom named without identifying it.
+     *
+     * TWO FACTS NOW, and the second is not cosmetic. A ringing event for a
+     * queue-distributed leg carries `{name, extension_type, extension_number}`
+     * and NO id (see `ZoomWebhookController::resolveQueue()`), so
+     * `extension_number` is the only thing in that payload that can be turned
+     * back into a queue id locally. This listing is the one place both the id and
+     * the extension number are in our hands at the same time, which makes it the
+     * only place that bridge can be built.
+     *
+     * ONLY EXISTING ROWS ARE TOUCHED, unchanged. A settings row exists when
+     * somebody has configured the queue — given it a pickup code or opted it out
+     * — and a queue nobody has configured has nothing for the webhook to look up
+     * anyway. Creating a row per queue on every page load would fill the table
+     * with rows carrying no decision.
+     *
+     * ONE SAVE, AND ONLY WHEN SOMETHING MOVED. This runs once per queue on every
+     * settings page load; a save per queue per load would be a write storm for
+     * data that changes a few times a year. `flushCache()` is called because the
+     * webhook's id map is built from exactly these two columns — without it a
+     * newly learnt extension number waits out the ten-minute TTL before the next
+     * call can be picked up.
      */
-    private function cacheQueueName(string $queueId, string $name, ?ZoomCallQueueSetting $setting): void
+    private function cacheQueueFacts(array $queue, ?ZoomCallQueueSetting $setting): void
     {
-        if ($name === '' || $setting === null || $setting->queue_name === $name) {
+        if ($setting === null) {
             return;
         }
 
-        $setting->queue_name = $name;
+        $name = trim((string) Arr::get($queue, 'name', ''));
+        $extension = trim((string) Arr::get($queue, 'extension_number', ''));
+
+        $dirty = false;
+
+        if ($name !== '' && $setting->queue_name !== $name) {
+            $setting->queue_name = $name;
+            $dirty = true;
+        }
+
+        if ($extension !== '' && trim((string) $setting->extension_number) !== $extension) {
+            $setting->extension_number = $extension;
+            $dirty = true;
+        }
+
+        if (! $dirty) {
+            return;
+        }
+
         $setting->save();
+
+        // The webhook resolves a queue id out of these two columns — see
+        // `ZoomCallQueueSetting::idsByExtensionAndName()`.
+        ZoomCallQueueSetting::flushCache();
     }
 
     /** Bare digits, or null for "no code". */

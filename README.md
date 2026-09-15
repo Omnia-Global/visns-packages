@@ -1054,6 +1054,18 @@ Behaviour worth knowing before you point Zoom at it:
 - Per-queue pickup codes and pop exclusions live in `zoom_call_queue_settings`,
   read through a 60-second cache that is busted on save. Codes are stored bare;
   Zoom fixes a `*99` prefix, so `8781` is dialled `*998781`.
+- **Zoom's ringing payload names a queue and does not identify it** (4.15.3).
+  Verified on production: `forwarded_by` on a queue-distributed leg carries
+  `{name, extension_type: "callQueue", extension_number}` and **no `id` and no
+  `extension_id`** — so the pickup code could not be looked up and the card drew
+  no Pick up button, and an excluded queue popped anyway. The settings row now
+  stores the queue's `extension_number` (written by the settings page from Zoom's
+  own listing, the one place the id and the number are in our hands together), and
+  `resolveQueue()` turns a nameless node back into an id through
+  `ZoomCallQueueSetting::idsByExtensionAndName()` — extension number first
+  (exact), then name (case-insensitive), behind a ten-minute cache
+  (`call_queue.queue_id_cache_ttl`) and **no Zoom API call on the webhook path**.
+  A node matching neither keeps the old behaviour: named, popped, no pickup key.
 
 > **Zoom API limit, proven and documented.** Saving a pickup code pushes the
 > policy to Zoom first and only stores the code if Zoom took it — but Zoom

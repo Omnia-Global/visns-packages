@@ -46,6 +46,12 @@ class CallQueueSettingsTest extends TestCase
         $this->runPackageMigration(
             '2026_08_19_210100_create_zoom_call_queue_settings_table.php'
         );
+        /* The queue's extension number. Zoom's ringing payload names a queue
+           without identifying it, so the webhook resolves an id out of this
+           column — see `ZoomCallQueueSetting::idsByExtensionAndName()`. */
+        $this->runPackageMigration(
+            '2026_09_16_100000_add_extension_number_to_zoom_call_queue_settings_table.php'
+        );
     }
 
     private function staffWith(string ...$permissions): User
@@ -161,6 +167,107 @@ class CallQueueSettingsTest extends TestCase
             ->assertJsonPath('queues.0.name', 'Reception')
             ->assertJsonPath('queues.0.pickup_code', '8781')
             ->assertJsonPath('queues.0.excluded', false);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | The extension number, which the webhook cannot do without
+    |--------------------------------------------------------------------------
+    |
+    | Zoom's ringing payload names a call queue and does NOT identify it — no
+    | `id`, no `extension_id`, verified on production. This listing is the one
+    | place the id and the extension number are in our hands together, which makes
+    | it the only place the bridge between them can be built.
+    */
+
+    public function test_the_listing_stores_each_configured_queues_extension_number(): void
+    {
+        $this->fakeZoom();
+
+        $setting = ZoomCallQueueSetting::create([
+            'queue_id' => 'queue-1',
+            'pickup_code' => '8781',
+        ]);
+
+        $this->actingAs($this->staffWith('Call Queue Settings'))
+            ->getJson('/ajax/call-queue/settings')
+            ->assertOk()
+            // Zoom sends it as an integer on this endpoint; it is stored as the
+            // string it is — an extension number is an identifier, and comparing
+            // `805` with `0805` as numbers would make them one queue.
+            ->assertJsonPath('queues.0.extension_number', 303);
+
+        $this->assertSame('303', $setting->fresh()->extension_number);
+        // The name cache still works, on the same write.
+        $this->assertSame('Reception', $setting->fresh()->queue_name);
+    }
+
+    public function test_the_stored_extension_number_is_published_when_zoom_is_unreachable(): void
+    {
+        /* The fallback passes `[]` as the queue, so without the stored copy this
+           column would empty out on exactly the day the page has nothing else to
+           show — and it is a fact the webhook now depends on, so a reader should
+           be able to see whether we hold it. */
+        $this->fakeZoom(['listQueues' => [
+            'success' => false,
+            'queues' => [],
+            'error' => 'Zoom is unreachable',
+        ]]);
+
+        ZoomCallQueueSetting::create([
+            'queue_id' => 'queue-1',
+            'queue_name' => 'Reception',
+            'extension_number' => '303',
+            'pickup_code' => '8781',
+        ]);
+
+        $this->actingAs($this->staffWith('Call Queue Settings'))
+            ->getJson('/ajax/call-queue/settings')
+            ->assertOk()
+            ->assertJsonPath('zoom_unreachable', true)
+            ->assertJsonPath('queues.0.extension_number', '303');
+    }
+
+    public function test_the_listing_creates_no_row_for_a_queue_nobody_has_configured(): void
+    {
+        // Unchanged: a row exists when somebody has made a decision about the
+        // queue, and a queue with no decision has nothing for the webhook to look
+        // up anyway. A row per queue per page load would fill the table with
+        // rows carrying no settings.
+        $this->fakeZoom();
+
+        $this->actingAs($this->staffWith('Call Queue Settings'))
+            ->getJson('/ajax/call-queue/settings')
+            ->assertOk()
+            ->assertJsonPath('queues.0.extension_number', 303);
+
+        $this->assertSame(0, ZoomCallQueueSetting::count());
+    }
+
+    public function test_learning_an_extension_number_takes_effect_without_waiting_out_the_cache(): void
+    {
+        $this->fakeZoom();
+
+        ZoomCallQueueSetting::create(['queue_id' => 'queue-1', 'pickup_code' => '8781']);
+
+        // Warm the map BEFORE the number is known, which is the state a
+        // production install is in on the day this ships.
+        $this->assertSame(
+            [],
+            ZoomCallQueueSetting::idsByExtensionAndName()['extensions']
+        );
+
+        $this->actingAs($this->staffWith('Call Queue Settings'))
+            ->getJson('/ajax/call-queue/settings')
+            ->assertOk();
+
+        /* The write flushes the map, so the very next ringing webhook can resolve
+           the queue — without that, opening the settings page would appear to do
+           nothing for ten minutes. */
+        $this->assertSame(
+            ['303' => 'queue-1'],
+            ZoomCallQueueSetting::idsByExtensionAndName()['extensions']
+        );
     }
 
     public function test_zoom_being_down_still_returns_the_local_rows(): void

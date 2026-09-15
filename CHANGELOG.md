@@ -5,6 +5,61 @@ Notable changes to `visnsstudio/visns-packages`.
 Entries before 4.15.0 were not kept in a file; the git log and the README's
 per-module sections are the record for those.
 
+## 4.15.3
+
+### Fixed — Call queue: the pop had no Pick up button, because Zoom never sent the queue's id
+
+Product owner, after the first successful queue pop on production: *"can we look
+into picking up the call with the call pop"*. The Test Dev queue was configured —
+`queue_id = "-pi2RsyBTTmgvi128QR9Bg"`, `pickup_code = 3288` — and the card came up
+with no button on it.
+
+**Zoom's `phone.callee_ringing` for a queue-distributed leg does not identify the
+queue.** The whole of the `forwarded_by` node, verified on production:
+
+```json
+{ "name": "Test Dev Call Queue", "extension_type": "callQueue", "extension_number": "805" }
+```
+
+No `id`, no `extension_id`. `ZoomWebhookController::resolveQueue()` read only
+those two, so the live row stored `queue_id` null with the name resolved,
+`ZoomLiveQueueCall::present()` had nothing to key the pickup-code map with, and
+the card had no code to offer. `isExcludedQueue()` was blind for exactly the same
+reason, so **a queue the operator had opted out of popped anyway** — the same
+fault, quieter.
+
+The queue LISTING carries the id, the name and the extension number together, so
+the bridge is built where they are all in our hands:
+
+- **`zoom_call_queue_settings.extension_number`** (string 16, nullable, indexed) —
+  migration `2026_09_16_100000_add_extension_number_to_zoom_call_queue_settings_table`.
+  Written by the settings page from Zoom's own listing, on the existing rows only
+  (a queue nobody has configured has nothing to look up), and published on the
+  settings payload — including from the stored copy when Zoom is unreachable,
+  which is the one day that column has nothing else to show.
+- **`ZoomCallQueueSetting::idsByExtensionAndName()`** — both maps behind a
+  ten-minute cache (`call_queue.queue_id_cache_ttl`, forgotten on every settings
+  save). **No Zoom API call on the webhook path**, which matters more here than
+  anywhere: Zoom retries a webhook it is not answered promptly and disables the
+  subscription after enough failures.
+- **`resolveQueue()`** resolves an id when the node carries none — by extension
+  number first, compared EXACTLY (an extension number is an identifier, and `805`
+  is not `0805`), then by name, compared case-insensitively (a display name's case
+  is not meaningful, and MySQL folds it while SQLite does not). The resolved id is
+  the real one and feeds `queue_id`, `pickup_key` and the exclusion check alike.
+  The `direct` pseudo-row is excluded from both maps: a queue genuinely called
+  "Direct calls" must not inherit the account-wide direct pickup code.
+
+A node matching neither an extension nor a name keeps today's behaviour exactly —
+named, popped, no pickup key — because a queue nobody has configured has no code
+to offer and one fewer button is better than no card.
+
+Tests: `CallQueueWebhookTest` (+6 — resolution by extension, the exact-match rule,
+resolution by name, neither, the exclusion, and the direct pseudo-row),
+`CallQueueSettingsTest` (+4 — the stored number, the unreachable fallback, no row
+for an unconfigured queue, and the cache flush that makes a newly learnt number
+work on the next call rather than in ten minutes).
+
 ## 4.15.2
 
 ### Fixed — Messaging: Zoom's own STOP block, and the red bubble it drew
