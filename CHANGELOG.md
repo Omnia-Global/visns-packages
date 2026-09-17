@@ -5,6 +5,63 @@ Notable changes to `visnsstudio/visns-packages`.
 Entries before 4.15.0 were not kept in a file; the git log and the README's
 per-module sections are the record for those.
 
+## 4.15.4
+
+### Fixed — Call queue: an answered call stayed on everybody else's screen for two minutes
+
+Product owner: *"a call rang and I picked it up but the call pop on other user
+browser did not dismiss for about 2 minutes"*. Read off production's ledger
+(2026-09-17, call `7686398976166803828`, a direct call to one extension with two
+devices):
+
+| received | event | device | outcome |
+| --- | --- | --- | --- |
+| 15:13:45.000 | `callee_ringing` | A | `ringing_recorded_direct` |
+| 15:13:57.000 | `callee_ringing` | B | `ringing_recorded_direct` |
+| 15:13:57.000 | `callee_answered` | B | `answered` |
+| 15:13:57.000 | `callee_ended` | A | **`ended_leg`** |
+| 15:16:30.000 | `callee_ended` | B | `closed` |
+
+**Zoom delivered device B's ring and its answer in the same millisecond, to two
+PHP-FPM workers.** `handleClosingEvent()` DELETES the live row on an answer; the
+ring, a moment behind, ran `updateOrCreate(['call_id' => …])`, found nothing and
+**created the row again** — a brand new ringing call, broadcast to every browser,
+for a conversation already in progress. The fourth line is the proof: device A's
+`callee_ended` found a row with a leg "still ringing" and kept it, where
+`closed_no_match` would have been the honest outcome. Nothing was ever going to
+close that row, so the card sat there until `max_ringing_seconds` (120) expired
+it. The browsers' 30-second reconcile could not help: the server agreed the call
+was live.
+
+Answering deletes the row, so the row cannot remember it was answered. **A
+short-lived cache marker does** (`call_queue.answered_grace_seconds`, **10**; 0
+switches it off), and the order of operations is the guarantee:
+
+- the answer writes the marker **before** it reads or deletes the row;
+- the ring looks for it **before it writes**, and **again after its row lock and
+  before it broadcasts** — and a ring whose row was deleted under it (the lock
+  finds nothing) is no longer broadcast from a stale model either.
+
+Whichever way the two requests interleave, either the answer's delete removes
+the ring's row or the ring's second look sees the marker and removes it itself.
+Both are recorded as **`ringing_after_answer`**, which the diagnostics panel draws
+in its neutral grey. The one interleaving left is a few instructions wide and
+leaves a card with **no row behind it**, which the pop's own reconcile clears.
+
+**Only an answer leaves the marker, never an `ended`.** A call that ends and rings
+again under one `call_id` is something Zoom really does — a sequential ring moving
+from the desk phone to the mobile, a queue re-offering a call — and that ring
+must still pop. A transfer of a call somebody has just answered rings later than
+ten seconds and pops as before.
+
+The marker needs a cache store every worker shares (`database`, `redis`, `file`);
+`array` is per-process and would make the guard a no-op outside a test suite.
+
+Tests: seven in `DirectCallPopTest` — the ring after the answer, the row deleted
+under the ring, the marker appearing mid-ring, the window expiring, `ended`
+leaving no marker, another call unaffected, and the switch. The first three fail
+against 4.15.3.
+
 ## 4.15.3
 
 ### Fixed — Call queue: the pop had no Pick up button, because Zoom never sent the queue's id

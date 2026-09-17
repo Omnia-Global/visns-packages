@@ -6,6 +6,7 @@ use Carbon\Carbon;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Visnsstudio\VisnsPackages\Events\CallQueueAnswered;
@@ -354,6 +355,14 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
             )
             ->caller($callerNumber);
 
+        if ($this->answeredMomentsAgo($callId)) {
+            // The ring that lost a race with its own answer. See
+            // `answeredMomentsAgo()`.
+            $ledger->outcome('ringing_after_answer');
+
+            return response()->json(['status' => 'ignored']);
+        }
+
         $attributes = [
             'queue_id' => $queue === null ? null : $queue['id'],
             'queue_name' => $queue === null ? null : $queue['name'],
@@ -411,10 +420,39 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
         | save would drop the first leg. A dropped leg means the count reaches
         | zero early, which is the very bug this column exists to fix.
         */
-        $this->withLockedRow($call, static function (ZoomLiveQueueCall $row) use ($object) {
-            $row->recordRingingLeg((array) Arr::get($object, 'callee', []));
-            $row->save();
-        });
+        $recorded = $this->withLockedRow(
+            $call,
+            static function (ZoomLiveQueueCall $row) use ($object): bool {
+                $row->recordRingingLeg((array) Arr::get($object, 'callee', []));
+                $row->save();
+
+                return true;
+            },
+            // Deleted between the write above and the lock: the call was
+            // answered (or ended) by a request running beside this one.
+            false
+        );
+
+        /*
+        | THE SECOND LOOK, and it is the one that closes the race.
+        |
+        | The check at the top of this method only catches an answer that had
+        | already landed when this request began. The production case
+        | (2026-09-17) is the two running SIDE BY SIDE: the answer deletes the
+        | row and this method's `updateOrCreate` makes it again a millisecond
+        | later, as a brand new ringing call nobody will ever close. The answer
+        | writes its marker BEFORE it deletes, so by the time this line runs
+        | either the row this request wrote has been deleted by the answer
+        | (`$recorded` false) or the marker is visible — and in both cases the
+        | right thing is to leave no row behind and tell no browser.
+        */
+        if (! $recorded || $this->answeredMomentsAgo($callId)) {
+            ZoomLiveQueueCall::where('call_id', $callId)->delete();
+
+            $ledger->outcome('ringing_after_answer');
+
+            return response()->json(['status' => 'ignored']);
+        }
 
         $ringing = $this->eventClass('ringing', CallQueueRinging::class);
 
@@ -712,6 +750,12 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
             return response()->json(['status' => 'ignored']);
         }
 
+        if ($kind === 'answered') {
+            // BEFORE the read and before the delete — the order is the whole
+            // of the guarantee. See `answeredMomentsAgo()`.
+            $this->markAnswered($callId);
+        }
+
         $call = ZoomLiveQueueCall::where('call_id', $callId)->first();
 
         if ($call === null) {
@@ -943,6 +987,61 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
                 ? $this->nullable(Arr::get($forwardedBy, 'name'))
                 : null,
         ];
+    }
+
+    /**
+     * Was this call answered in the last few seconds?
+     *
+     * ==========================================================================
+     *  A RING THAT ARRIVES BESIDE ITS OWN ANSWER MUST NOT RE-OPEN THE CALL.
+     * ==========================================================================
+     *
+     * Production, 2026-09-17, read off the ledger. A direct call rang a desk
+     * phone; twelve seconds later the same person's second device rang AND was
+     * answered, and Zoom delivered `callee_ringing` and `callee_answered` for it
+     * in the same millisecond, to two PHP-FPM workers. The answer deleted the
+     * live row and told every browser the call was taken. The ring, a moment
+     * behind it, found no row, so `updateOrCreate` CREATED one — a fresh ringing
+     * call, broadcast to every screen, for a conversation already in progress.
+     * Nothing was ever going to close it: the desk phone's `callee_ended` found
+     * a leg "still ringing" and kept the row (its ledger outcome was `ended_leg`
+     * where an honest one would have been `closed_no_match`), so the card sat on
+     * every other user's screen until `max_ringing_seconds` expired it. Two
+     * minutes, which is exactly what was reported.
+     *
+     * Answering DELETES the row, so the row cannot carry the fact that it was
+     * answered; a short-lived cache key does. It is written before the delete
+     * and read by the ring both before it writes and again before it broadcasts
+     * — see the two call sites — which covers every interleaving of the two
+     * requests except one a few instructions wide, and that one leaves a card
+     * with no row behind it, which the browsers' own reconcile removes.
+     *
+     * ONLY AN ANSWER LEAVES THE MARKER, never an `ended`. A call that ended and
+     * rings again under the same `call_id` is a thing Zoom really does (a
+     * sequential ring moving from the desk phone to the mobile, a queue
+     * re-offering a call), and suppressing that ring would drop a pop somebody
+     * needs. An answered call ringing again inside the window is, in practice,
+     * only ever this race; a TRANSFER rings later than that, and pops as before.
+     */
+    private function answeredMomentsAgo(string $callId): bool
+    {
+        return Cache::has($this->answeredKey($callId));
+    }
+
+    private function markAnswered(string $callId): void
+    {
+        $seconds = (int) ModuleConfig::get('call_queue.answered_grace_seconds', 10);
+
+        if ($seconds > 0) {
+            Cache::put($this->answeredKey($callId), true, $seconds);
+        }
+    }
+
+    private function answeredKey(string $callId): string
+    {
+        // Hashed: a call_id is Zoom's string, and not every cache store takes
+        // every character in a key.
+        return 'visns-packages:call-queue:answered:' . sha1($callId);
     }
 
     /**

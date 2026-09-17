@@ -1160,6 +1160,22 @@ return [
         'max_ringing_seconds' => 120,
 
         /*
+        | How long after a call is ANSWERED a ringing event for the same call_id
+        | is ignored.
+        |
+        | Zoom delivers a second device's `callee_ringing` in the same instant
+        | as the `callee_answered` that ends the ring, and the two are handled by
+        | separate workers. Answering deletes the live row; the ring, arriving a
+        | millisecond behind it, used to create the row again - a ringing card on
+        | every screen for a call already in progress, which nothing closed until
+        | `max_ringing_seconds` ran out. Ten seconds is far longer than the race
+        | and far shorter than anybody takes to transfer a call they have just
+        | picked up. 0 switches the guard off. Needs a cache store every worker
+        | shares (database, redis, file) - `array` only in a test suite.
+        */
+        'answered_grace_seconds' => 10,
+
+        /*
         | Zoom prefixes every call queue pickup code with a fixed *99, so the
         | stored code 8781 is dialled *998781. Codes are stored bare.
         */

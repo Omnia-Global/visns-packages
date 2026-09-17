@@ -541,6 +541,168 @@ class DirectCallPopTest extends TestCase
 
     /*
     |--------------------------------------------------------------------------
+    | A ring that arrives beside its own answer
+    |--------------------------------------------------------------------------
+    |
+    | Production, 2026-09-17: a second device's `callee_ringing` and the
+    | `callee_answered` that ended the ring were delivered in one millisecond to
+    | two workers. The answer deleted the row, the ring created it again, and
+    | the card sat on every other user's screen until `max_ringing_seconds`.
+    */
+
+    private function answeredPayload(string $callId = 'call-direct-1'): array
+    {
+        return [
+            'event' => 'phone.callee_answered',
+            'payload' => ['object' => ['call_id' => $callId]],
+        ];
+    }
+
+    private function secondDevice(): array
+    {
+        return $this->directPayload([
+            'callee' => [
+                'extension_type' => 'user',
+                'extension_id' => 'user-9',
+                'extension_number' => '208',
+                'name' => 'Steve Adviser',
+                'device_id' => 'device-mobile',
+            ],
+        ]);
+    }
+
+    public function test_a_ring_that_lands_just_after_the_answer_does_not_reopen_the_call(): void
+    {
+        $this->signedPost($this->directPayload())->assertOk();
+        $this->signedPost($this->answeredPayload())->assertOk();
+
+        Event::fake([CallQueueRinging::class]);
+
+        $this->signedPost($this->secondDevice())
+            ->assertOk()
+            ->assertJsonPath('status', 'ignored');
+
+        // No row for the snapshot to call live, and no browser told to pop.
+        $this->assertSame(0, ZoomLiveQueueCall::count());
+        Event::assertNotDispatched(CallQueueRinging::class);
+        $this->snapshot()->assertOk()->assertJsonCount(0, 'calls');
+
+        $this->assertSame(
+            ['ringing_recorded_direct', 'answered', 'ringing_after_answer'],
+            $this->outcomes()
+        );
+    }
+
+    /**
+     * The side-by-side case: the answer lands AFTER this ring has written its
+     * row and before it takes the lock. The row is gone by then, and a ring
+     * with no row behind it must not be announced.
+     */
+    public function test_a_ring_whose_row_is_deleted_under_it_is_not_broadcast(): void
+    {
+        Event::fake([CallQueueRinging::class]);
+
+        ZoomLiveQueueCall::saved(static function (ZoomLiveQueueCall $row): void {
+            $row->newQuery()->whereKey($row->getKey())->delete();
+        });
+
+        $this->signedPost($this->directPayload())
+            ->assertOk()
+            ->assertJsonPath('status', 'ignored');
+
+        ZoomLiveQueueCall::flushEventListeners();
+
+        $this->assertSame(0, ZoomLiveQueueCall::count());
+        Event::assertNotDispatched(CallQueueRinging::class);
+        $this->assertSame(['ringing_after_answer'], $this->outcomes());
+    }
+
+    /**
+     * And the other half of it: the answer's marker appears while the ring is
+     * mid-flight, after the ring's own first look. The second look catches it
+     * and takes the row back out.
+     */
+    public function test_an_answer_that_lands_mid_ring_takes_the_row_back_out(): void
+    {
+        Event::fake([CallQueueRinging::class]);
+
+        ZoomLiveQueueCall::created(static function (ZoomLiveQueueCall $row): void {
+            \Illuminate\Support\Facades\Cache::put(
+                'visns-packages:call-queue:answered:' . sha1($row->call_id),
+                true,
+                10
+            );
+        });
+
+        $this->signedPost($this->directPayload())->assertOk();
+
+        ZoomLiveQueueCall::flushEventListeners();
+
+        $this->assertSame(0, ZoomLiveQueueCall::count());
+        Event::assertNotDispatched(CallQueueRinging::class);
+        $this->assertSame(['ringing_after_answer'], $this->outcomes());
+    }
+
+    public function test_the_same_call_ringing_again_after_the_window_pops_as_before(): void
+    {
+        $this->signedPost($this->directPayload())->assertOk();
+        $this->signedPost($this->answeredPayload())->assertOk();
+
+        // A transfer: answered, talked to, passed on.
+        Carbon::setTestNow(Carbon::now()->addSeconds(11));
+
+        Event::fake([CallQueueRinging::class]);
+
+        $this->signedPost($this->secondDevice())
+            ->assertOk()
+            ->assertJsonPath('status', 'ok');
+
+        $this->assertSame(1, ZoomLiveQueueCall::count());
+        Event::assertDispatched(CallQueueRinging::class);
+    }
+
+    public function test_an_ended_call_leaves_no_marker_so_a_sequential_ring_still_pops(): void
+    {
+        $this->signedPost($this->directPayload())->assertOk();
+        $this->signedPost([
+            'event' => 'phone.caller_ended',
+            'payload' => ['object' => ['call_id' => 'call-direct-1']],
+        ])->assertOk();
+
+        Event::fake([CallQueueRinging::class]);
+
+        $this->signedPost($this->secondDevice())->assertJsonPath('status', 'ok');
+
+        $this->assertSame(1, ZoomLiveQueueCall::count());
+        Event::assertDispatched(CallQueueRinging::class);
+    }
+
+    public function test_an_answer_for_one_call_does_not_silence_another(): void
+    {
+        $this->signedPost($this->directPayload())->assertOk();
+        $this->signedPost($this->answeredPayload())->assertOk();
+
+        Event::fake([CallQueueRinging::class]);
+
+        $this->signedPost($this->directPayload(['call_id' => 'call-direct-2']))
+            ->assertJsonPath('status', 'ok');
+
+        Event::assertDispatched(CallQueueRinging::class);
+    }
+
+    public function test_a_grace_of_zero_switches_the_guard_off(): void
+    {
+        config(['visns-packages.call_queue.answered_grace_seconds' => 0]);
+
+        $this->signedPost($this->directPayload())->assertOk();
+        $this->signedPost($this->answeredPayload())->assertOk();
+        $this->signedPost($this->secondDevice())->assertJsonPath('status', 'ok');
+
+        $this->assertSame(1, ZoomLiveQueueCall::count());
+    }
+
+    /*
+    |--------------------------------------------------------------------------
     | The direct-calls settings row
     |--------------------------------------------------------------------------
     */
