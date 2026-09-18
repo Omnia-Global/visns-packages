@@ -82,6 +82,12 @@ class EmailCampaignRenderer
             . '</table></td></tr></table></body></html>';
     }
 
+    /** One line (a subject) with its merge tags filled from `$sample`, or in Resend's syntax. */
+    public function line(string $text, ?array $sample = null): string
+    {
+        return $this->tags($text, $sample, false);
+    }
+
     /** The plain-text part, from the same blocks. */
     public function text(array $blocks, ?array $sample = null): string
     {
@@ -159,7 +165,7 @@ class EmailCampaignRenderer
 
                 return $cell
                     . '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="display:inline-table; margin:8px 0;"><tr>'
-                    . '<td align="center" bgcolor="' . $brand['accent'] . '" style="border-radius:6px;">'
+                    . '<td align="center" bgcolor="' . $brand['button'] . '" style="border-radius:6px;">'
                     . '<a href="' . e($url) . '" style="display:inline-block; padding:12px 24px; font-family:' . self::FONT . '; font-size:15px; font-weight:700; color:#ffffff; text-decoration:none; border-radius:6px;">' . $label . '</a>'
                     . '</td></tr></table>'
                     . $end;
@@ -295,7 +301,7 @@ class EmailCampaignRenderer
                 }
 
                 $child->setAttribute('href', $href);
-                $child->setAttribute('style', 'color:' . $brand['accent'] . '; text-decoration:underline;');
+                $child->setAttribute('style', 'color:' . $brand['button'] . '; text-decoration:underline;');
             } elseif ($tag === 'p') {
                 $child->setAttribute('style', 'margin:0 0 12px 0;');
             } elseif (in_array($tag, ['ul', 'ol'], true)) {
@@ -332,6 +338,9 @@ class EmailCampaignRenderer
             'address' => trim((string) ($brand['address'] ?? '')),
             'website' => (string) ($this->url($brand['website'] ?? null, false) ?? ''),
             'accent' => $hex($brand['accent'] ?? null, '#3cbf7d'),
+            // Buttons and links: dark enough for white text on it, and for it
+            // as text on white, to pass 4.5:1. The light accent does neither.
+            'button' => $hex($brand['button'] ?? null, '#1a7f57'),
             'ink' => $hex($brand['ink'] ?? null, '#0b2b2d'),
             'muted' => $hex($brand['muted'] ?? null, '#6b7280'),
             'background' => $hex($brand['background'] ?? null, '#f5f3ef'),

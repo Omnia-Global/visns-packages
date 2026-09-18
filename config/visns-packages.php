@@ -1972,6 +1972,9 @@ return [
             'address' => env('EMAIL_CAMPAIGNS_ADDRESS'),
             'website' => env('EMAIL_CAMPAIGNS_WEBSITE'),
             'accent' => '#3cbf7d',
+            // Button background and link colour. Must reach 4.5:1 against white
+            // (white text on it, and it as text on white).
+            'button' => '#1a7f57',
             'ink' => '#0b2b2d',
             'muted' => '#6b7280',
             'background' => '#f5f3ef',

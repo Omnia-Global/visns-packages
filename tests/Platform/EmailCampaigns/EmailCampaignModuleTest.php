@@ -348,4 +348,18 @@ class EmailCampaignModuleTest extends EmailCampaignTestCase
         $this->actingAs($this->manager())->postJson(self::BASE . '/campaigns/' . $campaign->id, ['subject' => 'Changed'])->assertStatus(422);
         $this->actingAs($this->manager())->deleteJson(self::BASE . '/campaigns/' . $campaign->id)->assertStatus(422);
     }
+
+    public function test_the_preview_fills_the_subject_and_body_from_the_person_looking(): void
+    {
+        $campaign = $this->readyCampaign();
+        $me = $this->manager();
+
+        $preview = $this->actingAs($me)->postJson(self::BASE . '/campaigns/' . $campaign->id . '/preview')->assertOk();
+
+        $this->assertSame('What is new, Dana', $preview->json('subject'));
+        $this->assertStringContainsString('Hello Dana', $preview->json('html'));
+        // A reader with access only may preview but not change anything.
+        $this->actingAs($this->staff('Email Campaigns Access'))
+            ->postJson(self::BASE . '/campaigns/' . $campaign->id . '/preview')->assertOk();
+    }
 }

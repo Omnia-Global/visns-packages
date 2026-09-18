@@ -5,6 +5,36 @@ Notable changes to `visnsstudio/visns-packages`.
 Entries before 4.15.0 were not kept in a file; the git log and the README's
 per-module sections are the record for those.
 
+## 4.16.0
+
+### Added — Email campaigns (`email_campaigns`), on Resend Broadcasts
+
+Off by default. A newsletter manager in the shape of the popular ones:
+
+- **Lists** — built from the host's contacts through an `EmailContactSource`
+  (`email_campaigns.contact_source`), or imported from a spreadsheet. Each list
+  is a Resend **segment**; `email-campaigns:sync` (schedule it every minute —
+  there is no queue worker assumed) pushes members at `sync.per_second` inside
+  a `sync.seconds` budget, and a 429 ends the tick without failing anybody.
+  A CRM list is refreshed on demand: new people added, departed people removed.
+- **A block editor's renderer** — heading, text, image, button, divider,
+  spacer, columns — rendered server-side to table-based email HTML with the
+  brand block (`email_campaigns.brand`). Rich text is cleaned (no script, no
+  handlers, no `javascript:`), and the footer with the physical address and
+  `{{{RESEND_UNSUBSCRIBE_URL}}}` is always added — it is not a block anybody
+  can delete. `{first_name}` style merge tags become Resend's triple-brace
+  syntax with a fallback.
+- **Send test, schedule, send now, cancel, duplicate, templates.** Every
+  blocker is reported at once as a sentence.
+- **Reports** off the Resend webhook (`api/resend/webhook`, Svix-verified):
+  delivered, opened, clicked, bounced, complained, unsubscribed, per campaign.
+  A `contact.updated` unsubscribe and a complaint take the person off every
+  list's future sends.
+
+Permissions `Email Campaigns Access` / `Email Campaigns Manage` are the host's
+to seed. The button and link colour is `brand.button` separately from the
+accent, because a brand green is rarely 4.5:1 on white.
+
 ## 4.15.4
 
 ### Fixed — Call queue: an answered call stayed on everybody else's screen for two minutes

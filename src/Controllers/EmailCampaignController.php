@@ -149,11 +149,16 @@ class EmailCampaignController extends Controller
         $campaign = EmailCampaign::query()->findOrFail($id);
         $blocks = $request->has('content') ? (array) $request->input('content', []) : (array) $campaign->content;
 
+        $sample = $this->sample($request);
+        $subject = (string) $request->input('subject', $campaign->subject);
+
         return response()->json([
             'html' => $this->renderer->render($blocks, [
-                'subject' => $request->input('subject', $campaign->subject),
+                'subject' => $subject,
                 'preview_text' => $request->input('preview_text', $campaign->preview_text),
-            ], $this->sample($request)),
+            ], $sample),
+            // As the recipient's inbox will show it, tags filled.
+            'subject' => $this->renderer->line($subject, $sample),
         ]);
     }
 
