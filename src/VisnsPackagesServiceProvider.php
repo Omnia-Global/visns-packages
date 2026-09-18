@@ -11,6 +11,9 @@ use Visnsstudio\VisnsPackages\Commands\VaultReencryptCommand;
 use Visnsstudio\VisnsPackages\Commands\VaultStripClientTitlesCommand;
 use Visnsstudio\VisnsPackages\Commands\SmsPruneCommand;
 use Visnsstudio\VisnsPackages\Commands\SmsSendCampaignsCommand;
+use Visnsstudio\VisnsPackages\Commands\EmailCampaignsSyncCommand;
+use Visnsstudio\VisnsPackages\Controllers\EmailCampaignController;
+use Visnsstudio\VisnsPackages\Controllers\ResendWebhookController;
 use Visnsstudio\VisnsPackages\Commands\SmsSimulateInboundCommand;
 use Visnsstudio\VisnsPackages\Commands\SmsSyncLinesCommand;
 use Visnsstudio\VisnsPackages\Commands\InstallChromiumCommand;
@@ -87,6 +90,10 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             SmsPruneCommand::class,
             SmsSyncLinesCommand::class,
             SmsSendCampaignsCommand::class,
+
+            // Email campaigns: the list sync and broadcast settling. Checks the
+            // module's own switch and says so.
+            EmailCampaignsSyncCommand::class,
         ];
 
         // Only register MeiliSearch commands if dependencies are available
@@ -732,6 +739,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             $this->registerUniversalSearchRoutes($middleware, $prefix);
             $this->registerIntegrationRoutes($middleware, $prefix);
             $this->registerMessagingRoutes($middleware, $prefix);
+            $this->registerEmailCampaignRoutes($prefix);
 
             // Register dynamic entity routes first (they will be more general)
             $this->registerDynamicEntityRoutes($middleware);
@@ -1695,6 +1703,65 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                     SmsCampaignController::class,
                     'destroy',
                 ])->whereNumber('id');
+            });
+    }
+
+    /**
+     * Email campaigns (Resend Broadcasts). Nothing at all unless enabled.
+     *
+     * Reads (`permissions.access`) and writes (`permissions.manage`) are two
+     * groups; the webhook is on its own, outside auth, and is signed instead
+     * (ResendWebhook::verify). Literal segments are declared before the
+     * `{id}` wildcards and every id is numeric.
+     */
+    protected function registerEmailCampaignRoutes(string $prefix): void
+    {
+        if (!config('visns-packages.email_campaigns.enabled', false)) {
+            return;
+        }
+
+        $base = trim((string) config('visns-packages.email_campaigns.uris.base', 'ajax/email-campaigns'), '/');
+        $middleware = (array) (config('visns-packages.email_campaigns.routes_middleware') ?: ['web', 'auth']);
+        $access = config('visns-packages.email_campaigns.permissions.access', 'Email Campaigns Access');
+        $manage = config('visns-packages.email_campaigns.permissions.manage', 'Email Campaigns Manage');
+
+        Route::middleware((array) config('visns-packages.email_campaigns.webhook_middleware', ['api']))
+            ->post(
+                trim((string) config('visns-packages.email_campaigns.uris.webhook', 'api/resend/webhook'), '/'),
+                ResendWebhookController::class
+            );
+
+        Route::middleware($this->withPermission($middleware, $access))
+            ->prefix($prefix)
+            ->group(function () use ($base) {
+                Route::get($base, [EmailCampaignController::class, 'index']);
+                Route::get($base . '/groups', [EmailCampaignController::class, 'groups']);
+                Route::get($base . '/templates', [EmailCampaignController::class, 'templates']);
+                Route::get($base . '/campaigns/{id}', [EmailCampaignController::class, 'show'])->whereNumber('id');
+                Route::post($base . '/campaigns/{id}/preview', [EmailCampaignController::class, 'preview'])->whereNumber('id');
+                Route::get($base . '/lists/{id}', [EmailCampaignController::class, 'showList'])->whereNumber('id');
+            });
+
+        Route::middleware($this->withPermission($middleware, $manage))
+            ->prefix($prefix)
+            ->group(function () use ($base) {
+                Route::post($base . '/campaigns', [EmailCampaignController::class, 'store']);
+                Route::post($base . '/campaigns/{id}', [EmailCampaignController::class, 'update'])->whereNumber('id');
+                Route::post($base . '/campaigns/{id}/test', [EmailCampaignController::class, 'test'])->whereNumber('id');
+                Route::post($base . '/campaigns/{id}/send', [EmailCampaignController::class, 'send'])->whereNumber('id');
+                Route::post($base . '/campaigns/{id}/cancel', [EmailCampaignController::class, 'cancel'])->whereNumber('id');
+                Route::post($base . '/campaigns/{id}/duplicate', [EmailCampaignController::class, 'duplicate'])->whereNumber('id');
+                Route::delete($base . '/campaigns/{id}', [EmailCampaignController::class, 'destroy'])->whereNumber('id');
+
+                Route::post($base . '/lists', [EmailCampaignController::class, 'storeList']);
+                Route::post($base . '/lists/{id}', [EmailCampaignController::class, 'updateList'])->whereNumber('id');
+                Route::post($base . '/lists/{id}/refresh', [EmailCampaignController::class, 'refreshList'])->whereNumber('id');
+                Route::delete($base . '/lists/{id}', [EmailCampaignController::class, 'destroyList'])->whereNumber('id');
+
+                Route::post($base . '/templates', [EmailCampaignController::class, 'storeTemplate']);
+                Route::delete($base . '/templates/{id}', [EmailCampaignController::class, 'destroyTemplate'])->whereNumber('id');
+
+                Route::post($base . '/images', [EmailCampaignController::class, 'uploadImage']);
             });
     }
 

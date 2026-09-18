@@ -1902,6 +1902,104 @@ return [
     | - pivot_related_key: (Optional for belongsToMany) The pivot related key
     |
     */
+    /*
+    |--------------------------------------------------------------------------
+    | Email campaigns (Resend Broadcasts)
+    |--------------------------------------------------------------------------
+    |
+    | Newsletters and announcements to a host application's contacts, sent as
+    | Resend Broadcasts. The CRM owns the lists, the editor and the reports;
+    | Resend owns delivery, the unsubscribe link and the schedule.
+    |
+    | Off by default, like every opt-in module: no routes, no command work, no
+    | webhook until `enabled` is true and `api_key` is set.
+    |
+    | THE LISTS ARE MIRRORED, NOT MOVED. Members live in `email_list_members`
+    | and are pushed to a Resend segment by `email-campaigns:sync` (scheduled
+    | every minute, time-boxed, a few requests a second: Resend allows ten a
+    | second per team and the host's transactional mail shares them). The sync
+    | never writes Resend's `unsubscribed` flag, so the CRM cannot re-subscribe
+    | somebody who opted out.
+    */
+    'email_campaigns' => [
+        'enabled' => false,
+
+        'api_key' => env('RESEND_KEY'),
+        'api_base' => 'https://api.resend.com',
+
+        // Resend's webhook signing secret (whsec_...). Without it the webhook
+        // route refuses everything: a report built on unsigned events is a
+        // report anybody on the internet can write.
+        'webhook_secret' => env('RESEND_WEBHOOK_SECRET'),
+
+        // Who campaigns come from. `from_email` must be on a domain verified in
+        // Resend; a subdomain kept for marketing (news.example.com) protects
+        // the transactional domain's reputation from a bad mailshot.
+        'from_name' => env('EMAIL_CAMPAIGNS_FROM_NAME'),
+        'from_email' => env('EMAIL_CAMPAIGNS_FROM_EMAIL'),
+        'reply_to' => env('EMAIL_CAMPAIGNS_REPLY_TO'),
+
+        'uris' => [
+            'base' => 'ajax/email-campaigns',
+            'webhook' => 'api/resend/webhook',
+        ],
+
+        'routes_middleware' => ['web', 'auth'],
+        'webhook_middleware' => ['api'],
+
+        /*
+        | `access` reads campaigns, lists and reports; `manage` writes them and
+        | sends. A mailshot to every client is an administrative act.
+        */
+        'permissions' => [
+            'access' => 'Email Campaigns Access',
+            'manage' => 'Email Campaigns Manage',
+        ],
+
+        /*
+        | Where the pickable contacts come from: a class implementing
+        | Visnsstudio\VisnsPackages\Contracts\EmailContactSource. Null offers
+        | CSV import only.
+        */
+        'contact_source' => null,
+
+        // The house look every campaign is wrapped in. `address` is required by
+        // anti-spam law in most places (the Spam Act asks for accurate sender
+        // identification) and is printed in every footer.
+        'brand' => [
+            'company' => env('EMAIL_CAMPAIGNS_COMPANY'),
+            'logo_url' => env('EMAIL_CAMPAIGNS_LOGO_URL'),
+            'address' => env('EMAIL_CAMPAIGNS_ADDRESS'),
+            'website' => env('EMAIL_CAMPAIGNS_WEBSITE'),
+            'accent' => '#3cbf7d',
+            'ink' => '#0b2b2d',
+            'muted' => '#6b7280',
+            'background' => '#f5f3ef',
+        ],
+
+        // Images inserted into a campaign must be reachable from a stranger's
+        // mail client, so they go to a PUBLIC disk.
+        'image_disk' => 'public',
+        'image_directory' => 'email-campaigns',
+        'image_max_kb' => 5120,
+
+        'sync' => [
+            // Requests a second while syncing, and how long one tick may run.
+            'per_second' => 5,
+            'seconds' => 45,
+        ],
+
+        'max_list_size' => 20000,
+
+        'tables' => [
+            'lists' => 'email_lists',
+            'list_members' => 'email_list_members',
+            'campaigns' => 'email_campaigns',
+            'events' => 'email_campaign_events',
+            'templates' => 'email_templates',
+        ],
+    ],
+
     'user_dynamic_relationships' => [
         // Example:
         // 'profile' => [
