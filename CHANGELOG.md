@@ -5,6 +5,20 @@ Notable changes to `visnsstudio/visns-packages`.
 Entries before 4.15.0 were not kept in a file; the git log and the README's
 per-module sections are the record for those.
 
+## 4.17.3 — security
+
+### Fixed
+
+- **The OAuth leg of an integration needs a signed-in user who may manage
+  integrations.** `integrations/oauth/{provider}/authorize` and `/callback`
+  answered a guest, and the state they checked was a cache key tied to nobody,
+  so anybody could run the consent leg with an account of their own and
+  replace the organisation's connection. Both routes are now behind `auth`,
+  every OAuth action checks `integrations_permission` through the new
+  `Support\IntegrationsGate` (shared with `IntegrationsController`), and the
+  state records the user who started the flow: the callback is accepted only
+  from that user, once, within ten minutes.
+
 ## 4.17.2 — security
 
 Request input reached three unsafe places in the dynamic entity controller.

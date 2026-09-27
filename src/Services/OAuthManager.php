@@ -263,8 +263,13 @@ class OAuthManager
      */
     protected function generateState(string $provider): string
     {
-        $state = Str::random(32);
-        cache()->put("oauth_state_{$provider}_{$state}", $provider, 600); // 10 minutes
+        // Bound to the user who started the flow: the callback is accepted
+        // only from that same signed-in user, once, within ten minutes.
+        $state = Str::random(40);
+        cache()->put("oauth_state_{$provider}_{$state}", [
+            'provider' => $provider,
+            'user' => auth()->id(),
+        ], 600);
         return $state;
     }
 
@@ -391,11 +396,15 @@ class OAuthManager
      */
     protected function validateState(string $state, string $provider): bool
     {
-        $cachedProvider = cache()->get("oauth_state_{$provider}_{$state}");
-        if ($cachedProvider === $provider) {
-            cache()->forget("oauth_state_{$provider}_{$state}");
-            return true;
+        // pull(): a state is spent the first time it is presented, right or wrong.
+        $cached = cache()->pull("oauth_state_{$provider}_{$state}");
+
+        if (!is_array($cached) || ($cached['provider'] ?? null) !== $provider) {
+            return false;
         }
-        return false;
+
+        $user = auth()->id();
+
+        return $user !== null && (string) ($cached['user'] ?? '') === (string) $user;
     }
 }

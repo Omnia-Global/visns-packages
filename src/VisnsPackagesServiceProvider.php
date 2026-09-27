@@ -526,14 +526,16 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                     Route::prefix('integrations/oauth')
                         ->controller(OAuthController::class)
                         ->group(function () {
-                            // Public OAuth routes
-                            Route::get('{provider}/authorize', 'redirectToProvider')
-                                ->name('oauth.authorize');
-                            Route::get('{provider}/callback', 'callback')
-                                ->name('oauth.callback');
-                            
-                            // Protected OAuth API routes (use web auth instead of sanctum)
+                            // Every OAuth route needs a signed-in user, the
+                            // callback included: it returns to the browser
+                            // that started the flow, and a guest-reachable
+                            // authorise/callback pair let an outsider replace
+                            // the organisation's connection (4.17.3).
                             Route::middleware('auth')->group(function () {
+                                Route::get('{provider}/authorize', 'redirectToProvider')
+                                    ->name('oauth.authorize');
+                                Route::get('{provider}/callback', 'callback')
+                                    ->name('oauth.callback');
                                 Route::get('providers', 'providers')
                                     ->name('oauth.providers');
                                 Route::get('{provider}/status', 'status')

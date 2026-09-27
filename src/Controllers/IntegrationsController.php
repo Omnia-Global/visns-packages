@@ -270,23 +270,6 @@ class IntegrationsController extends \App\Http\Controllers\Controller
      */
     private function authorizeIntegrations(): void
     {
-        $permission = config('visns-packages.integrations_permission', 'manage integrations');
-
-        if (!$permission) {
-            return;
-        }
-
-        $user = request()->user();
-
-        if (!$user) {
-            abort(403);
-        }
-
-        // Spatie's `can` when the app uses it; a plain gate otherwise.
-        if (method_exists($user, 'can') && $user->can($permission)) {
-            return;
-        }
-
-        abort(403, 'You do not have permission to manage integrations.');
+        \Visnsstudio\VisnsPackages\Support\IntegrationsGate::authorize();
     }
 }

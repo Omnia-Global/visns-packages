@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Visnsstudio\VisnsPackages\Services\OAuthManager;
+use Visnsstudio\VisnsPackages\Support\IntegrationsGate;
 use Illuminate\Support\Facades\Log;
 
 class OAuthController extends \App\Http\Controllers\Controller
@@ -22,6 +23,8 @@ class OAuthController extends \App\Http\Controllers\Controller
      */
     public function redirectToProvider(string $provider): RedirectResponse
     {
+        IntegrationsGate::authorize();
+
         try {
             $authUrl = $this->oauthManager->getAuthorizationUrl($provider);
             
@@ -49,6 +52,8 @@ class OAuthController extends \App\Http\Controllers\Controller
      */
     public function callback(Request $request, string $provider): RedirectResponse
     {
+        IntegrationsGate::authorize();
+
         $code = $request->get('code');
         $state = $request->get('state');
         $error = $request->get('error');
@@ -105,6 +110,8 @@ class OAuthController extends \App\Http\Controllers\Controller
      */
     public function test(string $provider): JsonResponse
     {
+        IntegrationsGate::authorize();
+
         try {
             $result = $this->oauthManager->testConnection($provider);
             return response()->json($result);
@@ -121,6 +128,8 @@ class OAuthController extends \App\Http\Controllers\Controller
      */
     public function preview(Request $request, string $provider): JsonResponse
     {
+        IntegrationsGate::authorize();
+
         $request->validate([
             'data_type' => 'required|string',
             'options' => 'array',
@@ -147,6 +156,8 @@ class OAuthController extends \App\Http\Controllers\Controller
      */
     public function disconnect(string $provider): JsonResponse
     {
+        IntegrationsGate::authorize();
+
         try {
             $result = $this->oauthManager->disconnect($provider);
             
@@ -174,6 +185,8 @@ class OAuthController extends \App\Http\Controllers\Controller
      */
     public function sync(Request $request, string $provider): JsonResponse
     {
+        IntegrationsGate::authorize();
+
         $request->validate([
             'type' => 'required|string',
             'confirmed' => 'required|boolean',
