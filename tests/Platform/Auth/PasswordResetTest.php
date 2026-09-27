@@ -32,8 +32,41 @@ class PasswordResetTest extends TestCase
         config()->set('portal.url', 'https://portal.example.test');
 
         // No GenericMail exists in the test app, so the default mail tier is a
-        // no-op; the tests that care about the link read it off the row/builder.
+        // no-op. The row holds only the code's hash, so the tests read the
+        // plain code off the mail body the factory below captures.
         Mail::fake();
+
+        $this->mailed = [];
+        config()->set(
+            'visns-packages.auth.reset_mail_factory',
+            function ($content, $subject) {
+                $this->mailed[] = $content;
+
+                return null;
+            }
+        );
+    }
+
+    /** Bodies handed to the reset mail factory, oldest first. */
+    private array $mailed = [];
+
+    /** The plain reset code in a mail body (path segment or ?code=). */
+    private function tokenFrom(?string $content): string
+    {
+        $this->assertNotNull($content, 'No reset mail was built.');
+        $this->assertSame(
+            1,
+            preg_match('~(?:/verify/|code=)([A-Za-z0-9]{60})~', $content, $m),
+            'No reset code in the mail body.'
+        );
+
+        return $m[1];
+    }
+
+    /** The plain code from the latest reset mail. */
+    private function mailedToken(): string
+    {
+        return $this->tokenFrom(end($this->mailed) ?: null);
     }
 
     private function user(array $attributes = []): User
@@ -74,7 +107,8 @@ class PasswordResetTest extends TestCase
         $row = DB::table('password_resets')->first();
 
         $this->assertSame('jo@example.test', $row->email);
-        $this->assertSame(60, strlen($row->token));
+        // Only the SHA-256 of the mailed code is stored.
+        $this->assertSame(hash('sha256', $this->mailedToken()), $row->token);
     }
 
     public function test_a_token_resets_the_password_and_is_then_spent(): void
@@ -82,7 +116,7 @@ class PasswordResetTest extends TestCase
         $user = $this->user();
 
         $this->postJson('/password/forgot', ['email' => 'jo@example.test']);
-        $token = DB::table('password_resets')->first()->token;
+        $token = $this->mailedToken();
 
         $this->postJson('/password/reset', [
             'code' => $token,
@@ -138,7 +172,11 @@ class PasswordResetTest extends TestCase
 
         $this->postJson('/password/forgot', ['email' => 'jo@example.test']);
 
-        $token = DB::table('password_resets')->first()->token;
+        $token = $this->tokenFrom($captured);
+        $this->assertSame(
+            hash('sha256', $token),
+            DB::table('password_resets')->first()->token
+        );
 
         $this->assertStringContainsString(
             'https://crm.example.test/verify/' . $token,
@@ -191,7 +229,7 @@ class PasswordResetTest extends TestCase
 
         // Path form.
         $this->postJson('/password/forgot', ['email' => 'jo@example.test']);
-        $token = DB::table('password_resets')->first()->token;
+        $token = $this->tokenFrom($captured);
 
         $this->assertStringContainsString(
             'https://portal.example.test/verify/' . $token,
@@ -205,7 +243,7 @@ class PasswordResetTest extends TestCase
             'email' => 'jo@example.test',
             'portal' => 'true',
         ]);
-        $token = DB::table('password_resets')->first()->token;
+        $token = $this->tokenFrom($captured);
 
         $this->assertStringContainsString(
             'https://portal.example.test/verify/?code=' . $token,
@@ -275,7 +313,7 @@ class PasswordResetTest extends TestCase
         $this->assertSame('jo@example.test', $row->email);
 
         $this->postJson('/password/reset', [
-            'code' => $row->token,
+            'code' => $this->mailedToken(),
             'password' => 'a-brand-new-password',
             'password_confirmation' => 'a-brand-new-password',
         ])->assertJsonPath('error', '');
@@ -290,7 +328,7 @@ class PasswordResetTest extends TestCase
         $this->user();
 
         $this->postJson('/password/forgot', ['email' => 'jo@example.test']);
-        $token = DB::table('password_resets')->first()->token;
+        $token = $this->mailedToken();
 
         // The account moves on - a rename, a merge, a resolver that has since
         // narrowed. This used to dereference null and 500.
@@ -327,7 +365,7 @@ class PasswordResetTest extends TestCase
         $row = DB::table('password_resets')->first();
 
         $this->postJson('/password/reset', [
-            'code' => $row->token,
+            'code' => $this->mailedToken(),
             'password' => 'a-brand-new-password',
             'password_confirmation' => 'a-brand-new-password',
         ])->assertJsonPath('error', '');
@@ -350,7 +388,7 @@ class PasswordResetTest extends TestCase
         $user = $this->user();
 
         $this->postJson('/password/forgot', ['email' => 'jo@example.test']);
-        $token = DB::table('password_resets')->first()->token;
+        $token = $this->mailedToken();
 
         $this->postJson('/password/reset', [
             'code' => $token,

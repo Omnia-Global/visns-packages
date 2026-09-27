@@ -101,10 +101,13 @@ class RequestInputHardeningTest extends TestCase
     // ---- Fix A: relation names -------------------------------------------
 
     #[Test]
-    public function a_where_has_or_where_doesnt_have_naming_a_method_is_ignored(): void
+    public function a_where_has_or_where_doesnt_have_naming_a_method_is_never_called_and_matches_nothing(): void
     {
         $this->seedWidgets();
 
+        // 4.17.4: a filter through something that is not a relation fails
+        // CLOSED - it matches no rows rather than being skipped, which would
+        // widen the result set.
         foreach ([
             ['where' => [['whereHas' => 'purge']]],
             ['where' => [['whereDoesntHave' => 'purge']]],
@@ -113,10 +116,12 @@ class RequestInputHardeningTest extends TestCase
             ['where' => [['id' => 'purge.name', 'value' => 'x']]],
             ['where' => [['group' => true, 'operator' => 'OR', 'conditions' => [['whereDoesntHave' => 'promoteOwner']]]]],
         ] as $body) {
-            $this->table($body)->assertOk();
+            $this->assertSame([], $this->names($this->table($body)->assertOk()), json_encode($body));
         }
 
-        $this->postJson('/ajax/secWidgets/dropdown', ['where' => [['id' => 'whereHas', 'value' => 'purge']]])->assertOk();
+        $this->assertSame([], $this->postJson('/ajax/secWidgets/dropdown', [
+            'where' => [['id' => 'whereHas', 'value' => 'purge']],
+        ])->assertOk()->json('data'));
 
         $this->assertSame(0, SecWidget::$purged);
         $this->assertSame(2, SecWidget::count());

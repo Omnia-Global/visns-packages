@@ -4,6 +4,7 @@ namespace Visnsstudio\VisnsPackages\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Visnsstudio\VisnsPackages\Services\Zoom\WebhookLedger;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
@@ -58,7 +59,50 @@ class VerifyZoomWebhookSignature
             return $this->reject($request, 'signature mismatch');
         }
 
+        if ($this->isReplay($signature)) {
+            return $this->acknowledgeReplay($request);
+        }
+
         return $next($request);
+    }
+
+    /**
+     * Replay protection: has this exact signed delivery been processed already?
+     *
+     * The timestamp window alone lets a captured delivery be sent again for
+     * five minutes. The signature covers the timestamp and the whole body, so
+     * it identifies one delivery; it is remembered (hashed) for the window and
+     * a second arrival inside it is a replay. Cache::add is atomic, so two
+     * copies racing each other cannot both pass. The store must be one every
+     * web worker shares (file, redis, database) - an `array` store would make
+     * this a per-request no-op.
+     */
+    private function isReplay(string $signature): bool
+    {
+        $window = max(1, $this->maxClockSkewSeconds());
+
+        // Remembered for the whole span in which the same timestamp would still
+        // pass the window check: up to `window` seconds either side of now.
+        return ! Cache::add(
+            'visns:zoom-webhook:seen:' . hash('sha256', $signature),
+            1,
+            now()->addSeconds($window * 2)
+        );
+    }
+
+    /**
+     * A replay is answered 200 and not processed. Not an error status: Zoom
+     * disables a subscription that keeps getting them, and a genuine duplicate
+     * delivery from Zoom itself is not a fault.
+     */
+    private function acknowledgeReplay(Request $request)
+    {
+        Log::info('Zoom webhook: duplicate delivery acknowledged and skipped', [
+            'ip' => $request->ip(),
+            'path' => $request->path(),
+        ]);
+
+        return response()->json(['status' => 'duplicate'], 200);
     }
 
     private function secret(): ?string

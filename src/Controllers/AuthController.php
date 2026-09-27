@@ -5,6 +5,7 @@ namespace Visnsstudio\VisnsPackages\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
@@ -56,6 +57,13 @@ class AuthController extends \App\Http\Controllers\Controller
         if ($user) {
             $token = Str::random(60);
 
+            $key = ModuleConfig::get('auth.reset_key_by_resolved_email', false)
+                ? $user->email
+                : $request->email;
+
+            // Expired rows for this address are dead weight; clear them here.
+            $this->purgeExpiredResetRows((string) $key);
+
             DB::table('password_resets')->insert([
                 // The typed address by default, which is what this package has
                 // always stored. An application with a resolver wants the
@@ -63,15 +71,18 @@ class AuthController extends \App\Http\Controllers\Controller
                 // when the resolver looked past what was typed, and a row keyed
                 // on the typed address is then one reset() can never match an
                 // account back to.
-                'email' => ModuleConfig::get('auth.reset_key_by_resolved_email', false)
-                    ? $user->email
-                    : $request->email,
-                'token' => $token,
+                'email' => $key,
+                // Only the hash is stored: a read of this table must not hand
+                // anybody a working reset link.
+                'token' => $this->hashResetToken($token),
                 'created_at' => Carbon::now(),
             ]);
 
             if (app()->environment('production')) {
-                $to = $request->email;
+                // The ACCOUNT's own address, never the typed one: a resolver
+                // may have matched the account by some other address, and the
+                // link must go to the mailbox the account belongs to.
+                $to = (string) ($user->email ?? '');
             } else {
                 // Outside production every reset mail is funnelled to one
                 // address so a copied production database cannot mail real
@@ -212,6 +223,54 @@ class AuthController extends \App\Http\Controllers\Controller
         }
     }
 
+    /**
+     * How a reset code is stored.
+     */
+    protected function hashResetToken(string $token): string
+    {
+        return hash('sha256', $token);
+    }
+
+    /**
+     * Minutes a reset link stays usable (auth.reset_expire_minutes, 60).
+     */
+    protected function resetLifetimeMinutes(): int
+    {
+        $minutes = (int) ModuleConfig::get('auth.reset_expire_minutes', 60);
+
+        return $minutes > 0 ? $minutes : 60;
+    }
+
+    protected function resetRowExpired(object $row): bool
+    {
+        if (empty($row->created_at)) {
+            // A row with no issue time cannot prove it is fresh.
+            return true;
+        }
+
+        return Carbon::parse($row->created_at)
+            ->addMinutes($this->resetLifetimeMinutes())
+            ->isPast();
+    }
+
+    protected function purgeExpiredResetRows(string $email): void
+    {
+        if ($email === '') {
+            return;
+        }
+
+        DB::table('password_resets')
+            ->where('email', $email)
+            ->where(function ($q) {
+                $q->whereNull('created_at')->orWhere(
+                    'created_at',
+                    '<',
+                    Carbon::now()->subMinutes($this->resetLifetimeMinutes())
+                );
+            })
+            ->delete();
+    }
+
     public function reset(Request $request)
     {
         $error = '';
@@ -221,20 +280,32 @@ class AuthController extends \App\Http\Controllers\Controller
             'password' => 'required|min:8|confirmed',
         ]);
 
-        $checkToken = DB::table('password_resets')
-            ->where('token', $request->input('code'))
-            ->count();
+        $code = $request->input('code');
 
-        if ($checkToken == 0) {
+        $token = is_string($code) && $code !== ''
+            ? DB::table('password_resets')
+                ->where('token', $this->hashResetToken($code))
+                ->first()
+            : null;
+
+        if ($token && $this->resetRowExpired($token)) {
+            // Past its lifetime: spent, and every other expired row for the
+            // same address with it.
+            $this->purgeExpiredResetRows((string) $token->email);
+            DB::table('password_resets')
+                ->where('email', $token->email)
+                ->where('token', $token->token)
+                ->delete();
+            $token = null;
+        }
+
+        if (! $token) {
             $error = ModuleConfig::message(
                 'auth',
                 'invalid_reset_token',
                 'The token is no longer valid, please start the password request process again.'
             );
         } else {
-            $token = DB::table('password_resets')
-                ->where('token', $request->input('code'))
-                ->first();
 
             // Resolved through the same resolver forgot() used, so the account
             // being changed is the one the token was issued for.
@@ -255,16 +326,29 @@ class AuthController extends \App\Http\Controllers\Controller
                 $plainPassword = (string) $request->input('password');
 
                 $user->password = Hash::make($plainPassword);
+
+                // A new password retires any "remember me" recaller issued
+                // under the old one.
+                if ($this->supportsRememberToken($user)) {
+                    $user->setRememberToken(Str::random(60));
+                }
+
                 $user->save();
+
+                // Remembered two-factor devices go too: a reset is what
+                // somebody does when they think the account was reached.
+                TwoFactorRememberToken::revokeForUser($user);
 
                 $this->runAfterResetHooks($user, $plainPassword);
 
-                // Keyed on the ROW's address, not the resolved account's. They
-                // are the same thing unless a resolver looked past the typed
-                // address, and in that case deleting by the account's own
-                // address would leave the spent token alive and reusable.
+                // Every outstanding reset for this account: the ROW's address
+                // (which may be a typed address a resolver looked past) and
+                // the account's own.
                 DB::table('password_resets')
-                    ->where('email', $token->email)
+                    ->whereIn('email', array_values(array_unique(array_filter([
+                        (string) $token->email,
+                        (string) ($user->email ?? ''),
+                    ], fn($e) => $e !== ''))))
                     ->delete();
             }
         }
@@ -358,11 +442,13 @@ class AuthController extends \App\Http\Controllers\Controller
                 );
                 $payload = $user->load('roles.permissions');
             } elseif ($user->two_factor_secret && $user->two_factor_confirmed_at) {
-                // Check if there's a valid remember token for this device
-                $deviceIdentifier = $this->getDeviceIdentifier($request);
-                $rememberToken = TwoFactorRememberToken::findValidTokenByDevice(
+                // A remembered device proves itself with the secret token it
+                // was given when it was remembered (a cookie), never with its
+                // User-Agent and IP alone.
+                $rememberToken = $this->rememberedDevice(
                     $user,
-                    $deviceIdentifier
+                    $request,
+                    $this->getDeviceIdentifier($request)
                 );
 
                 if ($rememberToken) {
@@ -626,13 +712,13 @@ class AuthController extends \App\Http\Controllers\Controller
 
             // Check if user has 2FA enabled and confirmed
             if ($user->two_factor_secret && $user->two_factor_confirmed_at) {
-                // Check if there's a valid remember token for this device
-                $deviceIdentifier =
-                    $request->input('device_identifier') ?:
-                    $this->getDeviceIdentifier($request);
-                $rememberToken = TwoFactorRememberToken::findValidTokenByDevice(
+                // The remembered-device token is the proof; the device
+                // identifier is only an additional condition.
+                $rememberToken = $this->rememberedDevice(
                     $user,
-                    $deviceIdentifier
+                    $request,
+                    $request->input('device_identifier') ?:
+                        $this->getDeviceIdentifier($request)
                 );
 
                 if ($rememberToken) {
@@ -756,8 +842,11 @@ class AuthController extends \App\Http\Controllers\Controller
 
             // If remember is true, create a remember token for this device
             if ($request->input('remember', false)) {
-                $deviceIdentifier = $this->getDeviceIdentifier($request);
-                TwoFactorRememberToken::createToken($user, $deviceIdentifier);
+                $this->rememberDevice(
+                    $user,
+                    $request,
+                    $this->getDeviceIdentifier($request)
+                );
             }
 
             $this->runPostLoginHooks($user, $request);
@@ -864,8 +953,9 @@ class AuthController extends \App\Http\Controllers\Controller
         // here. Opt-in for the code driver, because an SMS code is a possession
         // factor tied to the phone, not to this browser.
         if ($manager->remembersDevices() && $request->input('remember', false)) {
-            TwoFactorRememberToken::createToken(
+            $this->rememberDevice(
                 $user,
+                $request,
                 $this->getDeviceIdentifier($request)
             );
         }
@@ -1065,34 +1155,36 @@ class AuthController extends \App\Http\Controllers\Controller
 
             $manager->consume($user);
 
+            $body = ['id' => $this->createApiToken($user, $request)];
+
             if ($manager->remembersDevices() && $request->input('remember', false)) {
-                TwoFactorRememberToken::createToken(
+                $body['two_factor_remember_token'] = $this->rememberDevice(
                     $user,
+                    $request,
                     $request->input('device_identifier') ?:
                         $this->getDeviceIdentifier($request)
                 );
             }
 
-            return response()->json(
-                ['id' => $this->createApiToken($user, $request)],
-                200
-            );
+            return response()->json($body, 200);
         }
 
         if ($this->validateTotpCode($user, (string) $request->code)) {
-            // If remember is true, create a remember token for this device
+            $body = ['id' => $this->createApiToken($user, $request)];
+
+            // Remember this device: the client keeps the returned token (and
+            // the cookie, where cookies reach it) and presents it on the next
+            // login as `two_factor_remember_token`.
             if ($request->input('remember', false)) {
-                $deviceIdentifier =
+                $body['two_factor_remember_token'] = $this->rememberDevice(
+                    $user,
+                    $request,
                     $request->input('device_identifier') ?:
-                    $this->getDeviceIdentifier($request);
-                TwoFactorRememberToken::createToken($user, $deviceIdentifier);
+                        $this->getDeviceIdentifier($request)
+                );
             }
 
-            // Create a token for API access
-            return response()->json(
-                ['id' => $this->createApiToken($user, $request)],
-                200
-            );
+            return response()->json($body, 200);
         }
 
         // If we reach here, the code was invalid
@@ -1105,7 +1197,59 @@ class AuthController extends \App\Http\Controllers\Controller
     }
 
     /**
+     * Remember this device: mint a random token, store only its hash, and hand
+     * the plain token to the browser in an HttpOnly cookie. Returned so an API
+     * caller, which may not keep cookies, can hold it itself.
+     */
+    protected function rememberDevice($user, Request $request, ?string $deviceIdentifier = null): string
+    {
+        $token = TwoFactorRememberToken::createToken($user, $deviceIdentifier);
+
+        Cookie::queue(Cookie::make(
+            TwoFactorRememberToken::COOKIE_NAME,
+            $token,
+            TwoFactorRememberToken::LIFETIME_DAYS * 24 * 60,
+            '/',
+            null,
+            $request->isSecure(),
+            true,
+            false,
+            'lax'
+        ));
+
+        return $token;
+    }
+
+    /**
+     * The remember row this request proves, or null.
+     *
+     * The proof is the token the device was given (cookie first, then the
+     * `two_factor_remember_token` input for API clients), compared by hash for
+     * THIS user. The device identifier is an extra condition only.
+     */
+    protected function rememberedDevice($user, Request $request, ?string $deviceIdentifier = null)
+    {
+        $token = $request->cookie(TwoFactorRememberToken::COOKIE_NAME);
+
+        if (! is_string($token) || $token === '') {
+            $token = $request->input('two_factor_remember_token');
+        }
+
+        if (! is_string($token) || $token === '') {
+            return null;
+        }
+
+        return TwoFactorRememberToken::findValidTokenForDevice(
+            $user,
+            $token,
+            $deviceIdentifier
+        );
+    }
+
+    /**
      * Get a unique identifier for the current device.
+     *
+     * Not a secret, and never used as proof on its own: see rememberedDevice().
      *
      * @param  \Illuminate\Http\Request  $request
      * @return string

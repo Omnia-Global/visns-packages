@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Visnsstudio\VisnsPackages\Support\ColumnExposure;
 use Visnsstudio\VisnsPackages\Support\RelationGuard;
 
 trait HasRelationshipSorting
@@ -59,6 +60,10 @@ trait HasRelationshipSorting
             
             // 2. Check if this is a JSON field (column exists on this model)
             if ($this->isJsonField($firstPart)) {
+                if (!ColumnExposure::allowed($this, $firstPart)) {
+                    \Log::info("Skipping sort on a hidden column: {$orderBy}");
+                    return $query;
+                }
                 \Log::info("Detected JSON field sorting for: {$orderBy}");
                 return $this->applyJsonFieldSorting($query, $orderBy, $order);
             }
@@ -71,6 +76,10 @@ trait HasRelationshipSorting
 
             // 4. A column qualified with this model's own table.
             if (count($parts) === 2 && $firstPart === $this->getTable() && Schema::hasColumn($this->getTable(), $parts[1])) {
+                if (!ColumnExposure::allowed($this, $parts[1])) {
+                    \Log::info("Skipping sort on a hidden column: {$orderBy}");
+                    return $query;
+                }
                 return $query->orderBy($orderBy, $order);
             }
 
@@ -84,6 +93,13 @@ trait HasRelationshipSorting
         if ($this->isVirtualColumn($orderBy)) {
             \Log::info("Detected virtual/appended column that cannot be sorted: {$orderBy}");
             return $this->handleVirtualColumnSorting($query, $orderBy, $order);
+        }
+
+        // A column the model hides, or whose name says it is a secret, is
+        // never an ordering: the order discloses the values.
+        if (!ColumnExposure::allowed($this, $orderBy)) {
+            \Log::info("Skipping sort on a hidden column: {$orderBy}");
+            return $query;
         }
 
         // Regular column sorting
@@ -116,6 +132,19 @@ trait HasRelationshipSorting
 
         try {
             $relation = $this->$relationName();
+
+            // The column must not be one the related model hides (for a
+            // nested path, the model at the end of it).
+            $columnParts = explode('.', $column);
+            $finalColumn = array_pop($columnParts);
+            $finalModel = $columnParts === []
+                ? $relation->getRelated()
+                : RelationGuard::relatedModelForPath($relation->getRelated(), implode('.', $columnParts));
+
+            if (!$finalModel || !ColumnExposure::allowed($finalModel, $finalColumn)) {
+                \Log::info("Skipping relationship sort on a hidden or unknown column: {$orderBy}");
+                return $query;
+            }
             
             // Handle different relationship types
             if ($relation instanceof BelongsTo || $relation instanceof HasOne) {

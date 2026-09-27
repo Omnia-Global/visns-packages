@@ -5,6 +5,93 @@ Notable changes to `visnsstudio/visns-packages`.
 Entries before 4.15.0 were not kept in a file; the git log and the README's
 per-module sections are the record for those.
 
+## 4.17.4 — security
+
+A second pass over sign-in secrets and the dynamic entity endpoints. Existing
+screens keep working; the behaviour changes are listed below.
+
+### Fixed
+
+- **"Remember this device" is proven by a secret.** A remembered device was
+  recognised by a hash of its User-Agent and IP, which anybody who knows both
+  can reproduce. Remembering a device now mints a random token, stores only its
+  SHA-256 in `two_factor_remember_tokens.token` (the existing column; no
+  migration), and hands the token to the browser in an HttpOnly, SameSite=Lax
+  cookie (`visns_2fa_remember`, Secure on HTTPS, 30 days). A login skips the
+  second factor only when that token matches an unexpired row for the same
+  user; the device identifier is kept as an extra condition. The API challenge
+  returns the token as `two_factor_remember_token` and `POST /api/login` accepts
+  it back under the same name. `TwoFactorRememberToken::findValidTokenByDevice()`
+  is deprecated and always answers null; use `findValidTokenForDevice()`.
+  Disabling two-factor, and a password reset, forget every remembered device.
+- **Password reset codes are hashed, expire, and go to the account.** Only the
+  SHA-256 of the code is stored in `password_resets`. A code older than
+  `auth.reset_expire_minutes` (new, default 60) is refused and deleted. The
+  link is mailed to the resolved account's own `email`, not the typed address
+  (the non-production redirect to `auth.mail_to_dev` and
+  `auth.reset_key_by_resolved_email` are unchanged). A successful reset deletes
+  every outstanding code for the account and cycles its `remember_token`. An
+  unknown address answers exactly as before.
+- **Filters and sorts cannot read hidden columns.** A dynamic-entity filter
+  (plain, `relation.column`, or `whereHas` with a column, `orKey` included) or
+  sort key (own column, table-qualified, JSON base, or `relation.column` in
+  `HasRelationshipSorting`) naming a column the target model hides, or one
+  `Support\ReportSchemaPolicy` denies by name, is skipped and logged. Shared in
+  the new `Support\ColumnExposure`. The dropdown's `fields` and sort field
+  follow the same rule.
+- **`columns` no longer switches off `excludedFields()`.** Exclusions always
+  apply; a requested column that is excluded, hidden or secret is dropped from
+  the select and the rest of the request still narrows it.
+- **The generic import writes only a configured model's fillable columns.**
+  `ImportController::processImport` resolves the target to a model from the new
+  `import.models` config (target => model class) or a `dynamic_entities` entry
+  whose table it is, and answers 422 otherwise. Each row is filtered to the
+  model's `$fillable` and saved through the model. The request's `model_config`
+  only supplies validation hints.
+- **A filter through an unknown relation matches nothing.** A `whereHas` /
+  `whereDoesntHave` / `relation.column` filter naming something
+  `Support\RelationGuard` rejects now adds an always-false condition instead of
+  being skipped, which widened the result set. An unknown sort relation is
+  still ignored.
+- **Merge `field_overrides` are limited to `$fillable`**; other keys are
+  ignored and logged.
+- **Zoom webhook replays are skipped.** After a delivery verifies, its
+  signature is remembered in the cache for the timestamp window; the same
+  delivery again inside it is answered 200 `{"status":"duplicate"}` and not
+  processed. Needs a cache store the web workers share.
+- **The OTP request endpoint does not reveal which addresses exist.** An
+  unknown address and a contact with no portal account both answer 404 with the
+  `contact_not_found` message. `otp.expose_code_outside_production` now
+  defaults to false.
+
+### Behaviour changes
+
+- Every remembered two-factor device is forgotten on upgrade: users complete
+  the challenge once more. API clients must keep `two_factor_remember_token`.
+- Reset links issued before the upgrade stop working (their rows hold the
+  plain code); a new request works.
+- Staging no longer echoes `dev_otp` unless `otp.expose_code_outside_production`
+  is set to true.
+- The OTP request answers 404 (was 403, `no_portal_access`) for a contact with
+  no portal account.
+- A grid filter through a name that is not a relation returns no rows instead
+  of all rows.
+- An import to a target not in `import.models` and not a dynamic entity's table
+  is refused with 422; columns outside `$fillable` are no longer written.
+
+### New config
+
+- `auth.reset_expire_minutes` (60)
+- `import.models` (`[]`)
+
+Tests: `tests/Platform/Security/AuthSecretsTest.php` (14),
+`HiddenColumnExposureTest.php` (9), `ImportHardeningTest.php` (4),
+`ZoomWebhookReplayTest.php` (3), `MergeOverrideTest.php` (1); updated
+`RequestInputHardeningTest`, `PasswordResetTest` and `OtpModuleTest`. The
+CallQueue webhook test helpers now stamp an `event_ts` on each delivery, as
+Zoom does, so two deliberate deliveries are not read as a replay. The suite's
+`memory_limit` is raised to 512M in `phpunit.xml`.
+
 ## 4.17.3 — security
 
 ### Fixed

@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use Visnsstudio\VisnsPackages\Exceptions\JsonValidationException;
 use Visnsstudio\VisnsPackages\Support\RelationGuard;
+use Visnsstudio\VisnsPackages\Support\ColumnExposure;
 
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -372,8 +373,13 @@ class DynamicController extends \App\Http\Controllers\Controller
             $sortField = $detectedFields['sort'];
         }
 
-        // Verify the sort field exists in the table
-        if ($sortField && !Schema::hasColumn($this->model->getTable(), $sortField)) {
+        // Verify the sort field exists in the table, and is not one the
+        // model hides (sorting by a secret discloses its order).
+        if ($sortField && (
+            !is_string($sortField) ||
+            !Schema::hasColumn($this->model->getTable(), $sortField) ||
+            !ColumnExposure::allowed($this->model, $sortField)
+        )) {
             $detectedFields = $this->detectAvailableFields();
             $sortField = $detectedFields['sort'];
         }
@@ -390,6 +396,7 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         // Handle fields parameter - respect provided fields if they exist in database
         $providedFields = $request->input('fields');
+        $allFieldsExist = false;
         if ($providedFields && is_array($providedFields) && count($providedFields) >= 2) {
             $tableName = $this->model->getTable();
             $providedIdField = $providedFields[0];
@@ -400,7 +407,11 @@ class DynamicController extends \App\Http\Controllers\Controller
             $appendedFields = $this->model->getAppends();
             
             foreach ($providedFields as $field) {
-                $fieldExists = Schema::hasColumn($tableName, $field) || in_array($field, $appendedFields);
+                $fieldExists = is_string($field)
+                    && (Schema::hasColumn($tableName, $field) || in_array($field, $appendedFields))
+                    // A hidden or secret column is never returned, whatever
+                    // the caller names.
+                    && ColumnExposure::allowed($this->model, $field);
                 if (!$fieldExists) {
                     $allFieldsExist = false;
                     break;
@@ -522,7 +533,7 @@ class DynamicController extends \App\Http\Controllers\Controller
             $itemData[$idField] = $item->{$idField};
 
             // Build label - use provided label field if specified, otherwise use smart label
-            if ($providedFields && isset($providedFields[1]) && Schema::hasColumn($this->model->getTable(), $providedFields[1])) {
+            if ($providedFields && $allFieldsExist && isset($providedFields[1]) && Schema::hasColumn($this->model->getTable(), $providedFields[1])) {
                 // Use the provided label field directly
                 $itemData['label'] = $item->{$providedFields[1]} ?? '';
             } else {
@@ -756,9 +767,10 @@ class DynamicController extends \App\Http\Controllers\Controller
         $this->applyRelationships($query);
         $this->applyCustomOrderAndSearch($query, $request);
         $this->applyFilters($query, $request);
-        // Skip excluded fields if specific columns were requested
-        $skipExcludeFields = $request->has('columns') && !empty($request->input('columns'));
-        return $this->paginateAndRespond($query, $request->input('take', 10), $skipExcludeFields);
+        // The model's excludedFields() always apply. Naming `columns` narrows
+        // the select (see initializeQuery) and never brings an excluded field
+        // back.
+        return $this->paginateAndRespond($query, $request->input('take', 10));
     }
 
     public function list(Request $request)
@@ -801,9 +813,8 @@ class DynamicController extends \App\Http\Controllers\Controller
 
             // Check if pagination is requested via 'take' parameter
             if ($request->has('take')) {
-                // Skip excluded fields if specific columns were requested
-                $skipExcludeFields = $request->has('columns') && !empty($request->input('columns'));
-                $result = $this->paginateAndRespond($query, $request->input('take'), $skipExcludeFields);
+                // excludedFields() always apply, `columns` or not.
+                $result = $this->paginateAndRespond($query, $request->input('take'));
                 \Log::info('DynamicController::list() - Query executed with pagination', [
                     'model' => $this->model,
                     'result_type' => get_class($result),
@@ -812,9 +823,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                 ]);
             } else {
                 // Backward compatibility: return all records when no 'take' parameter
-                // Skip excluded fields if specific columns were requested
-                $skipExcludeFields = $request->has('columns') && !empty($request->input('columns'));
-                $result = $this->respondWithAll($query, $skipExcludeFields);
+                // excludedFields() always apply, `columns` or not.
+                $result = $this->respondWithAll($query);
                 \Log::info('DynamicController::list() - Query executed without pagination (all records)', [
                     'model' => $this->model,
                     'result_type' => get_class($result),
@@ -856,9 +866,32 @@ class DynamicController extends \App\Http\Controllers\Controller
             
             if (is_array($columns) && !empty($columns)) {
                 // Clean and validate column names
-                $columns = array_map('trim', $columns);
+                $columns = array_map(fn ($c) => is_string($c) ? trim($c) : '', $columns);
                 $columns = array_filter($columns); // Remove empty values
-                
+
+                // A requested column the model excludes, hides or whose name
+                // says it is a secret is dropped from the select; the rest of
+                // the request still narrows it.
+                $excluded = method_exists($this->model, 'excludedFields')
+                    ? array_map('strtolower', (array) $this->model->excludedFields())
+                    : [];
+                $dropped = [];
+                $columns = array_values(array_filter($columns, function ($c) use ($excluded, &$dropped) {
+                    $base = strtolower(ColumnExposure::baseColumn($this->model, $c));
+                    if ($c !== '*' && (in_array($base, $excluded, true) || !ColumnExposure::allowed($this->model, $c))) {
+                        $dropped[] = $c;
+                        return false;
+                    }
+                    return true;
+                }));
+
+                if ($dropped !== []) {
+                    Log::info('Dropping requested columns that are excluded or hidden', [
+                        'model' => get_class($this->model),
+                        'columns' => $dropped,
+                    ]);
+                }
+
                 if (!empty($columns)) {
                     $query->select($columns);
                 }
@@ -895,7 +928,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                 ]);
 
                 $query->customOrder(
-                    $request->input('sortBy'),
+                    $this->exposableSortKey($request->input('sortBy')),
                     $request->filled('sort')
                         ? $this->sortDirection($request->input('sort'))
                         : null
@@ -1375,6 +1408,42 @@ class DynamicController extends \App\Http\Controllers\Controller
         return 'JSON_EXTRACT(' . $base->getGrammar()->wrap($table . '.' . $column) . ', ?)';
     }
 
+    /**
+     * The request's sort key, or null when it would order by a hidden or
+     * secret column: this model's own (plain, table-qualified or JSON base) or,
+     * for `relation.column`, the column on the model the relation leads to.
+     */
+    protected function exposableSortKey($sortBy)
+    {
+        if (!is_string($sortBy) || $sortBy === '') {
+            return $sortBy;
+        }
+
+        $model = $this->model;
+
+        if (str_contains($sortBy, '.')) {
+            $parts = explode('.', $sortBy);
+            $column = array_pop($parts);
+
+            if (RelationGuard::isRelation($model, $parts[0])) {
+                $related = RelationGuard::relatedModelForPath($model, implode('.', $parts));
+                if ($related && !ColumnExposure::allowed($related, $column)) {
+                    Log::info("Ignoring sort on a hidden column: {$sortBy}");
+                    return null;
+                }
+
+                return $sortBy;
+            }
+        }
+
+        if (!ColumnExposure::allowed($model, $sortBy)) {
+            Log::info("Ignoring sort on a hidden column: {$sortBy}");
+            return null;
+        }
+
+        return $sortBy;
+    }
+
     /** `asc` or `desc`; anything else is `asc`. */
     protected function sortDirection($direction): string
     {
@@ -1390,10 +1459,14 @@ class DynamicController extends \App\Http\Controllers\Controller
     {
         foreach (is_array($names) ? $names : [$names] as $name) {
             if (!RelationGuard::isRelationPath($this->model, $name)) {
-                Log::info('Skipping ' . ($doesntHave ? 'whereDoesntHave' : 'whereHas') . ' on something that is not a relation', [
+                // Fail CLOSED: skipping the condition would widen the result
+                // set, so a filter on something that is not a relation
+                // matches nothing.
+                Log::info('Refusing ' . ($doesntHave ? 'whereDoesntHave' : 'whereHas') . ' on something that is not a relation; matching nothing', [
                     'model' => get_class($this->model),
                     'relation' => is_scalar($name) ? (string) $name : gettype($name),
                 ]);
+                $query->whereRaw('1 = 0');
                 continue;
             }
 
@@ -1448,10 +1521,18 @@ class DynamicController extends \App\Http\Controllers\Controller
             [$relation, $column] = explode('.', $id, 2);
 
             if (!str_contains($column, '.') && RelationGuard::isRelation($this->model, $relation)) {
-                $relatedTable = RelationGuard::relatedModelForPath($this->model, $relation)?->getTable();
+                $relatedModel = RelationGuard::relatedModelForPath($this->model, $relation);
+                $relatedTable = $relatedModel?->getTable();
                 if (!$relatedTable || !Schema::hasColumn($relatedTable, $column)) {
                     Log::info(
                         "Skipping where condition for invalid relation column: {$relation}.{$column} in table: {$this->model->getTable()}"
+                    );
+                    return;
+                }
+
+                if (!ColumnExposure::allowed($relatedModel, $column)) {
+                    Log::info(
+                        "Skipping where condition on a hidden column: {$relation}.{$column} in table: {$this->model->getTable()}"
                     );
                     return;
                 }
@@ -1513,6 +1594,22 @@ class DynamicController extends \App\Http\Controllers\Controller
 
                 return;
             }
+
+            // `x.y` where `x` is neither a relation, a column of this table
+            // (a JSON path) nor this table's own name, and no whereHas says
+            // where `x` lives: an unknown relation. Fail CLOSED.
+            if (
+                empty($whereHas) &&
+                $relation !== $this->model->getTable() &&
+                !RelationGuard::isRelation($this->model, $relation) &&
+                !$this->isValidColumn($relation)
+            ) {
+                Log::info(
+                    "Refusing where condition through an unknown relation: {$relation} on {$this->model->getTable()}; matching nothing"
+                );
+                $query->whereRaw('1 = 0');
+                return;
+            }
         }
 
         // Special case: if only whereHas is provided (no id/value needed)
@@ -1556,6 +1653,48 @@ class DynamicController extends \App\Http\Controllers\Controller
                 "Skipping where condition for invalid column: {$jsonField} in table: {$this->model->getTable()}"
             );
             return;
+        }
+
+        // Which model the column belongs to: the end of the whereHas path, or
+        // this one. An unknown whereHas path fails CLOSED below.
+        $whereHasPath = null;
+        if (!empty($whereHas)) {
+            $relations = is_string($whereHas) ? [$whereHas] : $whereHas;
+
+            if (
+                !is_array($relations) ||
+                array_filter($relations, fn ($r) => !is_string($r)) !== [] ||
+                !RelationGuard::isRelationPath($this->model, implode('.', $relations))
+            ) {
+                Log::info('Refusing where condition through an unknown relation; matching nothing', [
+                    'model' => get_class($this->model),
+                    'whereHas' => $whereHas,
+                ]);
+                $query->whereRaw('1 = 0');
+                return;
+            }
+
+            $whereHasPath = $relations;
+        }
+
+        $targetModel = $whereHasPath
+            ? RelationGuard::relatedModelForPath($this->model, implode('.', $whereHasPath))
+            : $this->model;
+
+        // Never filter on a column the target model hides, or one whose name
+        // says it holds a secret: the answer discloses the value.
+        if (!ColumnExposure::allowed($targetModel, $jsonField)) {
+            Log::info(
+                "Skipping where condition on a hidden column: {$jsonField} of " . ($targetModel ? $targetModel->getTable() : 'unknown')
+            );
+            return;
+        }
+
+        if ($orKey !== null && !ColumnExposure::allowed($targetModel, $orKey)) {
+            Log::info(
+                'Ignoring orKey on a hidden column of ' . ($targetModel ? $targetModel->getTable() : 'unknown')
+            );
+            $orKey = null;
         }
 
         $applyCondition = function ($query) use (
@@ -1694,23 +1833,9 @@ class DynamicController extends \App\Http\Controllers\Controller
         };
 
         if (!empty($whereHas)) {
-            // Apply conditions with whereHas if provided
-            // Ensure whereHas is treated as an array, even if it's a single string
-            $relations = is_string($whereHas) ? [$whereHas] : $whereHas;
-
-            // Each name is a relation of the model the previous one leads to;
-            // anything else is skipped rather than called as a method.
-            if (
-                !is_array($relations) ||
-                array_filter($relations, fn ($r) => !is_string($r)) !== [] ||
-                !RelationGuard::isRelationPath($this->model, implode('.', $relations))
-            ) {
-                Log::info('Skipping where condition through an unknown relation', [
-                    'model' => get_class($this->model),
-                    'whereHas' => $whereHas,
-                ]);
-                return;
-            }
+            // Apply conditions with whereHas if provided. The path was checked
+            // (and failed closed) above, before the column rules.
+            $relations = $whereHasPath;
 
             // Recursive function to process relationships
             $applyNestedWhereHas = function (
@@ -3771,7 +3896,19 @@ class DynamicController extends \App\Http\Controllers\Controller
                 'exclude' => $options['exclude']
             ]);
             
+            $fillable = $target->getFillable();
+
             foreach ($options['field_overrides'] as $field => $value) {
+                // An override is a value a person chose in the merge dialog;
+                // it may only land on a column the model lets a form write.
+                if (!is_string($field) || !in_array($field, $fillable, true)) {
+                    \Log::info('Ignoring a merge field override for a column that is not fillable', [
+                        'model' => get_class($target),
+                        'field' => is_scalar($field) ? (string) $field : gettype($field),
+                    ]);
+                    continue;
+                }
+
                 // Apply field override if field is in attributesToMerge OR if it's a valid model attribute
                 if (in_array($field, $attributesToMerge) || array_key_exists($field, $sourceAttributes) || array_key_exists($field, $targetAttributes)) {
                     $target->$field = $value;

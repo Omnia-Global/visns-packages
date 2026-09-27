@@ -26,6 +26,8 @@ use Carbon\Carbon;
  *  - the code is only ever stored hashed, and only ever compared with
  *    Hash::check(), so a database read cannot recover a live code;
  *  - the "we sent it to..." line returns a masked contact, never the address;
+ *  - an unknown address and a contact with no portal account get the same
+ *    answer, so the request endpoint cannot be used to learn who is on file;
  *  - the plaintext code leaves the server in the response body only outside
  *    production, and only when the application opts in
  *    (otp.expose_code_outside_production), so a staging login is possible
@@ -53,21 +55,19 @@ class OtpController extends \App\Http\Controllers\Controller
             $resolver = $this->resolver();
             $contact = $resolver($contactInfo);
 
-            if (! $contact) {
-                return response()->json([
-                    'error' => ModuleConfig::message('otp', 'contact_not_found'),
-                ], 404);
-            }
-
             // Step 2: the contact must have a portal account to log in to.
-            $user = ModuleConfig::userQuery('otp')
-                ->where(ModuleConfig::get('otp.user_foreign_key', 'company_contact_id'), $contact->id)
-                ->first();
+            //
+            // An unknown address and a known contact with no portal account
+            // answer IDENTICALLY (same status, same body): anything else lets
+            // this unauthenticated endpoint say which addresses are on file.
+            $user = $contact
+                ? ModuleConfig::userQuery('otp')
+                    ->where(ModuleConfig::get('otp.user_foreign_key', 'company_contact_id'), $contact->id)
+                    ->first()
+                : null;
 
-            if (! $user) {
-                return response()->json([
-                    'error' => ModuleConfig::message('otp', 'no_portal_access'),
-                ], 403);
+            if (! $contact || ! $user) {
+                return $this->noCodeResponse();
             }
 
             // Step 3: rate limiting.
@@ -104,7 +104,7 @@ class OtpController extends \App\Http\Controllers\Controller
             // application that wants staging to behave like production turns
             // expose_code_outside_production off.
             $exposeCode = ! app()->environment('production')
-                && (bool) ModuleConfig::get('otp.expose_code_outside_production', true);
+                && (bool) ModuleConfig::get('otp.expose_code_outside_production', false);
 
             if (! $exposeCode) {
                 $this->sender()->send($contact, $contactMethod, $otpCode);
@@ -268,6 +268,17 @@ class OtpController extends \App\Http\Controllers\Controller
                 'error' => ModuleConfig::message('otp', 'login_failed'),
             ], 500);
         }
+    }
+
+    /**
+     * The one answer for "no code will be sent to this address": the address
+     * is unknown, or it belongs to a contact with no portal account.
+     */
+    protected function noCodeResponse()
+    {
+        return response()->json([
+            'error' => ModuleConfig::message('otp', 'contact_not_found'),
+        ], 404);
     }
 
     /**

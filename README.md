@@ -529,7 +529,12 @@ axios.post('/api/two-factor-challenge', {
 });
 ```
 
-The `device_identifier` parameter is optional. If not provided, the system will generate one based on the user agent and IP address.
+The response carries `two_factor_remember_token` alongside `id`. Keep it and
+send it back as `two_factor_remember_token` on the next `POST /api/login` (with
+the same `device_identifier`) to skip the challenge; a browser gets the same
+token in the HttpOnly `visns_2fa_remember` cookie instead. Only its SHA-256 is
+stored. The `device_identifier` is an additional condition, never the proof; if
+not provided, one is derived from the user agent and IP address.
 
 ## Auth Platform Modules
 
@@ -856,8 +861,10 @@ Endpoints (URIs configurable): `POST /api/auth/request-otp` and
 
 Rules, all configurable: 6 digits from the CSPRNG, stored bcrypt-hashed, 5-minute
 expiry, 3 attempts per code, 2-minute resend cooldown. Outside production the
-code comes back in the response as `dev_otp` so staging needs no SMS gateway —
-turn that off with `otp.expose_code_outside_production`.
+code can come back in the response as `dev_otp` so staging needs no SMS
+gateway — opt in with `otp.expose_code_outside_production` (off by default since
+4.17.4). An unknown address and a contact with no portal account get the same
+404 answer.
 
 Two things you supply. A **contact resolver**, because which record a contact
 string maps to is application knowledge (`Visnsstudio\VisnsPackages\Contracts\OtpContactResolver`

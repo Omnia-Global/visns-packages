@@ -29,6 +29,8 @@ class OtpModuleTest extends TestCase
         // and the "which user owns this contact" join is the identity.
         config()->set('visns-packages.otp.user_foreign_key', 'id');
         config()->set('visns-packages.otp.user_relations', []);
+        // Off by default since 4.17.4; most tests below read the echoed code.
+        config()->set('visns-packages.otp.expose_code_outside_production', true);
 
         $this->app->bind(OtpSender::class, CollectingOtpSender::class);
     }
@@ -143,7 +145,7 @@ class OtpModuleTest extends TestCase
         $this->assertTrue(Hash::check($code, $contact->otp_code));
     }
 
-    public function test_a_contact_without_a_portal_account_is_403(): void
+    public function test_a_contact_without_a_portal_account_answers_like_an_unknown_one(): void
     {
         // No account for this contact: point the join at a column that cannot
         // match, which is what "the contact exists but has no login" looks like.
@@ -151,11 +153,30 @@ class OtpModuleTest extends TestCase
 
         $this->contact(['company_contact_id' => null]);
 
+        $known = $this->postJson('/api/auth/request-otp', ['contact' => 'jo@example.test']);
+        $unknown = $this->postJson('/api/auth/request-otp', ['contact' => 'nobody@example.test']);
+
+        // Same status, same body, byte for byte: the endpoint must not say
+        // which addresses are on file.
+        $known->assertStatus(404);
+        $this->assertSame($unknown->getStatusCode(), $known->getStatusCode());
+        $this->assertSame($unknown->getContent(), $known->getContent());
+        $this->assertSame([], CollectingOtpSender::$sent);
+    }
+
+    public function test_the_code_is_not_echoed_by_default(): void
+    {
+        $shipped = require __DIR__ . '/../../../config/visns-packages.php';
+        $this->assertFalse($shipped['otp']['expose_code_outside_production']);
+
+        config()->set('visns-packages.otp.expose_code_outside_production', null);
+        $this->contact();
+
         $this->postJson('/api/auth/request-otp', ['contact' => 'jo@example.test'])
-            ->assertStatus(403)
-            ->assertExactJson([
-                'error' => 'No portal access is set up for this contact. Please contact the Throughlife team to activate your portal access.',
-            ]);
+            ->assertOk()
+            ->assertJsonMissingPath('dev_otp');
+
+        $this->assertCount(1, CollectingOtpSender::$sent);
     }
 
     public function test_a_second_request_inside_the_cooldown_is_429(): void

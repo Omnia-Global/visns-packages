@@ -2,6 +2,7 @@
 
 namespace Visnsstudio\VisnsPackages\Controllers;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
@@ -143,10 +144,34 @@ class ImportController extends \App\Http\Controllers\Controller
 
             $file = $request->file('file');
             $mapping = json_decode($request->input('mapping'), true);
+            // Validation hints only (required / email). Never decides which
+            // table or which columns are written.
             $modelConfig = json_decode($request->input('model_config'), true);
             $targetModel = $request->input('target_model');
             $parentId = $request->input('parent_id');
             $relationKey = $request->input('relation_key');
+
+            // The table and its writable columns come from the server: a
+            // configured (or dynamic-entity) model and its $fillable.
+            $model = $this->resolveImportModel($targetModel);
+
+            if (! $model) {
+                Log::info('Refusing an import to a target with no configured model', [
+                    'target' => is_scalar($targetModel) ? (string) $targetModel : gettype($targetModel),
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'This import target is not configured.',
+                ], 422);
+            }
+
+            if (! is_array($mapping)) {
+                $mapping = [];
+            }
+            if (! is_array($modelConfig)) {
+                $modelConfig = [];
+            }
 
             // Parse file
             $extension = $file->getClientOriginalExtension();
@@ -172,7 +197,7 @@ class ImportController extends \App\Http\Controllers\Controller
                 $fileData['data'], 
                 $mapping, 
                 $modelConfig, 
-                $targetModel,
+                $model,
                 $parentId,
                 $relationKey
             );
@@ -378,12 +403,16 @@ class ImportController extends \App\Http\Controllers\Controller
         $errors = [];
         
         // Build validation rules from model config
-        foreach ($modelConfig as $field) {
-            if ($field['required'] && isset($field['id'])) {
+        foreach ((array) $modelConfig as $field) {
+            if (! is_array($field) || ! isset($field['id']) || ! is_string($field['id'])) {
+                continue;
+            }
+
+            if (! empty($field['required'])) {
                 $rules[$field['id']] = 'required';
             }
             
-            if ($field['type'] === 'email') {
+            if (($field['type'] ?? null) === 'email') {
                 $rules[$field['id']] = ($rules[$field['id']] ?? '') . '|email';
             }
         }
@@ -421,10 +450,18 @@ class ImportController extends \App\Http\Controllers\Controller
                 if ($parentId && $relationKey) {
                     $mappedRow[$relationKey] = $parentId;
                 }
-                
-                // Add timestamps
-                $mappedRow['created_at'] = now();
-                $mappedRow['updated_at'] = now();
+
+                // Only the model's fillable columns are ever written; the
+                // model stamps its own timestamps on save.
+                $fillable = $targetModel->getFillable();
+                $dropped = array_diff(array_keys($mappedRow), $fillable);
+                if ($dropped !== []) {
+                    Log::info('Import dropping columns that are not fillable', [
+                        'model' => get_class($targetModel),
+                        'columns' => array_values($dropped),
+                    ]);
+                }
+                $mappedRow = array_intersect_key($mappedRow, array_flip($fillable));
                 
                 // Validate before insert
                 $validation = $this->validateMappedRow($mappedRow, $modelConfig);
@@ -439,8 +476,10 @@ class ImportController extends \App\Http\Controllers\Controller
                     continue;
                 }
                 
-                // Insert to database
-                DB::table($targetModel)->insert($mappedRow);
+                // Insert through the model, so $fillable and its casts apply.
+                $record = $targetModel->newInstance();
+                $record->fill($mappedRow);
+                $record->save();
                 $successCount++;
                 
             } catch (\Exception $e) {
@@ -460,6 +499,50 @@ class ImportController extends \App\Http\Controllers\Controller
             'errors' => $errors,
             'total_count' => count($data)
         ];
+    }
+
+    /**
+     * The model an import target writes to, from server-side configuration:
+     * `visns-packages.import.models` (target => model class), or a configured
+     * dynamic entity whose table is the target. Null when neither applies.
+     */
+    protected function resolveImportModel($target): ?Model
+    {
+        if (! is_string($target) || $target === '') {
+            return null;
+        }
+
+        $configured = (array) config('visns-packages.import.models', []);
+        $class = $configured[$target] ?? null;
+
+        if (is_string($class) && class_exists($class) && is_subclass_of($class, Model::class)) {
+            return new $class();
+        }
+
+        foreach ((array) config('visns-packages.dynamic_entities', []) as $entity) {
+            if (! is_string($entity) || $entity === '') {
+                continue;
+            }
+
+            $name = Str::studly(Str::singular($entity));
+
+            foreach (["App\\Models\\{$name}", "Visnsstudio\\VisnsPackages\\Models\\{$name}"] as $candidate) {
+                try {
+                    if (class_exists($candidate) && is_subclass_of($candidate, Model::class)) {
+                        $instance = new $candidate();
+                        if ($instance->getTable() === $target) {
+                            return $instance;
+                        }
+                        break;
+                    }
+                } catch (\Throwable $e) {
+                    // A model that cannot even be loaded is not a target.
+                    break;
+                }
+            }
+        }
+
+        return null;
     }
 
     /**

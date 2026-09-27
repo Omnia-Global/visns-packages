@@ -298,6 +298,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Generic spreadsheet import (ImportController::processImport)
+    |--------------------------------------------------------------------------
+    |
+    | Which model an import target writes to. The target is the table name the
+    | HasImportCapability trait derives (or `target_model` where an application
+    | routes the controller directly), mapped to a model class. A target not
+    | listed here is resolved only when it is the table of an entity in
+    | `dynamic_entities`; anything else is refused with 422. Every imported row
+    | is filtered to the model's $fillable and saved through the model.
+    |
+    |   'models' => ['visit_request_data' => \App\Models\VisitRequest::class],
+    */
+    'import' => [
+        'models' => [],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Dynamic Entity Routes
     |--------------------------------------------------------------------------
     |
@@ -517,7 +535,12 @@ return [
         | keeps a copy on the client's contact row). They are handed the
         | PLAINTEXT password, because a mirror generally has to hash it itself -
         | so a hook must never log, transmit or persist it unhashed.
+        |
+        | 'reset_expire_minutes' - how long a reset link stays usable. Only the
+        | SHA-256 of the code is stored, and a row older than this is refused
+        | and deleted. The link is mailed to the resolved account's own email.
         */
+        'reset_expire_minutes' => 60,
         'reset_user_resolver' => null,
         'reset_key_by_resolved_email' => false,
         'reset_url_builder' => null,
@@ -833,9 +856,12 @@ return [
             'locked_until' => 'otp_locked_until',
         ],
 
-        // Outside production the generated code is echoed back in `dev_otp` so
-        // a staging login is possible without a live SMS gateway.
-        'expose_code_outside_production' => true,
+        // Outside production the generated code can be echoed back in
+        // `dev_otp` so a staging login is possible without a live SMS gateway.
+        // Off by default since 4.17.4: a staging copy of production data would
+        // otherwise hand a code for a real account to anybody who asks. Turn it
+        // on per environment, never in production (it is ignored there).
+        'expose_code_outside_production' => false,
 
         /*
         | Clear the stored code the moment it is spent.

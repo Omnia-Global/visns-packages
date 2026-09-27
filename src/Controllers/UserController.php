@@ -198,6 +198,10 @@ class UserController extends \App\Http\Controllers\Controller
         $user->two_factor_confirmed_at = null;
         $user->save();
 
+        // A remembered device skipped a second factor that no longer exists;
+        // forget them all so re-enabling 2FA starts from nothing remembered.
+        \Visnsstudio\VisnsPackages\Models\TwoFactorRememberToken::revokeForUser($user);
+
         return response()->json([
             'two_factor_enabled' => false,
         ]);

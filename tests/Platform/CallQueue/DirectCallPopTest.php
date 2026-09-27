@@ -89,6 +89,15 @@ class DirectCallPopTest extends TestCase
      */
     private function signedPost(array $body)
     {
+        // Every real Zoom delivery carries its own `event_ts` (ms). Stamped
+        // here when a test leaves it out, so two deliberate deliveries of the
+        // same event are two deliveries - not a replay the signature
+        // middleware would acknowledge and skip (4.17.4).
+        if (! array_key_exists('event_ts', $body)) {
+            static $sequence = 0;
+            $body['event_ts'] = (int) (microtime(true) * 1000) + (++$sequence);
+        }
+
         $json = json_encode($body);
         $timestamp = (string) time();
 

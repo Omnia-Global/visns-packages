@@ -34,4 +34,13 @@
             <directory suffix=".php">./src</directory>
         </include>
     </source>
+    <php>
+        <!--
+            The whole Platform suite peaks just under PHP's default 128M in one
+            process (Testbench boots an application per test), and 4.17.4's
+            tests took it over. Raised here so `./vendor/bin/phpunit` runs as
+            it always has.
+        -->
+        <ini name="memory_limit" value="512M"/>
+    </php>
 </phpunit>
