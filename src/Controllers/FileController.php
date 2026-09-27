@@ -19,15 +19,33 @@ class FileController extends \App\Http\Controllers\Controller
             'file_extension' => 'required|string',
         ]);
 
-        $content = Storage::get($validate['file_path']);
+        // Only a path the `files` table knows. This endpoint used to stream
+        // any path on the default disk it was handed; DataGrid only ever
+        // posts the path of a file row that arrived without its id, so a row
+        // is what it may reach and nothing else.
+        $path = ltrim(str_replace('\\', '/', $validate['file_path']), '/');
+        if ($path === '' || str_contains($path, '..') || str_contains($path, "\0")) {
+            abort(404);
+        }
+
+        $known = \Illuminate\Support\Facades\DB::table('files')->where('file_path', $path)->exists();
+        if (!$known || !Storage::exists($path)) {
+            abort(404);
+        }
+
+        $content = Storage::get($path);
         $contentType = $this->getContentType(
             pathinfo($validate['file_extension'], PATHINFO_EXTENSION)
         );
 
+        // An attachment, never inline (a stored .html would otherwise run on
+        // this origin), and a filename that cannot break out of the header.
+        $name = str_replace(['"', '\\', "\r", "\n"], '', basename($validate['file_name'])) ?: 'download';
+
         return Response::make($content, 200, [
             'Content-Type' => $contentType,
-            'Content-Disposition' =>
-                'inline; filename="' . $validate['file_name'] . '"',
+            'Content-Disposition' => 'attachment; filename="' . $name . '"',
+            'X-Content-Type-Options' => 'nosniff',
         ]);
     }
 

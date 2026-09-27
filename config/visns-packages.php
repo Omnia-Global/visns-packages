@@ -45,6 +45,44 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Security (4.17.0)
+    |--------------------------------------------------------------------------
+    |
+    | `auth_throttle` — the rate limit on sign-in, password reset, two-factor
+    | and registration. `throttle:visns-auth` is ten a minute per address and
+    | IP plus sixty a minute per IP; null turns it off.
+    |
+    | `auth.registration_enabled` (under `auth` below) — self-registration is
+    | OFF by default; the VISNS stack signs people up by invitation.
+    |
+    | `roles_middleware` — the role and permission routes; `auth` by default.
+    | An application should add its administrator permission here.
+    |
+    | `entity_default_middleware` — what a dynamic entity with no middleware
+    | of its own gets. `auth` lets every signed-in user reach it.
+    |
+    | `report_builder` — tables and columns the free-form builder may name.
+    | Credential tables and columns named like secrets are always hidden;
+    | these add to that, or narrow it to an allowlist.
+    |
+    | `pdf.remote_enabled` — whether the PDF routes may fetch remote images
+    | (on by default, for S3-hosted pictures). PHP evaluation is always off.
+    |
+    */
+    'auth_throttle' => env('VISNS_AUTH_THROTTLE', 'throttle:visns-auth'),
+    'roles_middleware' => ['auth'],
+    'entity_default_middleware' => ['auth'],
+    'report_builder' => [
+        'denied_tables' => [],
+        'denied_columns' => [],
+        'allowed_tables' => null,
+    ],
+    'pdf' => [
+        'remote_enabled' => env('VISNS_PDF_REMOTE_ENABLED', true),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Report Semantics (report definition v2)
     |--------------------------------------------------------------------------
     |
@@ -379,6 +417,11 @@ return [
         'mail_from_address' => env('MAIL_FROM_ADDRESS'),
         'allow_multiple_sessions' => env('ALLOW_MULTIPLE_SESSIONS', false),
         'default_user_role' => env('DEFAULT_USER_ROLE'),
+
+        // Self-registration (POST /register, POST /api/register). OFF unless
+        // an application turns it on: a registered account passes every route
+        // gated on `auth` alone, and people join the VISNS stack by invitation.
+        'registration_enabled' => env('VISNS_REGISTRATION_ENABLED', false),
 
         /*
         | Does "remember me" actually remember?

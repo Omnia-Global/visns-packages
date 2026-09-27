@@ -170,6 +170,8 @@ class VisnsPackagesServiceProvider extends ServiceProvider
      */
     public function boot()
     {
+        $this->registerAuthRateLimiter();
+
         // Publish migrations
         $this->publishes(
             [
@@ -361,7 +363,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                     Route::controller(AuthController::class)->group(
                         function () {
                             // Login and password management
-                            Route::prefix('login')->group(function () {
+                            Route::prefix('login')->middleware($this->authThrottle())->group(function () {
                                 Route::post('/authenticate', 'authenticate');
                                 Route::post(
                                     '/two-factor-challenge',
@@ -377,7 +379,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                                 );
                             });
 
-                            Route::prefix('password')->group(function () {
+                            Route::prefix('password')->middleware($this->authThrottle())->group(function () {
                                 Route::post('/forgot', 'forgot');
                                 Route::post('/reset', 'reset');
                             });
@@ -391,12 +393,15 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                         // User profile and notifications
                         Route::controller(UserController::class)->group(
                             function () {
-                                Route::post(
+                                // Profile answers a guest with an empty
+                                // payload on purpose (the sign-in screen
+                                // asks it); everything else needs a user.
+                                Route::middleware('auth')->post(
                                     'notifications/table',
                                     'notificationTable'
                                 );
-                                Route::post('notifications', 'notifications');
-                                Route::post(
+                                Route::middleware('auth')->post('notifications', 'notifications');
+                                Route::middleware('auth')->post(
                                     'notification/markasread',
                                     'markAsRead'
                                 );
@@ -407,6 +412,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                         // Two-factor auth routes
                         Route::controller(UserController::class)
                             ->prefix('two-factor-auth')
+                            ->middleware('auth')
                             ->group(function () {
                                 Route::post('/enable', 'enableTwoFactorAuth');
                                 Route::post('/confirm', 'confirmTwoFactorAuth');
@@ -421,6 +427,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
 
                     // File-related AJAX routes
                     Route::prefix('ajax/files')
+                        ->middleware('auth')
                         ->controller(FileController::class)
                         ->group(function () {
                             Route::get('{id}', 'show');
@@ -440,6 +447,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
 
                     // Permission routes
                     Route::prefix('ajax/permissions')
+                        ->middleware(config('visns-packages.roles_middleware', ['auth']))
                         ->controller(PermissionController::class)
                         ->group(function () {
                             Route::get('/', 'index');
@@ -453,6 +461,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
 
                     // Role routes
                     Route::prefix('ajax/roles')
+                        ->middleware(config('visns-packages.roles_middleware', ['auth']))
                         ->controller(RoleController::class)
                         ->group(function () {
                             Route::get('/', 'index');
@@ -480,6 +489,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
 
                     // PDF Generation routes
                     Route::prefix('ajax/pdf')
+                        ->middleware('auth')
                         ->controller(PDFController::class)
                         ->group(function () {
                             Route::post('/generate', 'generatePDF');
@@ -541,12 +551,12 @@ class VisnsPackagesServiceProvider extends ServiceProvider
 
                     Route::controller(AuthController::class)->group(
                         function () {
-                            Route::post('/login', 'login_api');
-                            Route::post('/register', 'register');
+                            Route::post('/login', 'login_api')->middleware($this->authThrottle());
+                            Route::post('/register', 'register')->middleware($this->authThrottle());
                             Route::post(
                                 '/two-factor-challenge',
                                 'twoFactorAuthenticateApi'
-                            );
+                            )->middleware($this->authThrottle());
                             Route::post('/logout', 'logout_api');
                         }
                     );
@@ -657,12 +667,12 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                     // Auth API routes
                     Route::controller(AuthController::class)->group(
                         function () {
-                            Route::post('/login', 'login_api');
-                            Route::post('/register', 'register');
+                            Route::post('/login', 'login_api')->middleware($this->authThrottle());
+                            Route::post('/register', 'register')->middleware($this->authThrottle());
                             Route::post(
                                 '/two-factor-challenge',
                                 'twoFactorAuthenticateApi'
-                            );
+                            )->middleware($this->authThrottle());
                             Route::post('/logout', 'logout_api');
                         }
                     );
@@ -1911,7 +1921,13 @@ class VisnsPackagesServiceProvider extends ServiceProvider
 
         return array_values(array_unique(array_merge(
             $base,
-            is_array($declared) ? $declared : ['auth']
+            // An entity with no middleware of its own takes
+            // `entity_default_middleware` (default `['auth']`). Every signed-in
+            // user can reach such an entity, so an application whose entities
+            // hold client data should either declare each one or raise this.
+            is_array($declared)
+                ? $declared
+                : (array) config('visns-packages.entity_default_middleware', ['auth'])
         )));
     }
 
@@ -2138,5 +2154,45 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                 }
             }
         }
+    }
+
+    /**
+     * The rate limit on the credential-taking endpoints (sign-in, password
+     * reset, two-factor challenge, registration): `throttle:visns-auth` unless
+     * `visns-packages.auth_throttle` says otherwise; null or '' turns it off.
+     *
+     * @return array<int, string>
+     */
+    protected function authThrottle(): array
+    {
+        return array_values(array_filter([config('visns-packages.auth_throttle', 'throttle:visns-auth')]));
+    }
+    /**
+     * `visns-auth`: ten attempts a minute per address typed and client IP,
+     * and sixty a minute per IP whatever is typed. Keyed on the address as
+     * well as the IP so an office behind one NAT is not locked out by its
+     * own nine o'clock sign-ins; the IP ceiling is what stops one client
+     * walking a list of addresses. An application that defines its own
+     * `visns-auth` limiter first keeps it.
+     */
+    protected function registerAuthRateLimiter(): void
+    {
+        if (\Illuminate\Support\Facades\RateLimiter::limiter('visns-auth')) {
+            return;
+        }
+
+        \Illuminate\Support\Facades\RateLimiter::for('visns-auth', function (\Illuminate\Http\Request $request) {
+            // The address typed; a two-factor post carries none, so its
+            // session (which holds the pending sign-in) stands in for it.
+            $who = strtolower(trim((string) ($request->input('email') ?? $request->input('username') ?? '')));
+            if ($who === '' && $request->hasSession()) {
+                $who = 'session:' . $request->session()->getId();
+            }
+
+            return [
+                \Illuminate\Cache\RateLimiting\Limit::perMinute(10)->by('visns-auth|' . sha1($who) . '|' . $request->ip()),
+                \Illuminate\Cache\RateLimiting\Limit::perMinute(60)->by('visns-auth-ip|' . $request->ip()),
+            ];
+        });
     }
 }

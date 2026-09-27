@@ -5,6 +5,62 @@ Notable changes to `visnsstudio/visns-packages`.
 Entries before 4.15.0 were not kept in a file; the git log and the README's
 per-module sections are the record for those.
 
+## 4.17.0 — security
+
+A security review of the package's routes. Every change keeps existing screens
+working; two defaults change, and both have a switch.
+
+### Changed — defaults
+
+- **Self-registration is off** (`auth.registration_enabled`,
+  `VISNS_REGISTRATION_ENABLED`). `POST /register` and `POST /api/register`
+  answer 404 until an application turns it on. A registered account passes
+  every route gated on `auth` alone, and nothing in visns-components calls
+  these routes — the stack signs people up by invitation.
+- **Sign-in, password reset, two-factor and registration are rate limited**
+  (`auth_throttle`, default `throttle:visns-auth`): ten a minute per address
+  and IP (a two-factor post is keyed on its session), plus sixty a minute per
+  IP. An application defining its own `visns-auth` limiter keeps it; null
+  turns the throttle off.
+
+### Fixed
+
+- **The file, role, permission, PDF, notification and two-factor routes need
+  a signed-in user** of their own, instead of relying on each application's
+  `routes_middleware` carrying `auth`. `ajax/user/profile` still answers a
+  guest with its empty payload, which the sign-in screen reads. Roles and
+  permissions take `roles_middleware` (default `['auth']`; add your
+  administrator permission).
+- **PDF routes never evaluate PHP.** Every render forces `isPhpEnabled` off,
+  PDF JavaScript and debug temp files off, and reads confined to `public/`
+  unless a call site names its own root; the `options` a caller posts to
+  `generate-from-html` are limited to layout keys. Remote images stay on by
+  default for S3-hosted pictures (`pdf.remote_enabled`).
+- **`ajax/files/downloadByPath` reaches only a path the `files` table knows**,
+  refuses traversal, and always sends an attachment with a filename that
+  cannot break the header. DataGrid's use (a file row without its id) is
+  unchanged.
+- **`DynamicController` copies only a fresh upload** (`tmp/<uuid>`, as Vapor
+  issues) onto a record. A posted key naming any other object in the bucket
+  used to be copied onto the record and then downloadable from it —
+  `DynamicJsonController` already refused this.
+- **The free-form report builder hides credential tables and secret
+  columns** (`Support\ReportSchemaPolicy`): sessions, tokens, password resets,
+  integration settings, the vault, jobs; and any column named like
+  `password`, `*_token`, `*_secret`, `api_key`, `credentials`. They are left
+  out of every listing and a query naming one — main table, join, column,
+  formula, filter, sort or distinct field — is refused with a 422 before any
+  SQL runs. `report_builder.denied_tables` / `denied_columns` add to it and
+  `allowed_tables` narrows it to a list. The semantic (v2) builder is
+  unchanged; it only names what the registry declares.
+
+### Added
+
+- `entity_default_middleware` (default `['auth']`): what a dynamic entity with
+  no middleware of its own gets.
+
+Tests: `tests/Platform/Security` (13).
+
 ## 4.16.0
 
 ### Added — Email campaigns (`email_campaigns`), on Resend Broadcasts

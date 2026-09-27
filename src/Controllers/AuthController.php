@@ -474,6 +474,14 @@ class AuthController extends \App\Http\Controllers\Controller
      */
     public function register(Request $request)
     {
+        // Self-registration is OFF unless an application turns it on
+        // (`visns-packages.auth.registration_enabled`). A registered account
+        // passes every route gated on `auth` alone, so an open register
+        // endpoint is a way in; the VISNS stack signs people up by
+        // invitation, and nothing in visns-components calls this route.
+        if (!ModuleConfig::get('auth.registration_enabled', false)) {
+            abort(404);
+        }
         try {
             // Validate the request data
             $validated = $request->validate([

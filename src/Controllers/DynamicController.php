@@ -2149,7 +2149,7 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
 
         // Handle file upload if 'key' is present in the request
-        if ($request->has('key') && $request->has('file_relationship')) {
+        if ($request->has('key') && $request->has('file_relationship') && $this->isUploadKey($request->input('key'))) {
             $relationshipMethod = $request->input('file_relationship');
             $unique_name =
                 $request->input('uuid') . '.' . $request->input('extension');
@@ -2200,7 +2200,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                     $path = $this->folder . '/' . $unique_name;
 
                     $disk = config('filesystems.default', 's3');
-                    if (Storage::disk($disk)->exists($uploadedFile['key'])) {
+                    if ($this->isUploadKey($uploadedFile['key'] ?? null) && Storage::disk($disk)->exists($uploadedFile['key'])) {
                         Storage::disk($disk)->copy(
                             $uploadedFile['key'],
                             $path
@@ -2459,7 +2459,7 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
 
         // Handle file upload if 'key' is present in the request
-        if ($request->has('key') && $request->has('file_relationship')) {
+        if ($request->has('key') && $request->has('file_relationship') && $this->isUploadKey($request->input('key'))) {
             $relationshipMethod = $request->input('file_relationship');
             $unique_name =
                 $request->input('uuid') . '.' . $request->input('extension');
@@ -2555,7 +2555,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                         ) {
                             // Copy the file if it exists in the storage
                             $disk = config('filesystems.default', 's3');
-                            if (Storage::disk($disk)->exists($uploadedFile['key'])) {
+                            if ($this->isUploadKey($uploadedFile['key'] ?? null) && Storage::disk($disk)->exists($uploadedFile['key'])) {
                                 Storage::disk($disk)->copy(
                                     $uploadedFile['key'],
                                     $path
@@ -2808,6 +2808,10 @@ class DynamicController extends \App\Http\Controllers\Controller
             'fileable_field' => ['required'],
             'fileable_type' => ['required'],
         ]);
+
+        if ($request->filled('key') && !$this->isUploadKey($request->input('key'))) {
+            return response()->json(['error' => 'That upload could not be found. Try uploading the file again.'], 422);
+        }
 
         if ($request->filled('key')) {
             $filePath =
@@ -3912,5 +3916,19 @@ class DynamicController extends \App\Http\Controllers\Controller
             // If search fails, rethrow to trigger fallback in calling code
             throw $e;
         }
+    }
+    /**
+     * A key this request may copy from: a fresh upload, which Vapor's signed
+     * storage URL always issues as `tmp/<uuid>`. Anything else is another
+     * record's file, and copying it onto this record would hand its bytes to
+     * whoever can read this one — DynamicJsonController has always refused
+     * the same way.
+     */
+    private function isUploadKey($key): bool
+    {
+        return is_string($key)
+            && str_starts_with($key, 'tmp/')
+            && !str_contains($key, '..')
+            && !str_contains($key, "\0");
     }
 }

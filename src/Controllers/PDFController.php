@@ -11,6 +11,36 @@ use Spatie\Browsershot\Browsershot;
 
 class PDFController extends \App\Http\Controllers\Controller
 {
+    /** Layout options a request may set; every other key is refused. */
+    private const CALLER_OPTIONS = [
+        'dpi', 'defaultFont', 'defaultPaperSize', 'defaultPaperOrientation',
+        'defaultMediaType', 'isHtml5ParserEnabled', 'isFontSubsettingEnabled',
+    ];
+
+    /**
+     * The options every render here gets, whatever the call site asked for:
+     * no inline PHP (dompdf evaluates `<script type="text/php">` when it is
+     * on, and these routes render caller-supplied HTML), no PDF JavaScript,
+     * no debug files left in the temp directory, reads confined to public/
+     * unless a call site names a narrower root, and remote fetching only
+     * where `visns-packages.pdf.remote_enabled` allows it (default on, so
+     * S3-hosted images keep printing).
+     */
+    private function hardened(array $options): array
+    {
+        $remote = (bool) config('visns-packages.pdf.remote_enabled', true);
+
+        return array_merge($options, [
+            'isPhpEnabled' => false,
+            'enable_php' => false,
+            'isJavascriptEnabled' => false,
+            'debugKeepTemp' => false,
+            'debugCss' => false,
+            'isRemoteEnabled' => $remote && ($options['isRemoteEnabled'] ?? $options['enable_remote'] ?? false),
+            'enable_remote' => $remote && ($options['enable_remote'] ?? $options['isRemoteEnabled'] ?? false),
+            'chroot' => $options['chroot'] ?? public_path(),
+        ]);
+    }
     /**
      * Generate a PDF from a view
      *
@@ -71,7 +101,7 @@ class PDFController extends \App\Http\Controllers\Controller
 
             // Generate PDF with improved options
             $pdf = PDF::loadView($viewName, $data)
-                ->setOptions($defaultOptions)
+                ->setOptions($this->hardened($defaultOptions))
                 ->setPaper($paper, $orientation);
 
             // Return PDF as download or inline
@@ -142,7 +172,7 @@ class PDFController extends \App\Http\Controllers\Controller
 
             // Generate PDF with improved options
             $pdf = PDF::loadHTML($html)
-                ->setOptions($defaultOptions)
+                ->setOptions($this->hardened($defaultOptions))
                 ->setPaper($paper, $orientation);
 
             // Return PDF as download or inline
@@ -203,13 +233,18 @@ class PDFController extends \App\Http\Controllers\Controller
             ];
 
             // Merge with user-provided options
+            // Only the layout options a caller may choose; anything else in
+            // `options` (PHP evaluation, the chroot, remote fetching) is ours.
             $options = array_merge(
                 $defaultOptions,
-                $validated['options'] ?? []
+                array_intersect_key(
+                    (array) ($validated['options'] ?? []),
+                    array_flip(self::CALLER_OPTIONS)
+                )
             );
 
             // Initialize PDF
-            $pdf = PDF::setOptions($options);
+            $pdf = PDF::setOptions($this->hardened($options));
 
             // Load content from view or HTML
             if (isset($validated['view'])) {
@@ -338,7 +373,7 @@ class PDFController extends \App\Http\Controllers\Controller
 
             // Generate PDF with enhanced options and CSS
             $pdf = PDF::loadView($viewName, $data)
-                ->setOptions($options)
+                ->setOptions($this->hardened($options))
                 ->setPaper($paper, $orientation);
 
             // Add inline CSS to the PDF
@@ -494,7 +529,7 @@ class PDFController extends \App\Http\Controllers\Controller
             $hasHeaders = $headerConfig && ($headerConfig['enabled'] ?? false);
             
             // Generate PDF using the assembled HTML content
-            $pdf = PDF::setOptions($options)
+            $pdf = PDF::setOptions($this->hardened($options))
                 ->setPaper($paper, $orientation);
             
             // Set page script BEFORE loading HTML - disabled to get working PDF first

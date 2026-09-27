@@ -13,6 +13,7 @@ use Illuminate\Validation\ValidationException;
 use Visnsstudio\VisnsPackages\Models\ReportBuilder;
 use Visnsstudio\VisnsPackages\Services\ReportSemantics\QueryCompiler;
 use Visnsstudio\VisnsPackages\Services\ReportSemantics\SemanticException;
+use Visnsstudio\VisnsPackages\Support\ReportSchemaPolicy;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -98,7 +99,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             }
 
             // Check if table exists
-            if (!Schema::hasTable($tableName)) {
+            if (!$this->reportableTable($tableName)) {
                 return response()->json(
                     [
                         'success' => false,
@@ -109,7 +110,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             }
 
             // Get columns for the table
-            $columns = Schema::getColumnListing($tableName);
+            $columns = $this->reportableColumns($tableName);
 
             // Get column types and additional information
             $columnDetails = [];
@@ -172,7 +173,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             // Format the response with tables and their columns
             $result = [];
             foreach ($tables as $table) {
-                $columns = Schema::getColumnListing($table);
+                $columns = $this->reportableColumns($table);
 
                 $columnDetails = [];
                 foreach ($columns as $column) {
@@ -256,7 +257,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             }
 
             // Check if table exists
-            if (!Schema::hasTable($tableName)) {
+            if (!$this->reportableTable($tableName)) {
                 return response()->json(
                     [
                         'success' => false,
@@ -267,7 +268,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             }
 
             // Get foreign key columns (potential relationships)
-            $columns = Schema::getColumnListing($tableName);
+            $columns = $this->reportableColumns($tableName);
             $relationships = [];
 
             // Look for columns that might be foreign keys (ending with _id)
@@ -312,9 +313,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
                     // Check if any of the possible tables exist
                     foreach ($possibleTables as $possibleTable) {
-                        if (Schema::hasTable($possibleTable)) {
+                        if ($this->reportableTable($possibleTable)) {
                             // Check if the related table has an 'id' column
-                            if (Schema::hasColumn($possibleTable, 'id')) {
+                            if ($this->reportableColumn($possibleTable, 'id')) {
                                 $relationships[] = [
                                     'source_table' => $tableName,
                                     'source_column' => $column,
@@ -370,7 +371,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
             foreach ($allTables as $otherTable) {
                 if ($otherTable !== $tableName) {
-                    $otherTableColumns = Schema::getColumnListing($otherTable);
+                    $otherTableColumns = $this->reportableColumns($otherTable);
 
                     foreach ($potentialForeignKeys as $potentialForeignKey) {
                         if (
@@ -397,7 +398,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     if (in_array($pivotPattern1, $allTables)) {
                         // This is likely a pivot table
                         $pivotTable = $pivotPattern1;
-                        $pivotColumns = Schema::getColumnListing($pivotTable);
+                        $pivotColumns = $this->reportableColumns($pivotTable);
 
                         $fk1 = $singularTableName . '_id';
                         $fk2 = rtrim($otherTable, 's') . '_id';
@@ -423,7 +424,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     } elseif (in_array($pivotPattern2, $allTables)) {
                         // This is likely a pivot table
                         $pivotTable = $pivotPattern2;
-                        $pivotColumns = Schema::getColumnListing($pivotTable);
+                        $pivotColumns = $this->reportableColumns($pivotTable);
 
                         $fk1 = $singularTableName . '_id';
                         $fk2 = rtrim($otherTable, 's') . '_id';
@@ -494,7 +495,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             }
 
             // Check if table exists
-            if (!Schema::hasTable($tableName)) {
+            if (!$this->reportableTable($tableName)) {
                 return response()->json(
                     [
                         'success' => false,
@@ -591,7 +592,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
     private function getRelationshipsForTable($tableName)
     {
         // Get foreign key columns (potential relationships)
-        $columns = Schema::getColumnListing($tableName);
+        $columns = $this->reportableColumns($tableName);
         $relationships = [];
 
         // Look for columns that might be foreign keys (ending with _id)
@@ -636,9 +637,9 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
                 // Check if any of the possible tables exist
                 foreach ($possibleTables as $possibleTable) {
-                    if (Schema::hasTable($possibleTable)) {
+                    if ($this->reportableTable($possibleTable)) {
                         // Check if the related table has an 'id' column
-                        if (Schema::hasColumn($possibleTable, 'id')) {
+                        if ($this->reportableColumn($possibleTable, 'id')) {
                             $relationships[] = [
                                 'source_table' => $tableName,
                                 'source_column' => $column,
@@ -694,7 +695,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
         foreach ($allTables as $otherTable) {
             if ($otherTable !== $tableName) {
-                $otherTableColumns = Schema::getColumnListing($otherTable);
+                $otherTableColumns = $this->reportableColumns($otherTable);
 
                 foreach ($potentialForeignKeys as $potentialForeignKey) {
                     if (in_array($potentialForeignKey, $otherTableColumns)) {
@@ -734,7 +735,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     if (in_array($pivotPattern, $allTables)) {
                         // This is likely a pivot table
                         $pivotTable = $pivotPattern;
-                        $pivotColumns = Schema::getColumnListing($pivotTable);
+                        $pivotColumns = $this->reportableColumns($pivotTable);
 
                         $fk1 = $singularTableName . '_id';
                         $fk2 = $otherTableSingular . '_id';
@@ -815,7 +816,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                 }, $tables);
 
 
-                return $tableNames;
+                return $this->schemaPolicy()->filterTables($tableNames);
             }
 
             Log::warning('No tables found using SHOW TABLES');
@@ -914,7 +915,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
 
             // Method 3: Try to get column listing and infer type
             try {
-                if (Schema::hasColumn($tableName, $column)) {
+                if ($this->reportableColumn($tableName, $column)) {
                     // Try to infer type from a sample value
                     $sample = DB::table($tableName)
                         ->select($column)
@@ -993,8 +994,8 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
                     'success' => true,
                     'database' => $databaseName,
                     'property_name' => $propertyName,
-                    'count' => count($tables),
-                    'tables' => $tableNames,
+                    'count' => count($this->schemaPolicy()->filterTables($tableNames)),
+                    'tables' => $this->schemaPolicy()->filterTables($tableNames),
                 ]);
             }
 
@@ -1040,7 +1041,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             }
 
             // Check if table exists
-            if (!Schema::hasTable($tableName)) {
+            if (!$this->reportableTable($tableName)) {
                 return response()->json(
                     [
                         'success' => false,
@@ -1051,7 +1052,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             }
 
             // Check if column exists
-            if (!Schema::hasColumn($tableName, $columnName)) {
+            if (!$this->reportableColumn($tableName, $columnName)) {
                 return response()->json(
                     [
                         'success' => false,
@@ -1763,13 +1764,49 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
      * @param string $table
      * @return array
      */
+    /**
+     * The one schema policy this controller consults.
+     * @see ReportSchemaPolicy
+     */
+    private function schemaPolicy(): ReportSchemaPolicy
+    {
+        return app(ReportSchemaPolicy::class);
+    }
+
+    /** A table exists AND the policy reports on it. */
+    private function reportableTable($table): bool
+    {
+        return is_string($table)
+            && $this->schemaPolicy()->tableAllowed($table)
+            && Schema::hasTable($table);
+    }
+
+    /** A column exists AND the policy reports on it. */
+    private function reportableColumn($table, $column): bool
+    {
+        return is_string($column)
+            && $this->schemaPolicy()->columnAllowed($column)
+            && $this->reportableTable($table)
+            && Schema::hasColumn($table, $column);
+    }
+
+    /** A table's columns, less the ones the policy hides; none for a hidden table. */
+    private function reportableColumns($table): array
+    {
+        if (!$this->reportableTable($table)) {
+            return [];
+        }
+
+        return $this->schemaPolicy()->filterColumns(Schema::getColumnListing($table));
+    }
+
     private function getCachedColumnListing(string $table): array
     {
         return Cache::remember(
             'visns:report-builder:columns:' . $table,
             600,
             function () use ($table) {
-                return Schema::getColumnListing($table);
+                return $this->reportableColumns($table);
             }
         );
     }
@@ -1874,6 +1911,10 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
         if (empty($requestColumns)) {
             throw new \Exception('At least one column must be selected');
         }
+
+        // Every table and column the configuration names must be one the
+        // schema policy reports on (422, client safe) — before any SQL runs.
+        $this->schemaPolicy()->assertQueryConfig($queryConfig);
 
         // Start building the query
         $query = DB::table($mainTable);
@@ -3234,7 +3275,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             $limit = $validated['limit'] ?? 100;
 
             // Check if table exists
-            if (!Schema::hasTable($tableName)) {
+            if (!$this->reportableTable($tableName)) {
                 return response()->json(
                     [
                         'success' => false,
@@ -3245,7 +3286,7 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
             }
 
             // Check if column exists
-            if (!Schema::hasColumn($tableName, $columnName)) {
+            if (!$this->reportableColumn($tableName, $columnName)) {
                 return response()->json(
                     [
                         'success' => false,
