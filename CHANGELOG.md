@@ -5,6 +5,25 @@ Notable changes to `visnsstudio/visns-packages`.
 Entries before 4.15.0 were not kept in a file; the git log and the README's
 per-module sections are the record for those.
 
+## 4.17.1 — security
+
+### Fixed
+
+- **The package `User` model no longer serialises a secret.** `$hidden` now
+  carries the Microsoft sign-in tokens (`provider_token`,
+  `provider_refresh_token`), the two-factor secret and recovery codes, the
+  code-channel token, `otp_code` and `api_token`; before this every payload
+  that serialised a user (profile, user grids, eager-loaded owners and
+  assignees) carried the first two in plaintext.
+- **The sign-in tokens are encrypted at rest** with `Casts\EncryptedOrPlain`,
+  which still reads a token written before the cast and re-encrypts it on the
+  next save. An application with existing rows can encrypt them in place; the
+  omnia-global-app migration `2026_09_27_100000_encrypt_stored_oauth_tokens`
+  is the worked example.
+- **The same columns are kept out of the audit trail** (`$auditExclude`).
+
+Tests: `tests/Platform/Security/UserSecretsTest.php` (2).
+
 ## 4.17.0 — security
 
 A security review of the package's routes. Every change keeps existing screens

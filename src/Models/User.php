@@ -50,7 +50,36 @@ class User extends Authenticatable implements Auditable
      *
      * @var array
      */
-    protected $hidden = ['password', 'remember_token'];
+    /*
+     * Everything secret on the row (4.17.1). A user is serialised by the
+     * profile endpoint, user grids and every relation that eager-loads one,
+     * so a column not listed here is in all of those payloads — the Microsoft
+     * sign-in tokens were.
+     */
+    protected $hidden = [
+        'password',
+        'remember_token',
+        'provider_token',
+        'provider_refresh_token',
+        'two_factor_secret',
+        'two_factor_recovery_codes',
+        'two_factor_token',
+        'otp_code',
+        'api_token',
+    ];
+
+    /** Kept out of the unencrypted audit trail, for the same reason. */
+    protected $auditExclude = [
+        'password',
+        'remember_token',
+        'provider_token',
+        'provider_refresh_token',
+        'two_factor_secret',
+        'two_factor_recovery_codes',
+        'two_factor_token',
+        'otp_code',
+        'api_token',
+    ];
 
     /**
      * The attributes that should be cast to native types.
@@ -61,6 +90,10 @@ class User extends Authenticatable implements Auditable
         'dashboard_settings' => 'array',
         'email_verified_at' => 'datetime',
         'two_factor_confirmed_at' => 'datetime',
+        // Encrypted at rest; the tolerant cast still reads a token written
+        // before it existed, and re-encrypts it on the next save.
+        'provider_token' => \Visnsstudio\VisnsPackages\Casts\EncryptedOrPlain::class,
+        'provider_refresh_token' => \Visnsstudio\VisnsPackages\Casts\EncryptedOrPlain::class,
     ];
 
     /**
