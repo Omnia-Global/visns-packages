@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use Visnsstudio\VisnsPackages\Exceptions\JsonValidationException;
+use Visnsstudio\VisnsPackages\Support\RelationGuard;
 
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -363,7 +364,7 @@ class DynamicController extends \App\Http\Controllers\Controller
         $sortField =
             $request->input('orderBy') ??
             ($request->input('sortBy') ?? ($fields[1] ?? null));
-        $sort = $request->input('order') ?? ($request->input('sort') ?? 'asc');
+        $sort = $this->sortDirection($request->input('order') ?? ($request->input('sort') ?? 'asc'));
 
         // Use intelligent sort field detection if no sort field specified
         if (is_null($sortField)) {
@@ -499,7 +500,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                         }
                         break;
                     case 'whereHas':
-                        $query->whereHas($condition['value']);
+                        $this->applyWhereHasName($query, $condition['value'] ?? null, false);
                         break;
                     default:
                         $this->applyConditionBasedOnOperator(
@@ -551,6 +552,30 @@ class DynamicController extends \App\Http\Controllers\Controller
         $sort = 'asc';
         $fields = $request->input('fields', ['id', 'label']);
 
+        // Each field is read as `$item->{$field}`, and Eloquent resolves a
+        // name that is a method by CALLING it as a relation. A field naming a
+        // method that is neither a relation nor an accessor is dropped.
+        $fields = is_array($fields) ? array_values($fields) : ['id', 'label'];
+        $model = $this->model;
+        $safeFields = array_values(array_filter($fields, function ($field) use ($model) {
+            if (!is_string($field) || $field === '') {
+                return false;
+            }
+            if (!method_exists($model, $field)) {
+                return true;
+            }
+
+            return RelationGuard::isRelation($model, $field)
+                || $model->hasGetMutator($field)
+                || $model->hasAttributeMutator($field);
+        }));
+        if (count($safeFields) !== count($fields)) {
+            Log::info('dropdownWithGroups: ignoring requested fields that name methods', [
+                'model' => get_class($this->model),
+            ]);
+        }
+        $fields = $safeFields !== [] ? $safeFields : ['id', 'label'];
+
         // Get sorting parameters
         [$sortField, $sort] = $this->getSortParams($request, $fields);
 
@@ -595,7 +620,7 @@ class DynamicController extends \App\Http\Controllers\Controller
                         }
                         break;
                     case 'whereHas':
-                        $query->whereHas($condition['value']);
+                        $this->applyWhereHasName($query, $condition['value'] ?? null, false);
                         break;
                     default:
                         $this->applyConditionBasedOnOperator(
@@ -871,7 +896,9 @@ class DynamicController extends \App\Http\Controllers\Controller
 
                 $query->customOrder(
                     $request->input('sortBy'),
-                    $request->input('sort')
+                    $request->filled('sort')
+                        ? $this->sortDirection($request->input('sort'))
+                        : null
                 );
             }
 
@@ -1063,14 +1090,7 @@ class DynamicController extends \App\Http\Controllers\Controller
         
         // Handle whereDoesntHave case
         if (isset($condition['whereDoesntHave'])) {
-            $relation = $condition['whereDoesntHave'];
-            if (is_string($relation)) {
-                $query->whereDoesntHave($relation);
-            } elseif (is_array($relation)) {
-                foreach ($relation as $rel) {
-                    $query->whereDoesntHave($rel);
-                }
-            }
+            $this->applyWhereHasName($query, $condition['whereDoesntHave'], true);
             return;
         }
         
@@ -1259,19 +1279,28 @@ class DynamicController extends \App\Http\Controllers\Controller
      */
     protected function isValidColumn($column)
     {
+        // Skip validation for raw SQL expressions built by the package itself
+        if ($column instanceof \Illuminate\Database\Query\Expression) {
+            return true;
+        }
+
+        if (!is_string($column) || $column === '') {
+            return false;
+        }
+
         // If model is not set, we can't validate
         if (!$this->model) {
             return true;
         }
 
-        // Skip validation for JSON path expressions
+        // A JSON path expression (`details->status`): the base column must be
+        // a real column and every segment a plain identifier.
         if (strpos($column, '->') !== false) {
-            return true;
-        }
+            $segments = explode('->', $column);
+            $base = array_shift($segments);
 
-        // Skip validation for raw SQL expressions
-        if ($column instanceof \Illuminate\Database\Query\Expression) {
-            return true;
+            return $this->isSafeJsonSegments($segments, false)
+                && $this->isValidColumn($base);
         }
 
         // Skip validation for special cases
@@ -1288,6 +1317,87 @@ class DynamicController extends \App\Http\Controllers\Controller
                 "Error checking if column {$column} exists: " . $e->getMessage()
             );
             return true;
+        }
+    }
+
+    /**
+     * JSON path segments: plain identifiers only (`[A-Za-z0-9_]`). An empty
+     * list is the whole document when $allowEmpty is true.
+     *
+     * @param array<int, mixed> $segments
+     */
+    protected function isSafeJsonSegments(array $segments, bool $allowEmpty = true): bool
+    {
+        if ($segments === []) {
+            return $allowEmpty;
+        }
+
+        foreach ($segments as $segment) {
+            if (!is_string($segment) || !preg_match('/^[A-Za-z0-9_]+$/', $segment)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /** @param array<int, string> $segments */
+    protected function jsonPath(array $segments): string
+    {
+        return $segments === [] ? '$' : '$.' . implode('.', $segments);
+    }
+
+    /**
+     * `JSON_EXTRACT(<wrapped column>, ?)` for the table the query filters, or
+     * null when the column is not a real column of that table or the path is
+     * not plain identifiers. The path is the caller's binding (jsonPath()).
+     *
+     * @param array<int, mixed> $segments
+     */
+    protected function jsonExtractSql($query, $column, array $segments): ?string
+    {
+        if (!is_string($column) || !preg_match('/^[A-Za-z0-9_]+$/', $column) || !$this->isSafeJsonSegments($segments)) {
+            return null;
+        }
+
+        if ($query instanceof \Illuminate\Database\Eloquent\Builder) {
+            $table = $query->getModel()->getTable();
+            $base = $query->getQuery();
+        } else {
+            $table = $query->from;
+            $base = $query;
+        }
+
+        if (!is_string($table) || !Schema::hasColumn($table, $column)) {
+            return null;
+        }
+
+        return 'JSON_EXTRACT(' . $base->getGrammar()->wrap($table . '.' . $column) . ', ?)';
+    }
+
+    /** `asc` or `desc`; anything else is `asc`. */
+    protected function sortDirection($direction): string
+    {
+        return is_string($direction) && strtolower(trim($direction)) === 'desc' ? 'desc' : 'asc';
+    }
+
+    /**
+     * whereHas / whereDoesntHave for a relation name (or list of names) that
+     * came from a request. A name that is not a real relation - including a
+     * dotted path through relations - is skipped and logged, never called.
+     */
+    protected function applyWhereHasName($query, $names, bool $doesntHave): void
+    {
+        foreach (is_array($names) ? $names : [$names] as $name) {
+            if (!RelationGuard::isRelationPath($this->model, $name)) {
+                Log::info('Skipping ' . ($doesntHave ? 'whereDoesntHave' : 'whereHas') . ' on something that is not a relation', [
+                    'model' => get_class($this->model),
+                    'relation' => is_scalar($name) ? (string) $name : gettype($name),
+                ]);
+                continue;
+            }
+
+            $doesntHave ? $query->whereDoesntHave($name) : $query->whereHas($name);
         }
     }
 
@@ -1337,7 +1447,15 @@ class DynamicController extends \App\Http\Controllers\Controller
         if (!$insideRelation && is_string($id) && str_contains($id, '.')) {
             [$relation, $column] = explode('.', $id, 2);
 
-            if (!str_contains($column, '.') && method_exists($this->model, $relation)) {
+            if (!str_contains($column, '.') && RelationGuard::isRelation($this->model, $relation)) {
+                $relatedTable = RelationGuard::relatedModelForPath($this->model, $relation)?->getTable();
+                if (!$relatedTable || !Schema::hasColumn($relatedTable, $column)) {
+                    Log::info(
+                        "Skipping where condition for invalid relation column: {$relation}.{$column} in table: {$this->model->getTable()}"
+                    );
+                    return;
+                }
+
                 $query->whereHas($relation, function ($related) use ($column, $operator, $value) {
                     // QUALIFIED with the related table: a many-to-many
                     // whereHas joins the pivot, so a bare `id` is ambiguous
@@ -1399,26 +1517,14 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         // Special case: if only whereHas is provided (no id/value needed)
         if (empty($id) && !empty($whereHas)) {
-            if (is_string($whereHas)) {
-                $query->whereHas($whereHas);
-            } elseif (is_array($whereHas)) {
-                foreach ($whereHas as $relation) {
-                    $query->whereHas($relation);
-                }
-            }
+            $this->applyWhereHasName($query, $whereHas, false);
             return;
         }
 
         // NEW: Special case for whereDoesntHave (no id/value needed)
         $whereDoesntHave = $condition['whereDoesntHave'] ?? [];
         if (empty($id) && !empty($whereDoesntHave)) {
-            if (is_string($whereDoesntHave)) {
-                $query->whereDoesntHave($whereDoesntHave);
-            } elseif (is_array($whereDoesntHave)) {
-                foreach ($whereDoesntHave as $relation) {
-                    $query->whereDoesntHave($relation);
-                }
-            }
+            $this->applyWhereHasName($query, $whereDoesntHave, true);
             return;
         }
 
@@ -1433,9 +1539,12 @@ class DynamicController extends \App\Http\Controllers\Controller
                 ->format('Y-m-d');
         }
 
+        if (!is_string($id)) {
+            return;
+        }
+
         $fieldParts = explode('.', $id);
         $jsonField = array_shift($fieldParts);
-        $jsonPath = '$.' . implode('.', $fieldParts);
 
         // Skip column validation for whereHas conditions
         $skipColumnValidation = !empty($whereHas);
@@ -1452,18 +1561,26 @@ class DynamicController extends \App\Http\Controllers\Controller
         $applyCondition = function ($query) use (
             $operator,
             $jsonField,
-            $jsonPath,
+            $fieldParts,
             $value,
             $type
         ) {
             switch ($operator) {
                 case 'contain_json':
-                    $query->where(
-                        DB::raw(
-                            "JSON_UNQUOTE(JSON_EXTRACT($jsonField, '$jsonPath'))"
-                        ),
-                        'like',
-                        '%' . $value . '%'
+                    // The column is checked against the schema of the table
+                    // being filtered (the related one under whereHas), the
+                    // path segments against a strict pattern, and the path is
+                    // BOUND - nothing from the filter id is interpolated.
+                    $extract = $this->jsonExtractSql($query, $jsonField, $fieldParts);
+                    if ($extract === null) {
+                        Log::info(
+                            "Skipping contain_json condition for invalid column or path: {$jsonField}"
+                        );
+                        break;
+                    }
+                    $query->whereRaw(
+                        "JSON_UNQUOTE({$extract}) like ?",
+                        [$this->jsonPath($fieldParts), '%' . $value . '%']
                     );
                     break;
                 case 'contains':
@@ -1580,6 +1697,20 @@ class DynamicController extends \App\Http\Controllers\Controller
             // Apply conditions with whereHas if provided
             // Ensure whereHas is treated as an array, even if it's a single string
             $relations = is_string($whereHas) ? [$whereHas] : $whereHas;
+
+            // Each name is a relation of the model the previous one leads to;
+            // anything else is skipped rather than called as a method.
+            if (
+                !is_array($relations) ||
+                array_filter($relations, fn ($r) => !is_string($r)) !== [] ||
+                !RelationGuard::isRelationPath($this->model, implode('.', $relations))
+            ) {
+                Log::info('Skipping where condition through an unknown relation', [
+                    'model' => get_class($this->model),
+                    'whereHas' => $whereHas,
+                ]);
+                return;
+            }
 
             // Recursive function to process relationships
             $applyNestedWhereHas = function (
@@ -1983,78 +2114,19 @@ class DynamicController extends \App\Http\Controllers\Controller
             }
         }
 
-        // Extract nested objects that might be relationships
-        $nestedRelationships = [];
-        foreach ($allData as $key => $value) {
-            // Check if the value is an array (object) but not a Laravel collection or array of objects
-            if (
-                is_array($value) &&
-                !isset($value[0]) &&
-                !isset($value['value'])
-            ) {
-                // Check if this key corresponds to a relationship method in the model
-                if (method_exists($this->model, $key)) {
-                    // Get the relationship instance
-                    $relation = $this->model->$key();
-
-                    // Handle different relationship types
-                    if (
-                        $relation instanceof
-                            \Illuminate\Database\Eloquent\Relations\HasOne ||
-                        $relation instanceof
-                            \Illuminate\Database\Eloquent\Relations\BelongsTo
-                    ) {
-                        // Store the relationship data for processing after model creation
-                        $nestedRelationships[$key] = $value;
-
-                        // For BelongsTo, we need to create the related model first
-                        if (
-                            $relation instanceof
-                            \Illuminate\Database\Eloquent\Relations\BelongsTo
-                        ) {
-                            $relatedModel = $relation->getRelated();
-
-                            // Update the related model with the nested object data
-                            foreach ($value as $attr => $attrValue) {
-                                $relatedModel->$attr = $attrValue;
-                            }
-
-                            // Save the related model
-                            $relatedModel->save();
-
-                            // Update the foreign key in the main data
-                            $foreignKey = $relation->getForeignKeyName();
-                            $allData[$foreignKey] = $relatedModel->getKey();
-                        }
-
-                        // Remove the nested object from the data array to prevent errors
-                        unset($allData[$key]);
-                    }
-                }
-            }
-        }
+        // Nested objects under a relation name. Only a declared relation is
+        // processed; see processNestedRelationships() for the rules.
+        $pendingHasOne = $this->processNestedRelationships(null, $allData);
 
         // Create a new resource
         $resource = $this->model::create($allData);
 
-        // Process HasOne relationships after the main model is created
-        foreach ($nestedRelationships as $key => $value) {
-            $relation = $resource->$key();
-
-            if (
-                $relation instanceof
-                \Illuminate\Database\Eloquent\Relations\HasOne
-            ) {
-                $relatedModel = $relation->getRelated();
-
-                // Update the related model with the nested object data
-                foreach ($value as $attr => $attrValue) {
-                    $relatedModel->$attr = $attrValue;
-                }
-
-                // Save the related model through the relationship
-                $resource->$key()->save($relatedModel);
-            }
+        // HasOne rows (opt-in via nested_writable) once the parent has a key.
+        foreach ($pendingHasOne as $key => $attributes) {
+            $relation = $resource->{$key}();
+            $relatedModel = $relation->getRelated()->newInstance();
+            $relatedModel->fill($attributes);
+            $relation->save($relatedModel);
         }
 
         // Initialize an array to hold many-to-many relationships
@@ -2149,7 +2221,7 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
 
         // Handle file upload if 'key' is present in the request
-        if ($request->has('key') && $request->has('file_relationship') && $this->isUploadKey($request->input('key'))) {
+        if ($request->has('key') && $request->has('file_relationship') && $this->isUploadKey($request->input('key')) && $this->isFileRelation($resource, $request->input('file_relationship'))) {
             $relationshipMethod = $request->input('file_relationship');
             $unique_name =
                 $request->input('uuid') . '.' . $request->input('extension');
@@ -2190,7 +2262,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                     isset(
                         $uploadedFile['key'],
                         $uploadedFile['file_relationship']
-                    )
+                    ) &&
+                    $this->isFileRelation($resource, $uploadedFile['file_relationship'])
                 ) {
                     $relationshipMethod = $uploadedFile['file_relationship'];
                     $unique_name =
@@ -2233,7 +2306,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                 // Ensure each file is valid before processing
                 if (
                     $request->hasFile($fileKey) &&
-                    $request->file($fileKey)->isValid()
+                    $request->file($fileKey)->isValid() &&
+                    $this->isFileRelation($resource, $fileKey)
                 ) {
                     $fileUpload = $request->file($fileKey);
                     $extension = $fileUpload->getClientOriginalExtension();
@@ -2459,7 +2533,7 @@ class DynamicController extends \App\Http\Controllers\Controller
         }
 
         // Handle file upload if 'key' is present in the request
-        if ($request->has('key') && $request->has('file_relationship') && $this->isUploadKey($request->input('key'))) {
+        if ($request->has('key') && $request->has('file_relationship') && $this->isUploadKey($request->input('key')) && $this->isFileRelation($resource, $request->input('file_relationship'))) {
             $relationshipMethod = $request->input('file_relationship');
             $unique_name =
                 $request->input('uuid') . '.' . $request->input('extension');
@@ -2506,7 +2580,7 @@ class DynamicController extends \App\Http\Controllers\Controller
 
             $relationshipMethod = $uploadedFiles[0]['fileable_field'] ?? null;
 
-            if ($relationshipMethod) {
+            if ($relationshipMethod && $this->isFileRelation($resource, $relationshipMethod)) {
                 // Get current files associated with the resource
                 $existingFiles = $resource->$relationshipMethod()->get();
 
@@ -2535,7 +2609,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                             $uploadedFile['file_relationship']
                         ) &&
                         $uploadedFile['key'] &&
-                        $uploadedFile['file_relationship']
+                        $uploadedFile['file_relationship'] &&
+                        $this->isFileRelation($resource, $uploadedFile['file_relationship'])
                     ) {
                         $relationshipMethod =
                             $uploadedFile['file_relationship'];
@@ -2619,7 +2694,8 @@ class DynamicController extends \App\Http\Controllers\Controller
                 // Ensure each file is valid before processing
                 if (
                     $request->hasFile($fileKey) &&
-                    $request->file($fileKey)->isValid()
+                    $request->file($fileKey)->isValid() &&
+                    $this->isFileRelation($resource, $fileKey)
                 ) {
                     $fileUpload = $request->file($fileKey);
                     $extension = $fileUpload->getClientOriginalExtension();
@@ -2674,99 +2750,122 @@ class DynamicController extends \App\Http\Controllers\Controller
     }
 
     /**
-     * Process nested objects in the input data that might be relationships
+     * Nested objects in the posted data that sit under a relation name.
      *
-     * @param Model $resource The model instance being updated
-     * @param array &$allData The input data array (passed by reference to modify it)
-     * @return void
+     * - Only a DECLARED relation (RelationGuard) is processed. Any other key is
+     *   left for the ordinary fill, where $fillable applies, and is never
+     *   called as a method.
+     * - BelongsTo with the related key posted (`customer: {id: 7}`): the
+     *   parent's foreign key is set to that id, when such a row exists. The
+     *   looked-up row is never written to.
+     * - Writing ATTRIBUTES onto a related row is opt-in per entity:
+     *   `entity_config.<entity>.nested_writable` lists the relation names that
+     *   may be written, default none. When opted in, attributes go through
+     *   fill() (so $fillable applies) and only onto the row ALREADY related to
+     *   this resource - or a new one when there is none - never onto a row
+     *   fetched by a posted id.
+     *
+     * @param Model|null $resource the resource being updated; null on store
+     * @param array &$allData the posted data (relation keys are removed)
+     * @return array<string, array> HasOne attributes to write after a store
      */
     private function processNestedRelationships($resource, array &$allData)
     {
+        $model = $resource ?? $this->model;
+        $writable = (array) config("visns-packages.entity_config.{$this->original}.nested_writable", []);
+        $pendingHasOne = [];
+
         foreach ($allData as $key => $value) {
-            // Check if the value is an array (object) but not a Laravel collection or array of objects
+            // An object (not a list, not a {value: ...} wrapper) under a key.
             if (
-                is_array($value) &&
-                !isset($value[0]) &&
-                !isset($value['value'])
+                !is_string($key) ||
+                !is_array($value) ||
+                isset($value[0]) ||
+                isset($value['value'])
             ) {
-                // Check if this key corresponds to a relationship method in the model
-                if (method_exists($resource, $key)) {
-                    // Get the relationship instance
-                    $relation = $resource->$key();
+                continue;
+            }
 
-                    // Handle different relationship types
-                    if (
-                        $relation instanceof
-                            \Illuminate\Database\Eloquent\Relations\HasOne ||
-                        $relation instanceof
-                            \Illuminate\Database\Eloquent\Relations\BelongsTo
-                    ) {
-                        $related = $relation->getRelated();
-                        $keyName = $related->getKeyName();
-                        $nestedKey = $value[$keyName] ?? null;
+            if (!RelationGuard::isRelation($model, $key)) {
+                continue;
+            }
 
-                        // Get the related model (or create a new one if it doesn't exist)
-                        if (
-                            $relation instanceof
-                            \Illuminate\Database\Eloquent\Relations\BelongsTo
-                        ) {
-                            // For BelongsTo, we need to get the related model first
-                            $relatedModel = $resource->$key;
+            $relation = $model->{$key}();
+            $isBelongsTo = $relation instanceof \Illuminate\Database\Eloquent\Relations\BelongsTo;
+            $isHasOne = $relation instanceof \Illuminate\Database\Eloquent\Relations\HasOne;
 
-                            // If the nested object names a *different* row than the
-                            // one currently attached (e.g. a job form echoing back a
-                            // stale `job_stage` object after the stage moved on), the
-                            // caller wants to point the parent at that row — not
-                            // rewrite the currently attached row's primary key, which
-                            // throws a duplicate-key error on the lookup table.
-                            if (
-                                $nestedKey !== null &&
-                                (!$relatedModel ||
-                                    (string) $relatedModel->getKey() !==
-                                        (string) $nestedKey)
-                            ) {
-                                $relatedModel = $related
-                                    ->newQuery()
-                                    ->find($nestedKey);
-                            }
+            if (!$isBelongsTo && !$isHasOne) {
+                continue;
+            }
 
-                            if (!$relatedModel) {
-                                // Create a new instance of the related model
-                                $relatedModel = $related;
-                            }
-                        } else {
-                            // For HasOne, we can use the relation directly
-                            $relatedModel = $resource->$key ?? $related;
-                        }
+            $related = $relation->getRelated();
+            $keyName = $related->getKeyName();
+            $attributes = $value;
+            unset($attributes[$keyName]);
+            $mayWrite = in_array($key, $writable, true);
 
-                        // Update the related model with the nested object data.
-                        // The primary key is never writable here: it identifies
-                        // the row, it is not an attribute to copy across.
-                        foreach ($value as $attr => $attrValue) {
-                            if ($attr === $keyName) {
-                                continue;
-                            }
-                            $relatedModel->$attr = $attrValue;
-                        }
+            if ($isBelongsTo) {
+                $foreignKey = $relation->getForeignKeyName();
+                $postedKey = $value[$keyName] ?? null;
+                $current = $resource ? $resource->{$key} : null;
 
-                        // Save the related model
-                        $relatedModel->save();
-
-                        // For BelongsTo, we need to update the foreign key on the parent model
-                        if (
-                            $relation instanceof
-                            \Illuminate\Database\Eloquent\Relations\BelongsTo
-                        ) {
-                            $foreignKey = $relation->getForeignKeyName();
-                            $allData[$foreignKey] = $relatedModel->getKey();
-                        }
-
-                        // Remove the nested object from the data array to prevent errors
-                        unset($allData[$key]);
+                if ($postedKey !== null && $postedKey !== '') {
+                    if (is_scalar($postedKey) && $related->newQuery()->whereKey($postedKey)->exists()) {
+                        $allData[$foreignKey] = $postedKey;
+                    } else {
+                        Log::info("Ignoring nested {$key}: no related row with that key");
                     }
+
+                    // Attributes only onto the row that is ALREADY related.
+                    if (
+                        $mayWrite && $attributes !== [] && $current &&
+                        (string) $current->getKey() === (string) $postedKey
+                    ) {
+                        $current->fill($attributes)->save();
+                    }
+                } elseif ($mayWrite && $attributes !== []) {
+                    $target = $current ?: $related->newInstance();
+                    $target->fill($attributes)->save();
+                    $allData[$foreignKey] = $target->getKey();
+                }
+            } elseif ($mayWrite && $attributes !== []) {
+                if ($resource) {
+                    $current = $resource->{$key};
+                    if ($current) {
+                        $current->fill($attributes)->save();
+                    } else {
+                        $new = $related->newInstance();
+                        $new->fill($attributes);
+                        $resource->{$key}()->save($new);
+                    }
+                } else {
+                    $pendingHasOne[$key] = $attributes;
                 }
             }
+
+            // Remove the nested object from the data array to prevent errors
+            unset($allData[$key]);
         }
+
+        return $pendingHasOne;
+    }
+
+    /**
+     * A file field posted by the browser names the relation the file is saved
+     * through; it is called as a method, so it must be a real relation.
+     */
+    private function isFileRelation($resource, $name): bool
+    {
+        if (RelationGuard::isRelation($resource, $name)) {
+            return true;
+        }
+
+        Log::info('Skipping a file relation that is not a relation', [
+            'model' => get_class($resource),
+            'relation' => is_scalar($name) ? (string) $name : gettype($name),
+        ]);
+
+        return false;
     }
 
     /**
@@ -2811,6 +2910,10 @@ class DynamicController extends \App\Http\Controllers\Controller
 
         if ($request->filled('key') && !$this->isUploadKey($request->input('key'))) {
             return response()->json(['error' => 'That upload could not be found. Try uploading the file again.'], 422);
+        }
+
+        if (!$this->isFileRelation($resource, $request->input('fileable_field'))) {
+            return response()->json(['error' => 'That gallery could not be found on this record.'], 422);
         }
 
         if ($request->filled('key')) {
@@ -2906,13 +3009,37 @@ class DynamicController extends \App\Http\Controllers\Controller
             throw new JsonValidationException($validator);
         }
 
+        // Relationship names are loaded and then called as methods, so each
+        // must be a real relation of this model. Refused before anything moves.
+        $requestedRelationships = $request->input('relationships', []);
+        if (!is_array($requestedRelationships)) {
+            $requestedRelationships = [$requestedRelationships];
+        }
+        $invalidRelationships = array_filter(
+            $requestedRelationships,
+            fn ($name) => !is_string($name) || !RelationGuard::isRelation($this->model, $name)
+        );
+        if ($invalidRelationships !== []) {
+            Log::info('Refusing a merge naming something that is not a relation', [
+                'model' => get_class($this->model),
+                'relationships' => array_map(
+                    fn ($name) => is_scalar($name) ? (string) $name : gettype($name),
+                    array_values($invalidRelationships)
+                ),
+            ]);
+
+            throw JsonValidationException::withMessages([
+                'relationships' => ['One or more relationships are not relations of this record.'],
+            ]);
+        }
+
         // Find the target and source models
         $target = $this->model::findOrFail($targetId);
         $source = $this->model::findOrFail($sourceId);
 
         // Extract options from the request
         $options = [
-            'relationships' => $request->input('relationships', []),
+            'relationships' => array_values($requestedRelationships),
             'attributes' => $request->input('attributes', []),
             'exclude' => $request->input('exclude', [
                 'id',

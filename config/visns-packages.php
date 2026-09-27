@@ -339,6 +339,14 @@ return [
     | Advanced configuration for each dynamic entity, allowing custom controllers,
     | middleware, and permissions to be specified for individual entities.
     |
+    | nested_writable (4.17.2): the relation names whose ATTRIBUTES a posted
+    | nested object may write, e.g. `'nested_writable' => ['address']`.
+    | Default none. A nested BelongsTo carrying the related key
+    | (`customer: {id: 7}`) always just sets the foreign key; attributes are
+    | written only for a relation listed here, through fill() so the related
+    | model's $fillable applies, and only onto the row already related to the
+    | record (or a new one when there is none).
+    |
     */
     'entity_config' => [
         'proposalTemplates' => [

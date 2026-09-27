@@ -4,6 +4,8 @@ namespace Visnsstudio\VisnsPackages\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -124,6 +126,9 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
         }
 
         if ($request->has("key") && $request->filled("key")) {
+            if (!$this->isJsonColumn($request->input("key"))) {
+                return response()->json(["error" => "Data not found"], 422);
+            }
             $data = collect($item[$request->input("key")])->firstWhere(
                 "id",
                 $request->input("id")
@@ -164,7 +169,7 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
             }
         }
 
-        if ($id > 0 && $dataKey != "") {
+        if ($id > 0 && $dataKey != "" && $this->isJsonColumn($dataKey)) {
             $item = $this->model->find($id);
 
             if ($item && !is_null($item->{$dataKey})) {
@@ -195,6 +200,10 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
 
         if ($validator->fails()) {
             return response()->json(["error" => $validator->errors()], 422);
+        }
+
+        if (!$this->isJsonColumn($jsonKey)) {
+            return response()->json(["error" => ["key" => ["That field is not a column of this record."]]], 422);
         }
 
         $item = $this->model->find($request->input("dataId"));
@@ -235,6 +244,10 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
             return response()->json(["error" => $validator->errors()], 422);
         }
 
+        if (!$this->isJsonColumn($jsonKey)) {
+            return response()->json(["error" => ["key" => ["That field is not a column of this record."]]], 422);
+        }
+
         $item = $this->model->find($request->input("dataId"));
 
         // Fetch the data field dynamically based on the provided key
@@ -260,6 +273,29 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
         $item->save();
 
         return response()->json(["error" => ""], 200);
+    }
+
+    /**
+     * A key posted by the browser is read as `$item->{$key}`, and Eloquent
+     * resolves a name that is a method by calling it. Only a real column of
+     * the table may be named.
+     */
+    private function isJsonColumn($key): bool
+    {
+        if (
+            is_string($key) &&
+            preg_match('/^[A-Za-z0-9_]+$/', $key) &&
+            $this->model &&
+            Schema::hasColumn($this->model->getTable(), $key)
+        ) {
+            return true;
+        }
+
+        Log::info('DynamicJsonController: ignoring a key that is not a column', [
+            'model' => $this->model ? get_class($this->model) : null,
+        ]);
+
+        return false;
     }
 
     /**
@@ -546,6 +582,10 @@ class DynamicJsonController extends \App\Http\Controllers\Controller
 
         if (!$item) {
             return response()->json(["error" => "Item not found"], 404);
+        }
+
+        if ($request->filled("key") && !$this->isJsonColumn($request->input("key"))) {
+            return response()->json(["error" => "Data not found"], 422);
         }
 
         $filteredData = collect(

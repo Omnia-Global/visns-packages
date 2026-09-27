@@ -5,6 +5,51 @@ Notable changes to `visnsstudio/visns-packages`.
 Entries before 4.15.0 were not kept in a file; the git log and the README's
 per-module sections are the record for those.
 
+## 4.17.2 — security
+
+Request input reached three unsafe places in the dynamic entity controller.
+Existing screens keep working; one behaviour changes (nested writes) and has a
+switch.
+
+### Fixed
+
+- **A relation name from a request must be a real relation.** Eloquent
+  resolves `whereHas`, `whereDoesntHave`, `with`/`load` and `$model->name()`
+  by calling the method of that name, so a request could call any public
+  zero-argument model method. The new `Support\RelationGuard` decides, without
+  calling anything, whether a name is a relation: listed in the model's own
+  `loadableRelations()`, `getSortableRelationshipFields()` or a new optional
+  `$filterableRelations` property, or a public, parameterless, user-land method
+  whose return type is a `Relation` (or, untyped, whose body returns one of
+  Eloquent's relation builders). It guards the `whereHas` / `whereDoesntHave`
+  filters (dropdowns included), the dotted `relation.column` filter, the merge
+  endpoint's `relationships` (422 for an unknown name, before anything moves),
+  nested objects on store/update, the file-relation fields on store, update
+  and `updateGallery` (422), `dropdownWithGroups`' `fields`, the JSON
+  sub-resource `key` / `dataKey` (`DynamicJsonController`, must be a column),
+  and relationship sorting in `HasRelationshipSorting`. Unknown names are
+  skipped and logged.
+- **Nested writes respect `$fillable` and never write unrelated rows.** A
+  nested BelongsTo carrying the related key now only sets the parent's foreign
+  key (when that row exists); the looked-up row is never written. Writing
+  attributes onto a related row is opt-in per entity with
+  `entity_config.<entity>.nested_writable` (default none), goes through
+  `fill()`, and only ever writes the row already related to the record (or a
+  new one when there is none). A key that is not a relation is left to the
+  ordinary fill.
+- **No request text is interpolated into SQL.** The `contain_json` filter
+  checks its column against the schema, allows only `[A-Za-z0-9_]` path
+  segments and binds the path; `isValidColumn()` validates the base column and
+  segments of a `column->path` instead of accepting any `->`; JSON sorting
+  checks the column and segments and binds the path; the sort direction is
+  normalised to `asc`/`desc` in `scopeCustomOrder` and in the controller; a
+  relationship sort checks its column against the related table; and a dotted
+  sort key that is neither a relation, a JSON column nor this table's own
+  qualified column is ignored instead of reaching the database.
+
+Tests: `tests/Platform/Security/RequestInputHardeningTest.php` (12) and
+`tests/Platform/Security/RelationGuardTest.php` (5).
+
 ## 4.17.1 — security
 
 ### Fixed

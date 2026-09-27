@@ -6,7 +6,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Visnsstudio\VisnsPackages\Support\RelationGuard;
 
 trait HasRelationshipSorting
 {
@@ -32,9 +34,14 @@ trait HasRelationshipSorting
             'hasTraitMethod' => method_exists($this, 'applyRelationshipSorting')
         ]);
 
-        if (!isset($orderBy) || !isset($order)) {
+        if (!isset($orderBy) || !isset($order) || !is_string($orderBy)) {
             return $query;
         }
+
+        // The direction reaches raw SQL in the JSON branch and is otherwise
+        // refused by the query builder with an exception; normalise it once
+        // so every branch below gets `asc` or `desc` and nothing else.
+        $order = self::normaliseSortDirection($order);
 
         // Handle dot notation first (could be relationship, JSON field, or virtual column)
         if (str_contains($orderBy, '.')) {
@@ -43,8 +50,9 @@ trait HasRelationshipSorting
             $parts = explode('.', $orderBy);
             $firstPart = $parts[0];
             
-            // 1. Check if this is a relationship FIRST (most common case)
-            if (method_exists($this, $firstPart)) {
+            // 1. Check if this is a relationship FIRST (most common case).
+            // Only a real relation: the name is called as a method below.
+            if (RelationGuard::isRelation($this, $firstPart)) {
                 \Log::info("Detected relationship sorting for: {$orderBy}");
                 return $this->applyRelationshipSorting($query, $orderBy, $order);
             }
@@ -60,6 +68,16 @@ trait HasRelationshipSorting
                 \Log::info("Detected virtual/appended column that cannot be sorted: {$orderBy}");
                 return $this->handleVirtualColumnSorting($query, $orderBy, $order);
             }
+
+            // 4. A column qualified with this model's own table.
+            if (count($parts) === 2 && $firstPart === $this->getTable() && Schema::hasColumn($this->getTable(), $parts[1])) {
+                return $query->orderBy($orderBy, $order);
+            }
+
+            // Anything else names neither a relation, a JSON column nor a
+            // column of this table; ordering by it could only fail.
+            \Log::info("Skipping sort on an unknown dotted key: {$orderBy}");
+            return $query;
         }
 
         // Check for non-dot notation virtual columns
@@ -87,10 +105,13 @@ trait HasRelationshipSorting
         $relationName = array_shift($parts);
         $column = implode('.', $parts);
 
-        // Validate that the relationship exists
-        if (!method_exists($this, $relationName)) {
-            // Fallback to regular ordering if relationship doesn't exist
-            return $query->orderBy($orderBy, $order);
+        $order = self::normaliseSortDirection($order);
+
+        // Validate that the relationship exists. The name is called as a
+        // method below, so only a real relation may pass.
+        if (!RelationGuard::isRelation($this, $relationName)) {
+            \Log::info("Skipping relationship sort on something that is not a relation: {$relationName}");
+            return $query;
         }
 
         try {
@@ -124,6 +145,8 @@ trait HasRelationshipSorting
      */
     protected function applySingleRelationSorting($query, $relation, $column, $order)
     {
+        $order = self::normaliseSortDirection($order);
+
         // Handle nested relationships (e.g., user.profile.company.name)
         if (str_contains($column, '.')) {
             $subQuery = $relation->getQuery()
@@ -134,8 +157,12 @@ trait HasRelationshipSorting
                 )
                 ->limit(1);
         } else {
-            // Simple relationship column
+            // Simple relationship column - a real column of the related table.
             $relatedTable = $relation->getRelated()->getTable();
+            if (!Schema::hasColumn($relatedTable, $column)) {
+                \Log::info("Skipping relationship sort on an unknown column: {$relatedTable}.{$column}");
+                return $query;
+            }
             $qualifiedColumn = "{$relatedTable}.{$column}";
             
             // Get fresh query builder to avoid existing constraints
@@ -163,7 +190,14 @@ trait HasRelationshipSorting
      */
     protected function applyMultipleRelationSorting($query, $relation, $column, $order)
     {
+        $order = self::normaliseSortDirection($order);
         $relatedTable = $relation->getRelated()->getTable();
+
+        if (!Schema::hasColumn($relatedTable, $column)) {
+            \Log::info("Skipping relationship sort on an unknown column: {$relatedTable}.{$column}");
+            return $query;
+        }
+
         $qualifiedColumn = "{$relatedTable}.{$column}";
         
         if ($relation instanceof BelongsToMany) {
@@ -234,16 +268,45 @@ trait HasRelationshipSorting
      */
     protected function applyJsonFieldSorting($query, $orderBy, $order)
     {
-        // Convert dot notation to JSON path
-        // e.g., 'project_detail.project_status' becomes 'project_detail->>"$.project_status"'
+        // 'project_detail.project_status' sorts by JSON_EXTRACT(column, '$.project_status').
+        // The column must be a real column of this table and every path
+        // segment a plain identifier; the path itself is BOUND, never
+        // interpolated, and the direction is normalised.
         $parts = explode('.', $orderBy);
         $jsonField = array_shift($parts);
+
+        if (!self::isSafeJsonPath($parts) || !Schema::hasColumn($this->getTable(), $jsonField)) {
+            \Log::info("Skipping JSON sort on an invalid column or path: {$orderBy}");
+            return $query;
+        }
+
         $jsonPath = '$.' . implode('.', $parts);
-        
-        // Use MySQL JSON_EXTRACT function for sorting
-        $jsonExtract = "JSON_EXTRACT({$this->getTable()}.{$jsonField}, '{$jsonPath}')";
-        
-        return $query->orderByRaw("{$jsonExtract} {$order}");
+        $column = $query->getQuery()->getGrammar()->wrap($this->getTable() . '.' . $jsonField);
+        $direction = self::normaliseSortDirection($order);
+
+        return $query->orderByRaw("JSON_EXTRACT({$column}, ?) {$direction}", [$jsonPath]);
+    }
+
+    /** `asc` or `desc`; anything else is `asc`. */
+    public static function normaliseSortDirection($order): string
+    {
+        return is_string($order) && strtolower(trim($order)) === 'desc' ? 'desc' : 'asc';
+    }
+
+    /** @param array<int, string> $segments */
+    protected static function isSafeJsonPath(array $segments): bool
+    {
+        if ($segments === []) {
+            return false;
+        }
+
+        foreach ($segments as $segment) {
+            if (!is_string($segment) || !preg_match('/^[A-Za-z0-9_]+$/', $segment)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
