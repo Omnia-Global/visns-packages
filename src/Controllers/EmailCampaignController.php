@@ -130,6 +130,17 @@ class EmailCampaignController extends Controller
             $data['list_id'] = $this->existingList($data['list_id']);
         }
 
+        // THE VALIDATED ARRAY HOLDS ONLY `type` PER BLOCK. A nested rule such
+        // as `content.*.type` makes Laravel's validate() return the validated
+        // KEYS and nothing beside them, so filling from `$data` stored
+        // `[{"type":"heading"},{"type":"text"}]` — every heading's words, every
+        // paragraph and every button's label and link gone on the first edit,
+        // and the editor blank on reload (found 2026-09-30). The rule still
+        // checks each block's type; the blocks themselves come off the request.
+        if (array_key_exists('content', $data)) {
+            $data['content'] = array_values((array) $request->input('content', []));
+        }
+
         $campaign->fill($data);
 
         // An edit to a cancelled or failed campaign starts it over as a draft.
@@ -393,6 +404,9 @@ class EmailCampaignController extends Controller
             'content' => ['required', 'array', 'max:100'],
             'content.*.type' => ['required', 'string', 'in:heading,text,image,button,divider,spacer,columns'],
         ]);
+
+        // The whole blocks, not the validated keys — see update().
+        $data['content'] = array_values((array) $request->input('content', []));
 
         $template = EmailTemplate::create($data + ['user_id' => $request->user()?->getAuthIdentifier()]);
 

@@ -362,4 +362,37 @@ class EmailCampaignModuleTest extends EmailCampaignTestCase
         $this->actingAs($this->staff('Email Campaigns Access'))
             ->postJson(self::BASE . '/campaigns/' . $campaign->id . '/preview')->assertOk();
     }
+
+    /* -- the blocks survive a save ----------------------------------------- */
+
+    public function test_editing_the_blocks_keeps_their_words(): void
+    {
+        $campaign = $this->readyCampaign();
+
+        $blocks = [
+            ['type' => 'heading', 'text' => 'Spring update, {first_name}'],
+            ['type' => 'text', 'html' => '<p>Three <em>new</em> things.</p>'],
+            ['type' => 'button', 'label' => 'Book a call', 'url' => 'https://omnia.test/call'],
+            ['type' => 'divider'],
+        ];
+
+        $this->actingAs($this->manager())
+            ->postJson(self::BASE . '/campaigns/' . $campaign->id, ['content' => $blocks])
+            ->assertOk();
+
+        // Every key of every block, not only `type` — the validated array
+        // would have kept `[{"type":"heading"},…]` and blanked the editor.
+        $this->assertSame($blocks, $campaign->fresh()->content);
+
+        $template = $this->actingAs($this->manager())
+            ->postJson(self::BASE . '/templates', ['name' => 'Spring', 'content' => $blocks])
+            ->assertCreated();
+
+        $this->assertSame($blocks, \Visnsstudio\VisnsPackages\Models\EmailTemplate::findOrFail($template->json('template.id'))->content);
+
+        // The type is still checked.
+        $this->actingAs($this->manager())
+            ->postJson(self::BASE . '/campaigns/' . $campaign->id, ['content' => [['type' => 'script', 'html' => 'x']]])
+            ->assertStatus(422);
+    }
 }

@@ -5,6 +5,22 @@ Notable changes to `visnsstudio/visns-packages`.
 Entries before 4.15.0 were not kept in a file; the git log and the README's
 per-module sections are the record for those.
 
+## 4.17.5 — email campaign blocks survive a save
+
+### Fixed
+
+- **Editing an email campaign's blocks no longer blanks them.**
+  `EmailCampaignController::update()` and `storeTemplate()` filled the model
+  from the validated array, and with `content.*.type` among the rules
+  Laravel's `validate()` returns only the validated keys — so a save stored
+  `[{"type":"heading"},{"type":"text"},…]` with every heading's words, every
+  paragraph and every button's label and link gone, and the editor reopened
+  blank. Only the starter layout written at create survived. The type of each
+  block is still checked; the blocks themselves are read off the request.
+  Found on 2026-09-30 while photographing the editor for the host wiki.
+  `EmailCampaignModuleTest::test_editing_the_blocks_keeps_their_words` fails
+  against 4.17.4.
+
 ## 4.17.4 — security
 
 A second pass over sign-in secrets and the dynamic entity endpoints. Existing
