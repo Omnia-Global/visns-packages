@@ -5,6 +5,39 @@ Notable changes to `visnsstudio/visns-packages`.
 Entries before 4.15.0 were not kept in a file; the git log and the README's
 per-module sections are the record for those.
 
+## 4.18.0 — a page-size ceiling, and `{slug}` in record URLs
+
+### Added
+
+- **`{slug}` in the two configured record URLs.** `universal_search.sources[].url`
+  and `vault.client.url` accept `{slug}` beside `{id}`: the row's (or the
+  client's) `slug` attribute. **`{slug}` falls back to the id** where the slug
+  is empty or the model has no such attribute, because an id URL always
+  resolves in a host that accepts slugs and a blank segment never does. `{id}`
+  is unchanged. The vault looks the clients' slugs up once per page
+  (`primeClientSlugs()`), not once per entry, and only when the pattern names
+  `{slug}`. One implementation: `Support\RecordUrl`.
+- **`max_page_size`** (default 200, `VISNS_MAX_PAGE_SIZE`).
+
+### Fixed
+
+- **A list endpoint's page size is capped.** `DynamicController::table()` and
+  `list()` paginated by whatever `take` arrived, so `take=100000` was the whole
+  table in one response; so did the roles, permissions and audit tables.
+  `Support\PageSize` is the one reading now: an absent `take` keeps the
+  endpoint's default (10), a non-numeric or non-positive one is the default,
+  and a larger one is capped to `max_page_size` — capped, never refused, so a
+  grid asking for 500 still draws. `paginateAndRespond()` clamps whatever it
+  is handed, so no path into it can skip the ceiling. (The vault and messaging
+  lists already capped `per_page` at 100 and are unchanged.)
+- **The vault test harness ran the module's later migrations.** It built
+  `vault_entries` and `vault_access_logs` from their create migrations only,
+  so every test reaching the `client_id` or `meta` columns answered 500 — 21
+  failures that had nothing to do with the code under test. The suite is down
+  to the three known `PhonePresenceTest` failures.
+
+Tests: `Security\PageSizeCapTest` (5), `Search\RecordUrlTokenTest` (4).
+
 ## 4.17.5 — email campaign blocks survive a save
 
 ### Fixed

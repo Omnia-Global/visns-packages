@@ -2,6 +2,7 @@
 
 namespace Visnsstudio\VisnsPackages\Controllers;
 
+use Visnsstudio\VisnsPackages\Support\RecordUrl;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -167,7 +168,8 @@ class UniversalSearchController extends \App\Http\Controllers\Controller
             'id' => $row->getKey(),
             'title' => $title ?: ('#' . $row->getKey()),
             'subtitle' => $subtitle ?: null,
-            'url' => $url ? str_replace('{id}', (string) $row->getKey(), $url) : null,
+            // `{id}` or `{slug}` (falling back to the id) - see Support\RecordUrl.
+            'url' => RecordUrl::forRecord($url, $row),
         ];
     }
 

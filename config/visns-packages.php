@@ -25,6 +25,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Largest page a list endpoint will serve
+    |--------------------------------------------------------------------------
+    |
+    | Every grid posts `take`. The dynamic entity table/list endpoints and the
+    | roles, permissions and audit tables cap it here (Support\PageSize):
+    | an absent `take` keeps the endpoint's default (10), a larger one is
+    | capped to this, never refused. Before 4.18.0 `take=100000` was the whole
+    | table in one response.
+    |
+    */
+    'max_page_size' => env('VISNS_MAX_PAGE_SIZE', 200),
+
+    /*
+    |--------------------------------------------------------------------------
     | Report Builder Routes Middleware
     |--------------------------------------------------------------------------
     |
@@ -1307,13 +1321,18 @@ return [
     |
     | Column names may be `relation.column`; the query goes through whereHas.
     |
+    | `url` takes two tokens: `{id}` (the row's key) and, since 4.18.0,
+    | `{slug}` (the row's `slug` attribute). `{slug}` falls back to the id on a
+    | row whose slug is empty or a model with no slug at all, so a link never
+    | has a blank segment in it.
+    |
     |   'customers' => [
     |       'label'      => 'Customers',
     |       'model'      => \App\Models\Customer::class,
     |       'columns'    => ['name', 'abn'],
     |       'title'      => 'name',                      // one = fallback chain
     |       'subtitle'   => ['abn', 'status'],           // several = composite
-    |       'url'        => '/customers/{id}',
+    |       'url'        => '/customers/{id}',       // or '/customers/{slug}'
     |       'permission' => 'Customer',
     |       'with'       => ['sites'],                   // optional eager load
     |       'where'      => ['status' => 1],             // optional constraint
@@ -1513,7 +1532,9 @@ return [
             'model' => null,                    // e.g. \App\Models\Customer::class
             'label_column' => 'name',           // what to show for one
             'search_columns' => ['name'],       // what the picker searches
-            'url' => null,                      // e.g. '/customers/{id}'
+            // e.g. '/customers/{id}', or '/customers/{slug}' since 4.18.0 -
+            // the client's `slug`, falling back to its id where it has none.
+            'url' => null,
         ],
     ],
 

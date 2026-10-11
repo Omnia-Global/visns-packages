@@ -17,6 +17,7 @@ use Illuminate\Validation\ValidationException;
 use Visnsstudio\VisnsPackages\Exceptions\JsonValidationException;
 use Visnsstudio\VisnsPackages\Support\RelationGuard;
 use Visnsstudio\VisnsPackages\Support\ColumnExposure;
+use Visnsstudio\VisnsPackages\Support\PageSize;
 
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -770,7 +771,7 @@ class DynamicController extends \App\Http\Controllers\Controller
         // The model's excludedFields() always apply. Naming `columns` narrows
         // the select (see initializeQuery) and never brings an excluded field
         // back.
-        return $this->paginateAndRespond($query, $request->input('take', 10));
+        return $this->paginateAndRespond($query, PageSize::from($request));
     }
 
     public function list(Request $request)
@@ -814,12 +815,12 @@ class DynamicController extends \App\Http\Controllers\Controller
             // Check if pagination is requested via 'take' parameter
             if ($request->has('take')) {
                 // excludedFields() always apply, `columns` or not.
-                $result = $this->paginateAndRespond($query, $request->input('take'));
+                $result = $this->paginateAndRespond($query, PageSize::from($request));
                 \Log::info('DynamicController::list() - Query executed with pagination', [
                     'model' => $this->model,
                     'result_type' => get_class($result),
                     'result_status' => $result instanceof \Illuminate\Http\JsonResponse ? $result->getStatusCode() : 'unknown',
-                    'pagination_size' => $request->input('take')
+                    'pagination_size' => PageSize::from($request)
                 ]);
             } else {
                 // Backward compatibility: return all records when no 'take' parameter
@@ -1881,8 +1882,9 @@ class DynamicController extends \App\Http\Controllers\Controller
 
     protected function paginateAndRespond($query, $perPage, $skipExcludeFields = false)
     {
-        // Perform pagination
-        $paginator = $query->paginate($perPage);
+        // Every caller's size goes through the one ceiling (4.18.0), so a
+        // page size can never be the whole table whichever path reached here.
+        $paginator = $query->paginate(PageSize::clamp($perPage));
 
         // Get the data from the paginator
         $data = $paginator->getCollection();

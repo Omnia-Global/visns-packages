@@ -5,6 +5,7 @@ namespace Visnsstudio\VisnsPackages\Controllers;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Illuminate\Http\Request;
+use Visnsstudio\VisnsPackages\Support\PageSize;
 
 class RoleController extends \App\Http\Controllers\Controller
 {
@@ -57,9 +58,7 @@ class RoleController extends \App\Http\Controllers\Controller
             }
         }
 
-        $data = $data->paginate(
-            $request->input('take') ? $request->input('take') : 10
-        );
+        $data = $data->paginate(PageSize::from($request));
 
         return response()->json($data);
     }

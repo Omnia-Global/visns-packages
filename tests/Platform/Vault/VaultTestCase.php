@@ -40,6 +40,15 @@ abstract class VaultTestCase extends TestCase
         $this->runPackageMigration(
             '2026_08_21_090100_create_vault_access_logs_table.php'
         );
+        // The later columns the controller now writes - the client a credential
+        // belongs to (4.x) and the per-action log detail (4.9.0). Missing from
+        // this harness until 4.18.0, which is why 21 vault tests answered 500.
+        $this->runPackageMigration(
+            '2026_08_24_020000_add_client_to_vault_entries_table.php'
+        );
+        $this->runPackageMigration(
+            '2026_08_26_010000_add_meta_to_vault_access_logs_table.php'
+        );
     }
 
     protected function staffWith(string ...$permissions): User

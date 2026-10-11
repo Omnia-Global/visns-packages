@@ -11,6 +11,7 @@ use Visnsstudio\VisnsPackages\Models\VaultAccessLog;
 use Visnsstudio\VisnsPackages\Models\VaultEntry;
 use Visnsstudio\VisnsPackages\Services\VaultOtpService;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
+use Visnsstudio\VisnsPackages\Support\RecordUrl;
 
 /**
  * The vault: staff-shared credentials, their one-time codes, and the record of
@@ -44,6 +45,16 @@ class VaultController extends \App\Http\Controllers\Controller
 {
     private const MAX_PER_PAGE = 100;
     private const DEFAULT_PER_PAGE = 25;
+
+    /**
+     * Client slugs already looked up in this request, keyed by client id
+     * (null = the client has none, or no longer exists). Filled in one query
+     * per page by primeClientSlugs(), so a list of 25 entries is not 25
+     * lookups. Only used when vault.client.url names `{slug}`.
+     *
+     * @var array<int|string, string|null>
+     */
+    private array $clientSlugs = [];
 
     /** The only action a browser is allowed to report for itself. */
     private const CLIENT_ACTIONS = ['copy_username'];
@@ -111,6 +122,8 @@ class VaultController extends \App\Http\Controllers\Controller
             // several entries share a title.
             ->orderBy('id', 'asc')
             ->paginate($perPage);
+
+        $this->primeClientSlugs($entries->getCollection()->pluck('client_id')->all());
 
         return response()->json(
             $entries->through(fn(VaultEntry $entry) => $this->summary($entry, $user))
@@ -810,13 +823,68 @@ class VaultController extends \App\Http\Controllers\Controller
         return $model::query()->whereKey($clientId)->value($column);
     }
 
+    /**
+     * Where a client's own page is, off `vault.client.url`.
+     *
+     * `{id}` is the client's key; `{slug}` (4.18.0) is its `slug` attribute,
+     * falling back to the id where the client has none - see Support\RecordUrl.
+     */
     private function clientUrl($clientId): ?string
     {
         $pattern = config('visns-packages.vault.client.url');
 
-        return ($clientId && $pattern)
-            ? str_replace('{id}', (string) $clientId, $pattern)
-            : null;
+        if (!$clientId || !$pattern) {
+            return null;
+        }
+
+        $slug = null;
+
+        if (RecordUrl::wantsSlug($pattern)) {
+            if (!array_key_exists($clientId, $this->clientSlugs)) {
+                $this->primeClientSlugs([$clientId]);
+            }
+
+            $slug = $this->clientSlugs[$clientId] ?? null;
+        }
+
+        return RecordUrl::fill($pattern, $clientId, $slug);
+    }
+
+    /**
+     * Look up the slugs of these clients in one query, when the client URL
+     * names `{slug}`. A failure (a model with no such table, a database
+     * hiccup) leaves every one on the id fallback rather than failing a list
+     * that has nothing to do with client pages.
+     */
+    private function primeClientSlugs(array $ids): void
+    {
+        $model = config('visns-packages.vault.client.model');
+
+        if (!RecordUrl::wantsSlug(config('visns-packages.vault.client.url'))
+            || !$model || !class_exists($model)) {
+            return;
+        }
+
+        $ids = array_values(array_unique(array_filter(
+            $ids,
+            fn($id) => $id !== null && $id !== '' && !array_key_exists($id, $this->clientSlugs)
+        )));
+
+        if ($ids === []) {
+            return;
+        }
+
+        foreach ($ids as $id) {
+            $this->clientSlugs[$id] = null;
+        }
+
+        try {
+            foreach ($model::query()->whereKey($ids)->get() as $client) {
+                $this->clientSlugs[$client->getKey()] = RecordUrl::slugOf($client);
+            }
+        } catch (\Throwable $e) {
+            // Left on the id fallback.
+        }
     }
 
     /**
@@ -930,6 +998,8 @@ class VaultController extends \App\Http\Controllers\Controller
             ->get();
 
         $clients = [];
+
+        $this->primeClientSlugs($rows->pluck('client_id')->all());
 
         foreach ($rows as $row) {
             $id = (int) $row->client_id;

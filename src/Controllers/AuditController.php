@@ -3,6 +3,7 @@
 namespace Visnsstudio\VisnsPackages\Controllers;
 
 use Illuminate\Http\Request;
+use Visnsstudio\VisnsPackages\Support\PageSize;
 use Illuminate\Support\Facades\DB;
 
 use Visnsstudio\VisnsPackages\Models\Audit;
@@ -26,9 +27,7 @@ class AuditController extends \App\Http\Controllers\Controller
             }
         }
 
-        $data = $data->paginate(
-            $request->input('take') ? $request->input('take') : 10
-        );
+        $data = $data->paginate(PageSize::from($request));
 
         return response()->json($data);
     }

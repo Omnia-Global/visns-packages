@@ -4,6 +4,7 @@ namespace Visnsstudio\VisnsPackages\Controllers;
 
 use Spatie\Permission\Models\Permission;
 use Illuminate\Http\Request;
+use Visnsstudio\VisnsPackages\Support\PageSize;
 
 class PermissionController extends \App\Http\Controllers\Controller
 {
@@ -52,9 +53,7 @@ class PermissionController extends \App\Http\Controllers\Controller
             }
         }
 
-        $data = $data->paginate(
-            $request->input('take') ? $request->input('take') : 10
-        );
+        $data = $data->paginate(PageSize::from($request));
 
         return response()->json($data);
     }
