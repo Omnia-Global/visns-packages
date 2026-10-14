@@ -2,15 +2,19 @@
 
 namespace Visnsstudio\VisnsPackages\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 use Visnsstudio\VisnsPackages\Support\PhoneNumber;
+use Visnsstudio\VisnsPackages\Support\SchemaColumns;
 
 /**
  * A number that has asked not to be texted.
  *
- * One row per handset, keyed on the number itself - see the migration for why
- * it is not per line and not per campaign. Everything that decides whether a
+ * One row per handset per SENDER, keyed on (client_id, number): `client_id` 0
+ * is the house's register and any other value one client's (4.19.0) - see the
+ * 2026_10_14 migration for why somebody unsubscribing from a client's number
+ * has not unsubscribed from ours. Still not per line and not per campaign. Everything that decides whether a
  * number is on this list goes through Services\Sms\SmsOptOuts rather than
  * querying here, so the normalisation rule has one home.
  *
@@ -63,5 +67,21 @@ class SmsOptOut extends Model
             $this->number,
             (string) ModuleConfig::get('messaging.default_country', 'AU')
         );
+    }
+
+    /**
+     * One register: 0 is the house's, any other id that client's.
+     *
+     * Before the 4.19.0 migration there is only the house's register, so a
+     * house question reads the whole table and a client one reads nothing - see
+     * Support\SchemaColumns.
+     */
+    public function scopeForClient(Builder $query, int $clientId): Builder
+    {
+        if (! SchemaColumns::has($this->getTable(), 'client_id')) {
+            return $clientId === 0 ? $query : $query->whereRaw('1 = 0');
+        }
+
+        return $query->where($this->qualifyColumn('client_id'), $clientId);
     }
 }

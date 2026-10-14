@@ -1953,6 +1953,18 @@ return [
             | SMS-enabled account - see Services\Zoom\ZoomSmsClient::sendBody().
             */
             'send_path' => '/phone/sms/messages',
+
+            /*
+            | Extra secrets a Zoom webhook delivery may be signed with, beside
+            | the call queue's own (the `zoom` integration's webhook secret).
+            | For the user-level SMS app (`zoom_sms`) whose event subscription
+            | carries the `phone.sms_*` events for client-owned lines: its
+            | deliveries are signed with ITS secret token, not the
+            | Server-to-Server app's. A `webhook_secret` field declared on a
+            | `zoom_sms` integration is read as well - see
+            | Support\ZoomWebhookSecret::candidates().
+            */
+            'webhook_secrets' => [],
         ],
 
         // Null = the package-wide `user_model`.

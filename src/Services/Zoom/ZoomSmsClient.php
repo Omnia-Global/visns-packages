@@ -6,6 +6,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Visnsstudio\VisnsPackages\Models\OAuthConnection;
+use Visnsstudio\VisnsPackages\Models\SmsLine;
 use Visnsstudio\VisnsPackages\Services\OAuthManager;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 use Visnsstudio\VisnsPackages\Support\ZoomSmsErrors;
@@ -42,6 +43,20 @@ use Visnsstudio\VisnsPackages\Support\ZoomSmsErrors;
  * queue and the webhooks keep the Server-to-Server token, because those are
  * account-wide reads that a single user's token cannot answer. With no
  * connection, sending behaves exactly as it did before this existed.
+ *
+ * ## A client's own line (4.19.0)
+ *
+ * A line a client owns (SmsLine::client_id set) sends on THAT CLIENT's own
+ * user-level connection - the line's `oauth_connection_id` while it is active,
+ * otherwise the client's active `zoom_sms` connection - and on nothing else.
+ * It never falls back to the house's connection and never to the
+ * Server-to-Server app: either would send the client's campaign out of OUR
+ * Zoom tenant, from a number the recipients have never heard of, or be refused
+ * with 7639 at best. With no usable connection the answer is a `not_connected`
+ * result - nothing goes to Zoom - which the transport stores as a
+ * `not_connected` message and the campaign sender pauses on, exactly as it does
+ * for the dev transport. A house line (or no line at all) behaves precisely as
+ * it did before.
  *
  * ## Sender substitution
  *
@@ -88,6 +103,19 @@ class ZoomSmsClient extends ZoomApiClient
     /** Set once a refresh has been attempted, so one send cannot loop. */
     private bool $refreshed = false;
 
+    /**
+     * The line the send in progress is for, so the one-retry path in
+     * sendAsUser() refreshes the SAME connection it sent on - a client's,
+     * never the house's.
+     */
+    private ?SmsLine $sendingLine = null;
+
+    /** What a client line's send answers when it has no connection to send on. */
+    public const CLIENT_NOT_CONNECTED = "This line's Zoom connection is not set up. Connect Zoom in the portal.";
+
+    /** What it answers when its connection can no longer produce a token. */
+    public const CLIENT_EXPIRED = "This line's Zoom connection has expired. Reconnect Zoom in the portal.";
+
     public function __construct()
     {
         parent::__construct();
@@ -117,11 +145,21 @@ class ZoomSmsClient extends ZoomApiClient
      *                               (SmsLine::zoom_user_id). Zoom rejects a send
      *                               without it ("User does not exist due to
      *                               missing required params").
-     * @return array{success: bool, http_code: int, data: mixed}
+     * @param  SmsLine|null $line    The line it goes out on. Decides WHOSE
+     *                               connection sends - see the class docblock.
+     *                               Null reads as the house, as every caller
+     *                               written before 4.19.0 meant it.
+     * @return array{success: bool, http_code: int, data: mixed, not_connected?: bool}
      */
-    public function sendSms(string $from, string $to, string $body, ?string $userId = null): array
+    public function sendSms(string $from, string $to, string $body, ?string $userId = null, ?SmsLine $line = null): array
     {
-        $connection = $this->userConnection();
+        $this->sendingLine = $line;
+
+        $connection = $this->userConnection($line);
+
+        if ($line !== null && ! $line->isHouse()) {
+            return $this->sendForClient($connection, $from, $to, $body, $userId);
+        }
 
         // No user-level connection: the original Server-to-Server path,
         // unchanged. Every deployment that has not connected the SMS app keeps
@@ -148,6 +186,48 @@ class ZoomSmsClient extends ZoomApiClient
                 'data' => [
                     'message' => 'The Zoom SMS connection has expired. Reconnect it under Settings > Integrations.',
                 ],
+            ];
+        }
+
+        return $this->sendAsUser(
+            $token,
+            $this->sendBody($from, $to, $body, $this->senderUserId($connection, $token, $userId))
+        );
+    }
+
+    /**
+     * A client line's send: its own connection or nothing.
+     *
+     * @return array{success: bool, http_code: int, data: mixed, not_connected?: bool}
+     */
+    private function sendForClient(?OAuthConnection $connection, string $from, string $to, string $body, ?string $userId): array
+    {
+        if ($connection === null) {
+            // http_code 0 and `not_connected`: nothing was attempted, so this
+            // is neither a refusal to report nor a failure to retry. The
+            // transport turns it into a `not_connected` message.
+            return [
+                'success' => false,
+                'http_code' => 0,
+                'not_connected' => true,
+                'data' => ['message' => self::CLIENT_NOT_CONNECTED],
+            ];
+        }
+
+        $token = $this->userAccessToken($connection);
+
+        if ($token === null) {
+            Log::warning('sms.zoom client line token unusable; not falling back to any other token', [
+                'provider' => self::USER_PROVIDER,
+                'connection_id' => $connection->id,
+                'line_id' => $this->sendingLine?->id,
+            ]);
+
+            return [
+                'success' => false,
+                'http_code' => 0,
+                'not_connected' => true,
+                'data' => ['message' => self::CLIENT_EXPIRED],
             ];
         }
 
@@ -384,17 +464,43 @@ class ZoomSmsClient extends ZoomApiClient
     }
 
     /**
-     * The active `zoom_sms` connection, or null.
+     * The `zoom_sms` connection a send on this line goes out on, or null.
+     *
+     *   house line, or no line   the house's active connection (null = the
+     *                            Server-to-Server path, unchanged)
+     *   client line              the line's own connection while it is active,
+     *                            this client's and a `zoom_sms` one; otherwise
+     *                            the client's active `zoom_sms` connection;
+     *                            otherwise null, which for a client line means
+     *                            NOT CONNECTED and never "use the S2S app"
      *
      * Never throws. This is called on the send path of an app whose
      * `oauth_connections` table may not have been migrated yet, and a missing
      * table must degrade to "no user connection" rather than take the send
      * down with it.
      */
-    private function userConnection(): ?OAuthConnection
+    private function userConnection(?SmsLine $line = null): ?OAuthConnection
     {
         try {
-            return OAuthConnection::getActiveConnection(self::USER_PROVIDER);
+            if ($line === null || $line->isHouse()) {
+                return OAuthConnection::getActiveConnection(self::USER_PROVIDER);
+            }
+
+            $clientId = (int) $line->client_id;
+            $own = $line->oauth_connection_id !== null ? $line->connection : null;
+
+            // Checked rather than trusted: a pointer is a column somebody could
+            // set to another client's row, and a deactivated row is a token the
+            // client has already replaced or revoked.
+            if ($own instanceof OAuthConnection
+                && (bool) $own->is_active
+                && $own->provider === self::USER_PROVIDER
+                && (int) $own->client_id === $clientId
+            ) {
+                return $own;
+            }
+
+            return OAuthConnection::getActiveConnection(self::USER_PROVIDER, $clientId);
         } catch (\Throwable $e) {
             Log::warning('sms.zoom could not read the user OAuth connection', [
                 'error' => $e->getMessage(),
@@ -569,7 +675,7 @@ class ZoomSmsClient extends ZoomApiClient
         // One refresh, one retry, then give up - `$this->refreshed` makes that
         // true even if the expiry check already refreshed.
         if ($response->status() === 401 && ! $this->refreshed) {
-            $connection = $this->userConnection();
+            $connection = $this->userConnection($this->sendingLine);
 
             if ($connection !== null && $this->refreshUserToken($connection)) {
                 $retry = (string) ($connection->access_token ?? '');

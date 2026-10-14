@@ -29,6 +29,12 @@ use Visnsstudio\VisnsPackages\Support\ModuleConfig;
  * Ordered by id at every step so the answer is stable: a resolution that
  * depended on insertion order in the database would move a practice's sending
  * number the day a line was edited.
+ *
+ * HOUSE lines only, at every step (4.19.0). A client's own line sends from the
+ * client's Zoom tenant under the client's name, and the application's login
+ * codes and reminders arriving from it would be a stranger's business texting
+ * our users - so a client line is never an answer here, however low its id and
+ * whatever Zoom user it carries.
  */
 class SmsLineResolver
 {
@@ -43,7 +49,7 @@ class SmsLineResolver
         if (is_string($configured) && trim($configured) !== '') {
             $line = SmsLine::findByNumber($configured);
 
-            if ($line !== null) {
+            if ($line !== null && $line->isHouse()) {
                 return $line;
             }
 
@@ -56,6 +62,7 @@ class SmsLineResolver
         }
 
         $withZoomUser = SmsLine::query()
+            ->house()
             ->where('active', true)
             ->whereNotNull('zoom_user_id')
             ->orderBy('id')
@@ -66,6 +73,7 @@ class SmsLineResolver
         }
 
         return SmsLine::query()
+            ->house()
             ->where('active', true)
             ->orderBy('id')
             ->first();

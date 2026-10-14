@@ -19,14 +19,18 @@ use Visnsstudio\VisnsPackages\Support\ZoomWebhookSecret;
  *
  * Fails closed: an unset secret (which is the state until the Zoom app exists)
  * rejects everything with 401, so the endpoint is inert rather than open.
+ *
+ * Several secrets since 4.19.0 (Support\ZoomWebhookSecret::candidates): each is
+ * tried with hash_equals, and the one that matched is put on the request as
+ * `zoom_webhook_secret` so the URL-validation answer can be signed with it.
  */
 class VerifyZoomWebhookSignature
 {
     public function handle(Request $request, Closure $next)
     {
-        $secret = $this->secret();
+        $secrets = $this->secrets();
 
-        if (! is_string($secret) || $secret === '') {
+        if ($secrets === []) {
             return $this->reject($request, 'webhook secret not configured');
         }
 
@@ -47,17 +51,29 @@ class VerifyZoomWebhookSignature
             return $this->reject($request, 'timestamp outside allowed window');
         }
 
-        $expected =
-            'v0=' .
-            hash_hmac(
-                'sha256',
-                'v0:' . $timestamp . ':' . $request->getContent(),
-                $secret
-            );
+        $matched = null;
 
-        if (! hash_equals($expected, $signature)) {
+        // Every candidate is tried, not just until the first match, so the
+        // time this takes says nothing about which secret signed the request.
+        foreach ($secrets as $secret) {
+            $expected =
+                'v0=' .
+                hash_hmac(
+                    'sha256',
+                    'v0:' . $timestamp . ':' . $request->getContent(),
+                    $secret
+                );
+
+            if (hash_equals($expected, $signature) && $matched === null) {
+                $matched = $secret;
+            }
+        }
+
+        if ($matched === null) {
             return $this->reject($request, 'signature mismatch');
         }
+
+        $request->attributes->set('zoom_webhook_secret', $matched);
 
         if ($this->isReplay($signature)) {
             return $this->acknowledgeReplay($request);
@@ -105,9 +121,12 @@ class VerifyZoomWebhookSignature
         return response()->json(['status' => 'duplicate'], 200);
     }
 
-    private function secret(): ?string
+    /**
+     * @return array<int, string>
+     */
+    private function secrets(): array
     {
-        return ZoomWebhookSecret::resolve();
+        return ZoomWebhookSecret::candidates();
     }
 
     /** Reject deliveries whose timestamp is further than this from now. */

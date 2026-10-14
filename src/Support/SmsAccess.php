@@ -43,7 +43,8 @@ class SmsAccess
     }
 
     /**
-     * The ids of the lines this user may work.
+     * The ids of the lines this user may work. House lines only, by way of
+     * SmsLine::scopeVisibleTo - a client's own line is never one of them.
      *
      * @return array<int, int>
      */

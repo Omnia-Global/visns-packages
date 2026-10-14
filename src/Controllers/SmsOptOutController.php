@@ -23,6 +23,15 @@ use Visnsstudio\VisnsPackages\Support\SmsPayload;
  * be contacted, and a button that takes somebody OFF that list. Deciding
  * whether a person may see it at all is a middleware decision; there is nothing
  * here a non-administrator should get a partial view of.
+ *
+ * ## Whose register (4.19.0)
+ *
+ * Every action reads and writes ONE register, named by optOutClientId(): the
+ * house's (0) here. A host application that gives a client a line of its own
+ * extends this class, overrides that one method with the client's id, and
+ * mounts it behind its own client-facing guard - so a client sees and manages
+ * the unsubscribes sent to THEIR number and nobody else's, through exactly the
+ * same code the practice's screen runs.
  */
 class SmsOptOutController extends \App\Http\Controllers\Controller
 {
@@ -42,6 +51,39 @@ class SmsOptOutController extends \App\Http\Controllers\Controller
     }
 
     /**
+     * Whose register this controller serves. 0 is the house's.
+     *
+     * The hook a host application overrides - see the class docblock.
+     * Permissions are the ROUTE's business (middleware); nothing in here asks
+     * who the caller is beyond recording it on a manual entry.
+     */
+    protected function optOutClientId(Request $request): int
+    {
+        return 0;
+    }
+
+    /**
+     * Who is recording a manual entry, in SmsCampaignController::actor()'s
+     * shape. Only `user` is read here: `user_id` on the register points at
+     * `users`, and a person signed in to a client portal is not a row there -
+     * under `auth:portal` the request's user is a portal account whose id
+     * would name some unrelated member of staff. So a host overriding this for
+     * such a guard answers `user` null.
+     *
+     * @return array{user_id: mixed, created_by_name: ?string, user: mixed}
+     */
+    protected function actor(Request $request): array
+    {
+        $user = $request->user();
+
+        return [
+            'user_id' => $user?->getKey(),
+            'created_by_name' => $user?->name,
+            'user' => $user,
+        ];
+    }
+
+    /**
      * The register, newest first.
      *
      * `search` is a substring of the NUMBER, matched against the stored E.164
@@ -51,7 +93,9 @@ class SmsOptOutController extends \App\Http\Controllers\Controller
      */
     public function index(Request $request)
     {
-        $query = SmsOptOut::query()->with('user');
+        $query = SmsOptOut::query()
+            ->forClient($this->optOutClientId($request))
+            ->with('user');
 
         $term = trim((string) $request->input('search', ''));
 
@@ -113,8 +157,9 @@ class SmsOptOutController extends \App\Http\Controllers\Controller
             SmsOptOut::SOURCE_MANUAL,
             null,
             null,
-            $request->user(),
-            $data['note'] ?? null
+            $this->actor($request)['user'] ?? null,
+            $data['note'] ?? null,
+            $this->optOutClientId($request)
         );
 
         // 201 even when the row already existed and was updated: the caller
@@ -133,13 +178,17 @@ class SmsOptOutController extends \App\Http\Controllers\Controller
      */
     public function destroy(Request $request, $id)
     {
-        $optOut = SmsOptOut::find($id);
+        $clientId = $this->optOutClientId($request);
+
+        // Found through the register this controller serves, so another
+        // register's row is a 404 exactly like a row that never existed.
+        $optOut = SmsOptOut::query()->forClient($clientId)->find($id);
 
         if ($optOut === null) {
             abort(404, 'Not found.');
         }
 
-        $this->optOuts->release((string) $optOut->number);
+        $this->optOuts->release((string) $optOut->number, $clientId);
 
         return response()->noContent();
     }

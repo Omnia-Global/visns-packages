@@ -30,7 +30,9 @@ class SmsTemplateController extends \App\Http\Controllers\Controller
     {
         $manages = SmsAccess::manages($request->user());
 
-        $query = SmsTemplate::query();
+        // The house's templates. A client's own (client_id set) belong to the
+        // host application's screen for that client, not to the practice's.
+        $query = SmsTemplate::query()->house();
 
         if (! $manages || ! $request->boolean('include_inactive')) {
             $query->where('active', true);
@@ -66,7 +68,7 @@ class SmsTemplateController extends \App\Http\Controllers\Controller
     {
         $this->requireManage($request);
 
-        $template = SmsTemplate::find($id);
+        $template = SmsTemplate::query()->house()->find($id);
 
         if ($template === null) {
             abort(404, 'Not found.');
@@ -94,7 +96,7 @@ class SmsTemplateController extends \App\Http\Controllers\Controller
     {
         $this->requireManage($request);
 
-        $template = SmsTemplate::find($id);
+        $template = SmsTemplate::query()->house()->find($id);
 
         if ($template === null) {
             abort(404, 'Not found.');

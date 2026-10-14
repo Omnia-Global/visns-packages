@@ -1869,12 +1869,14 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             \Visnsstudio\VisnsPackages\Support\SmsChannel::pattern(),
             function ($user, $lineId) {
                 try {
-                    if (\Visnsstudio\VisnsPackages\Support\SmsAccess::manages($user)) {
-                        return true;
-                    }
-
+                    // visibleTo() is house-only for a manager as well, so a
+                    // client's own line admits nobody here: its live events are
+                    // that client's, and "Messaging Manage" is not a way in.
                     return \Visnsstudio\VisnsPackages\Models\SmsLine::query()
-                        ->visibleTo($user, false)
+                        ->visibleTo(
+                            $user,
+                            \Visnsstudio\VisnsPackages\Support\SmsAccess::manages($user)
+                        )
                         ->whereKey((int) $lineId)
                         ->exists();
                 } catch (\Throwable $e) {

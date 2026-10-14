@@ -38,7 +38,12 @@ class SmsLineSettingsController extends \App\Http\Controllers\Controller
     {
         $this->requireManage($request);
 
+        // House lines only. A client's own line is set up by that client,
+        // through whatever screen the host application gives them, and
+        // administering it from here would put the practice's settings page in
+        // charge of another business's number.
         $lines = SmsLine::query()
+            ->house()
             ->withTrashed()
             ->with('users')
             ->orderBy('label')
@@ -95,7 +100,7 @@ class SmsLineSettingsController extends \App\Http\Controllers\Controller
     {
         $this->requireManage($request);
 
-        $line = SmsLine::withTrashed()->find($id);
+        $line = SmsLine::withTrashed()->house()->find($id);
 
         if ($line === null) {
             abort(404, 'Not found.');
@@ -129,7 +134,7 @@ class SmsLineSettingsController extends \App\Http\Controllers\Controller
     {
         $this->requireManage($request);
 
-        $line = SmsLine::find($id);
+        $line = SmsLine::query()->house()->find($id);
 
         if ($line === null) {
             abort(404, 'Not found.');

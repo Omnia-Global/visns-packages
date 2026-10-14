@@ -324,7 +324,9 @@ class SmsCampaignSender
         // arrived while the campaign was half sent has to be honoured for the
         // other half. The import check is a courtesy that tells somebody before
         // they press start; this one is the rule.
-        if ($this->optOuts->isOptedOut((string) $recipient->number)) {
+        // The register of whoever owns the line: a client's campaign honours the
+        // STOPs sent to that client, and the house's honours the house's.
+        if ($this->optOuts->isOptedOut((string) $recipient->number, (int) ($campaign->line?->client_id ?? 0))) {
             $this->finish($recipient, SmsCampaignRecipient::STATUS_SKIPPED, SmsCampaignRecipient::ERROR_OPTED_OUT);
 
             $campaign->forceFill(['skipped' => (int) $campaign->skipped + 1])->save();
@@ -360,7 +362,18 @@ class SmsCampaignSender
             // row stays pending and the campaign stops. Retrying against a
             // transport that cannot send is a loop that would burn every
             // recipient's retry budget in half an hour.
-            $this->pause($campaign, self::NOT_CONNECTED);
+            // A house line keeps the sentence it has always had. A client's own
+            // line carries the transport's reason instead - "connect Zoom in
+            // the portal" - because the fix there is the client's, and the
+            // generic sentence would send them looking for a setting of ours.
+            $line = $campaign->line;
+
+            $this->pause(
+                $campaign,
+                $line !== null && ! $line->isHouse() && trim((string) $message->error) !== ''
+                    ? (string) $message->error
+                    : self::NOT_CONNECTED
+            );
 
             return 'paused';
         }

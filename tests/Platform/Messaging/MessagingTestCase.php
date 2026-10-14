@@ -10,8 +10,8 @@ use Visnsstudio\VisnsPackages\Models\SmsThread;
 use Visnsstudio\VisnsPackages\Tests\TestCase;
 
 /**
- * Shared harness for the messaging suite: the module turned on, its seven tables
- * built from the shipped migrations, and a way to mint staff, lines and threads.
+ * Shared harness for the messaging suite: the module turned on, its tables built
+ * from the shipped migrations, and a way to mint staff, lines and threads.
  *
  * The migrations are run rather than restated because they ARE the schema this
  * module ships - a test against a hand-written table would prove nothing about
@@ -54,6 +54,13 @@ abstract class MessagingTestCase extends TestCase
             '2026_09_11_120000_create_sms_opt_outs_table.php',
             '2026_09_11_120010_create_sms_campaigns_table.php',
             '2026_09_11_120020_create_sms_campaign_recipients_table.php',
+
+            // 4.19.0: client-owned lines. The OAuth table rides along because
+            // a client line's send reads its own connection there, and the
+            // migration adds `client_id` to it; with no rows in it the house
+            // path is exactly the one it was without the table.
+            '2025_01_01_000020_create_oauth_connections_table.php',
+            '2026_10_14_100000_add_client_scope_to_sms_tables.php',
         ] as $migration) {
             $this->runPackageMigration($migration);
         }

@@ -508,7 +508,9 @@ class SmsController extends \App\Http\Controllers\Controller
     private function canSeeLine($user, bool $manages, int $lineId): bool
     {
         if ($manages) {
-            return SmsLine::query()->whereKey($lineId)->exists();
+            // House only: a manager administers the practice's numbers, and a
+            // client's line is not one of them.
+            return SmsLine::query()->house()->whereKey($lineId)->exists();
         }
 
         return SmsLine::query()->visibleTo($user, false)->whereKey($lineId)->exists();

@@ -2,9 +2,24 @@
 
 namespace Visnsstudio\VisnsPackages\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Visnsstudio\VisnsPackages\Support\SchemaColumns;
 
+/**
+ * A stored OAuth authorisation for one provider.
+ *
+ * ## The house and its clients (4.19.0)
+ *
+ * `client_id` NULL is the house's connection - the application's own, which is
+ * every row there was before 4.19.0, and what every caller that names no client
+ * still reads and writes. An id is one of the host application's clients who
+ * has authorised the same provider for themselves (a client's own Zoom SMS
+ * user, say - see SmsLine). The two never meet: a house read cannot return a
+ * client's token, and storing a client's connection deactivates only that
+ * client's previous one.
+ */
 class OAuthConnection extends Model
 {
     use HasFactory;
@@ -21,6 +36,7 @@ class OAuthConnection extends Model
         'metadata',
         'last_sync_at',
         'sync_status',
+        'client_id',
     ];
 
     protected $casts = [
@@ -48,14 +64,38 @@ class OAuthConnection extends Model
     ];
 
     /**
-     * Get the active connection for a provider
+     * Get the active connection for a provider.
+     *
+     * @param  int|null  $clientId  Null = the house's connection (every caller
+     *                              written before 4.19.0); an id = that client's.
      */
-    public static function getActiveConnection(string $provider)
+    public static function getActiveConnection(string $provider, ?int $clientId = null)
     {
-        return static::where('provider', $provider)
+        return static::query()
+            ->forClient($clientId)
+            ->where('provider', $provider)
             ->where('is_active', true)
             ->orderBy('created_at', 'desc')
             ->first();
+    }
+
+    /**
+     * One owner's connections: null = the house's, an id = that client's.
+     *
+     * Until the 4.19.0 migration has run there is no `client_id` and every row
+     * is the house's, so a house read is unscoped and a client read finds
+     * nothing - see Support\SchemaColumns. Without that a package update would
+     * take Settings -> Integrations down until somebody migrated.
+     */
+    public function scopeForClient(Builder $query, ?int $clientId): Builder
+    {
+        if (! SchemaColumns::has($this->getTable(), 'client_id')) {
+            return $clientId === null ? $query : $query->whereRaw('1 = 0');
+        }
+
+        return $clientId === null
+            ? $query->whereNull($this->qualifyColumn('client_id'))
+            : $query->where($this->qualifyColumn('client_id'), $clientId);
     }
 
     /**
@@ -102,16 +142,34 @@ class OAuthConnection extends Model
     }
 
     /**
-     * Store new connection, deactivating old ones
+     * Store a new connection, deactivating the old ones OF THE SAME OWNER.
+     *
+     * @param  int|null  $clientId  Null = the house's (every caller written
+     *                              before 4.19.0); an id = that client's. A
+     *                              client connecting never disconnects the
+     *                              house, nor another client.
      */
-    public static function storeConnection(string $provider, array $tokenData, array $metadata = [])
+    public static function storeConnection(string $provider, array $tokenData, array $metadata = [], ?int $clientId = null)
     {
+        // A client's connection with nowhere to record whose it is would be
+        // stored as the HOUSE's - and then sent on as the house. Refused
+        // loudly instead; it means 4.19.0's migration has not been run.
+        if ($clientId !== null && ! SchemaColumns::has((new static())->getTable(), 'client_id')) {
+            throw new \RuntimeException(
+                'oauth_connections has no client_id column; run the visns-packages 4.19.0 migration.'
+            );
+        }
+
         // Deactivate existing connections
-        static::where('provider', $provider)
+        static::query()
+            ->forClient($clientId)
+            ->where('provider', $provider)
             ->where('is_active', true)
             ->update(['is_active' => false]);
 
-        return static::create([
+        $owner = $clientId !== null ? ['client_id' => $clientId] : [];
+
+        return static::create($owner + [
             'provider' => $provider,
             'access_token' => $tokenData['access_token'],
             'refresh_token' => $tokenData['refresh_token'] ?? null,

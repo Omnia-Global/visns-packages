@@ -162,7 +162,7 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
             if ($event === 'endpoint.url_validation') {
                 $ledger->outcome('url_validation');
 
-                return $this->urlValidation($body);
+                return $this->urlValidation($body, $request);
             }
 
             /*
@@ -263,10 +263,16 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
     /**
      * Answer Zoom's URL validation challenge.
      */
-    private function urlValidation(array $body)
+    private function urlValidation(array $body, ?\Illuminate\Http\Request $request = null)
     {
         $plainToken = (string) Arr::get($body, 'payload.plainToken', '');
-        $secret = (string) \Visnsstudio\VisnsPackages\Support\ZoomWebhookSecret::resolve();
+        // Signed with the secret the middleware matched the delivery against -
+        // i.e. the secret of the Zoom app that is asking - falling back to the
+        // call queue's own. Two apps share this endpoint since 4.19.0, and
+        // answering one app's challenge with the other's secret fails Zoom's
+        // check with nothing in any log to say why.
+        $secret = (string) (($request ?? request())->attributes->get('zoom_webhook_secret')
+            ?? \Visnsstudio\VisnsPackages\Support\ZoomWebhookSecret::resolve());
 
         return response()->json([
             'plainToken' => $plainToken,

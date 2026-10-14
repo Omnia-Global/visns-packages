@@ -145,7 +145,10 @@ class SmsSystemSender
                 (string) $line->phone_number,
                 $to,
                 $body,
-                $line->zoom_user_id !== null ? (string) $line->zoom_user_id : null
+                $line->zoom_user_id !== null ? (string) $line->zoom_user_id : null,
+                // Always a house line (SmsLineResolver answers nothing else),
+                // passed so the client says so rather than assuming it.
+                $line
             );
         } catch (\Throwable $e) {
             // The row already exists and something has to end up in its status

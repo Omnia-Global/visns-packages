@@ -5,6 +5,7 @@ namespace Visnsstudio\VisnsPackages\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
+use Visnsstudio\VisnsPackages\Support\SchemaColumns;
 use Visnsstudio\VisnsPackages\Support\PhoneNumber;
 use Visnsstudio\VisnsPackages\Support\SmsText;
 
@@ -73,10 +74,21 @@ class SmsThread extends Model
 
     /**
      * Threads on lines this user may work. Mirrors SmsLine::scopeVisibleTo so
-     * the two can never disagree about who sees what.
+     * the two can never disagree about who sees what - including that it is
+     * HOUSE lines only, manage or not: a conversation on a client's own line is
+     * the client's, and the practice's inbox is not a way into it.
      */
     public function scopeVisibleTo(Builder $query, $user, bool $manages = false): Builder
     {
+        $lines = ModuleConfig::get('messaging.tables.lines', 'sms_lines');
+
+        if (SchemaColumns::has($lines, 'client_id')) {
+            $query->whereIn(
+                $this->qualifyColumn('line_id'),
+                fn ($q) => $q->select('id')->from($lines)->whereNull('client_id')
+            );
+        }
+
         if ($manages) {
             return $query;
         }

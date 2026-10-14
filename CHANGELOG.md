@@ -5,6 +5,73 @@ Notable changes to `visnsstudio/visns-packages`.
 Entries before 4.15.0 were not kept in a file; the git log and the README's
 per-module sections are the record for those.
 
+## 4.19.0 — client-owned SMS lines
+
+A host application can give one of its clients a line of their own, sending
+from the client's own Zoom tenant on the client's own user-level connection,
+with the campaign and opt-out screens scoped to that client. Every existing
+caller keeps the house's behaviour. Run the new migration.
+
+### Added
+
+- **`2026_10_14_100000_add_client_scope_to_sms_tables`.** `client_id` on
+  `sms_lines`, `sms_templates` and `oauth_connections` (NULL = the house),
+  `oauth_connection_id` on `sms_lines`, `created_by_name` on `sms_campaigns`,
+  and `client_id` (NOT NULL, `0` = the house) on `sms_opt_outs`, whose unique
+  key moves from `number` to `(client_id, number)` —
+  `sms_opt_outs_client_number_unique`. Idempotent, guarded per column and
+  index, runs on SQLite and MySQL; `down()` reverses it, but keeps the
+  composite key where a number is by then opted out of two registers. Until it
+  has run, every read treats every row as the house's (`Support\SchemaColumns`),
+  so updating the package before migrating changes nothing.
+- **Scopes.** `SmsLine::house()` / `forClient()` / `isHouse()` /
+  `connection()`, `SmsTemplate::house()` / `forClient()`,
+  `SmsOptOut::forClient()`, `OAuthConnection::forClient()`.
+- **`OAuthConnection::getActiveConnection($provider, ?int $clientId = null)`
+  and `storeConnection(…, ?int $clientId = null)`.** Null is the house;
+  storing a client's connection deactivates only that client's previous one,
+  and is refused (throws) before the migration has run rather than being
+  stored as the house's.
+- **Controller hooks.** `SmsCampaignController::lineQuery()`,
+  `campaignQuery()`, `optOutClientId()`, `actor()`;
+  `SmsOptOutController::optOutClientId()`, `actor()`. Every action goes
+  through them; a campaign or opt-out row outside the scope is a 404, a
+  `line_id` outside `lineQuery()` a 422 *"That line is not available."*
+- **Campaign payload `user_name`**, and `user: {id: null, name}` for a
+  campaign created by an actor who is not a user.
+- **`ZoomWebhookSecret::candidates()`** and **`messaging.zoom.webhook_secrets`**
+  (default `[]`): the signature middleware accepts a delivery signed with any
+  candidate — the call queue's own first, then a `zoom_sms` integration's
+  `webhook_secret` field when the host declares one, then the config list —
+  and the URL-validation answer is signed with the one that matched.
+
+### Changed
+
+- **Staff surfaces are house-only, manage permission or not.**
+  `SmsLine::scopeVisibleTo` and `SmsThread::scopeVisibleTo` exclude client
+  lines; `GET {base}/lines`, the line settings and template screens, the
+  house campaign and opt-out endpoints and the broadcast channel follow. The
+  channel now also requires the line to exist for a manager (it admitted any
+  id).
+- **`SmsCampaignController::store()`** answers *"That line is not available."*
+  where it said *"That line no longer exists."* — one sentence for a deleted
+  line and somebody else's.
+- **`SmsLineResolver::resolve()` answers a house line only**, including when
+  `messaging.system_line` names a client's number; **`sms:sync-lines`** skips
+  client lines.
+- **`ZoomSmsClient::sendSms()` takes the line** (fifth argument, optional). A
+  client line sends on its own active connection or the client's active
+  `zoom_sms` connection, never the house's or the Server-to-Server app; with
+  neither it answers `not_connected`, `ZoomSmsTransport` stores the message
+  `not_connected`, and a campaign on that line pauses with
+  `ZoomSmsClient::CLIENT_NOT_CONNECTED`. A house line is unchanged.
+- **Opt-outs are per client.** `SmsOptOuts::isOptedOut()`, `optedOutAmong()`,
+  `record()` and `release()` take a client id last (default `0`); a keyword on
+  a client's line and a client's campaign use the line's owner.
+
+Tests: `Messaging\MessagingClientLinesTest` (21). The messaging harness now
+also builds `oauth_connections` and runs the new migration.
+
 ## 4.18.0 — a page-size ceiling, and `{slug}` in record URLs
 
 ### Added

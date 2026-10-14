@@ -2026,6 +2026,110 @@ Illegal transitions answer **422 with a sentence** naming what the campaign is
 ("A completed campaign cannot be started."), never a silent no-op.
 
 
+#### Client-owned lines
+
+Since 4.19.0 a line has an **owner**. `sms_lines.client_id` NULL is the
+**house** — the application's own numbers, which is every line that existed
+before — and an id is one of the host application's clients, texting from
+**their own** Zoom tenant. Run the `2026_10_14_100000_add_client_scope_to_sms_tables`
+migration (idempotent and guarded; until it has run, every line, template,
+opt-out and OAuth connection simply reads as the house's).
+
+| Column | Meaning |
+| --- | --- |
+| `sms_lines.client_id` | NULL = house; an id = that client's line |
+| `sms_lines.oauth_connection_id` | the client's own user-level `zoom_sms` connection |
+| `sms_opt_outs.client_id` | `0` = the house's register; unique on `(client_id, number)` |
+| `sms_templates.client_id` | NULL = the house's templates |
+| `sms_campaigns.created_by_name` | who built it when `user_id` is null (a portal user is not in `users`) |
+| `oauth_connections.client_id` | NULL = the house's connection for that provider |
+
+**Staff never see a client's line**, manage permission or not: `SmsLine::scopeVisibleTo`
+(and `SmsThread`'s mirror of it), `SmsAccess::lineIds()`, `GET {base}/lines`,
+the line settings screen, the templates screen, the house campaign and opt-out
+endpoints and the broadcast channel are all house-only. `SmsLineResolver` never
+answers a client line, so login codes and reminders always come from a house
+number, and `sms:sync-lines` never touches one. `SmsLine::findByNumber()` is
+unchanged — inbound routing is by number across every owner.
+
+**A client line sends on the client's own connection or not at all.**
+`ZoomSmsClient::sendSms()` takes the line as a fifth argument: a house line
+(or none) behaves exactly as before; a client line uses its `oauth_connection_id`
+while that connection is active and the client's, otherwise
+`OAuthConnection::getActiveConnection('zoom_sms', $clientId)`, and with neither
+it answers `not_connected` — nothing reaches Zoom, the message is stored
+`not_connected`, and a campaign on that line pauses with
+`ZoomSmsClient::CLIENT_NOT_CONNECTED` as its reason. It never falls back to the
+house's connection or the Server-to-Server app.
+
+`OAuthConnection::getActiveConnection($provider, ?int $clientId = null)` and
+`storeConnection($provider, $tokens, $metadata = [], ?int $clientId = null)`:
+null is the house (every existing caller), and storing a client's connection
+deactivates only that client's previous one.
+
+**Opt-outs are per sender.** `SmsOptOuts::isOptedOut()`, `optedOutAmong()`,
+`record()` and `release()` take a client id last (default `0`, the house). A
+STOP on a client's line is recorded against that client; a client's campaign
+checks the client's register, the house's checks the house's.
+
+##### The hooks a host overrides
+
+A host gives a client the campaign screen by **extending** the package's
+controllers and mounting the subclass behind its own guard and routes — the
+same code, scoped. Every action goes through these protected methods:
+
+```php
+class PortalSmsCampaignController extends \Visnsstudio\VisnsPackages\Controllers\SmsCampaignController
+{
+    // The lines a campaign may be created on. Default: SmsLine::query()->house().
+    protected function lineQuery(Request $request): Builder
+    {
+        return SmsLine::query()->forClient($request->user('portal')->customer_id);
+    }
+
+    // Default: campaigns on lineQuery()'s lines (soft-deleted lines included),
+    // so overriding lineQuery() alone already narrows the campaigns.
+    // protected function campaignQuery(Request $request): Builder
+
+    // Whose opt-out register an import is judged against. Default 0.
+    protected function optOutClientId(Request $request): int
+    {
+        return (int) $request->user('portal')->customer_id;
+    }
+
+    // Who created it. Default: the request's user. A portal user is NOT a row
+    // in `users`, so answer user_id/user null and name them instead.
+    protected function actor(Request $request): array
+    {
+        return ['user_id' => null, 'created_by_name' => 'Dana Client', 'user' => null];
+    }
+}
+```
+
+`SmsOptOutController` has `optOutClientId()` and `actor()` the same way.
+Outside the scope is a 404 (a campaign, an opt-out row) or a 422 *"That line is
+not available."* (a `line_id` on create) — never a 500 and never a 403, so
+another client's records cannot be confirmed to exist. Permissions stay the
+route's business. Campaign payloads carry `user_name`, and a campaign with no
+user but a `created_by_name` answers `user: {id: null, name: …}` so the
+existing screen's "created by" line still reads.
+
+`sms:send-campaigns` already walks every sending campaign, so client campaigns
+need no scheduling of their own.
+
+##### Webhook secrets
+
+A client's replies, STOPs and delivery receipts arrive at the same webhook
+endpoint from the **user-level SMS app's** event subscription, signed with that
+app's secret token — not the Server-to-Server app's. The signature middleware
+therefore accepts any of `Support\ZoomWebhookSecret::candidates()`:
+
+1. the existing secret (`zoom` integration / `call_queue.webhook_secret_token`) — first, unchanged;
+2. the `zoom_sms` integration's `webhook_secret` credential, when the host declares that field;
+3. `messaging.zoom.webhook_secrets` — a list of any others.
+
+The URL-validation challenge is answered with whichever secret signed it.
+
 #### Things a front end has to know
 
 - **Status first.** `GET {base}/status` says whether anything is actually

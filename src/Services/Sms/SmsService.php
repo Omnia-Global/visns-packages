@@ -444,15 +444,23 @@ class SmsService
                 return;
             }
 
+            // Whose register: the line's owner's. A STOP to a client's own
+            // number unsubscribes from that client, never from the house - and
+            // a house line (client_id null) is register 0, as it always was.
+            $clientId = (int) ($thread->line?->client_id ?? 0);
+
             if ($direction === SmsOptOuts::OUT) {
                 $optOuts->record(
                     $e164,
                     SmsOptOut::SOURCE_KEYWORD,
                     $thread->line_id === null ? null : (int) $thread->line_id,
-                    (int) $message->id
+                    (int) $message->id,
+                    null,
+                    null,
+                    $clientId
                 );
             } else {
-                $optOuts->release($e164);
+                $optOuts->release($e164, $clientId);
             }
 
             $reply = $optOuts->confirmation($direction);

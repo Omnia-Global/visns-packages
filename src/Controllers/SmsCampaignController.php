@@ -2,6 +2,7 @@
 
 namespace Visnsstudio\VisnsPackages\Controllers;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Visnsstudio\VisnsPackages\Models\SmsCampaign;
 use Visnsstudio\VisnsPackages\Models\SmsCampaignRecipient;
@@ -11,6 +12,7 @@ use Visnsstudio\VisnsPackages\Services\Sms\SmsCampaignRenderer;
 use Visnsstudio\VisnsPackages\Services\Sms\SmsOptOuts;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 use Visnsstudio\VisnsPackages\Support\PhoneNumber;
+use Visnsstudio\VisnsPackages\Support\SchemaColumns;
 use Visnsstudio\VisnsPackages\Support\SmsPayload;
 
 /**
@@ -42,6 +44,25 @@ use Visnsstudio\VisnsPackages\Support\SmsPayload;
  * they press start; and again in the sender, per recipient, which is the rule -
  * an opt-out that arrives while a campaign is half sent has to be honoured for
  * the other half.
+ *
+ * ## Whose campaigns (4.19.0)
+ *
+ * Every action reaches its lines and campaigns through four protected hooks,
+ * and nothing in here reaches either any other way:
+ *
+ *   lineQuery()       the lines a campaign may be created on (the house's)
+ *   campaignQuery()   the campaigns this controller may see and act on -
+ *                     those on lineQuery()'s lines, soft-deleted lines included
+ *   optOutClientId()  whose opt-out register the import is checked against
+ *   actor()           who to record as having created one
+ *
+ * So a host application that gives one of its clients a line of their own
+ * extends this class, overrides the hooks to that client, and mounts it behind
+ * its own client-facing guard: the client gets the whole of this screen for
+ * their own number, and another client's campaign - or the house's - is the
+ * same 404 as one that never existed. The house's routes keep exactly what they
+ * had. Permissions stay the ROUTE's business (middleware), which is why no
+ * action here asks whether the caller "manages" anything.
  */
 class SmsCampaignController extends \App\Http\Controllers\Controller
 {
@@ -55,6 +76,65 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
         private SmsOptOuts $optOuts,
         private SmsCampaignRenderer $renderer
     ) {
+    }
+
+    /* ---------------------------------------------------------------------
+     | Scoping hooks - see the class docblock
+     | ------------------------------------------------------------------- */
+
+    /**
+     * The lines a campaign may be created on: the house's.
+     */
+    protected function lineQuery(Request $request): Builder
+    {
+        return SmsLine::query()->house();
+    }
+
+    /**
+     * The campaigns this controller may list and act on: those on a line
+     * lineQuery() answers for.
+     *
+     * Soft-deleted lines included. A campaign outlives the number it went out
+     * from - its recipients are the record of who was texted - so deleting a
+     * line must not make its campaigns vanish from the screen that reports them.
+     * Derived from lineQuery() rather than restated, so a subclass that narrows
+     * the lines narrows the campaigns with them even if it forgets this hook.
+     */
+    protected function campaignQuery(Request $request): Builder
+    {
+        $lines = $this->lineQuery($request)->withTrashed()->select('id');
+
+        return SmsCampaign::query()->whereIn('line_id', $lines);
+    }
+
+    /**
+     * Whose opt-out register an import is judged against. 0 is the house's.
+     */
+    protected function optOutClientId(Request $request): int
+    {
+        return 0;
+    }
+
+    /**
+     * Who is creating a campaign.
+     *
+     * `user_id` is a row in `users` or null; `created_by_name` is the words the
+     * screen shows, kept for an actor who is NOT a user - a person signed in to
+     * a client portal - so a campaign is never anonymous; `user` is what the
+     * sender attributes each message to (SmsService::sendToNumber), and null
+     * there reads as "the system sent this".
+     *
+     * @return array{user_id: mixed, created_by_name: ?string, user: mixed}
+     */
+    protected function actor(Request $request): array
+    {
+        $user = $request->user();
+
+        return [
+            'user_id' => $user?->getKey(),
+            'created_by_name' => $user?->name,
+            'user' => $user,
+        ];
     }
 
     /**
@@ -72,7 +152,7 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
      */
     public function index(Request $request)
     {
-        $campaigns = SmsCampaign::query()
+        $campaigns = $this->campaignQuery($request)
             ->with(['line', 'user'])
             ->orderByDesc('id')
             ->get();
@@ -127,10 +207,13 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
             'recipients.*.extra' => ['nullable', 'array'],
         ]);
 
-        $line = SmsLine::query()->find((int) $data['line_id']);
+        $line = $this->lineQuery($request)->find((int) $data['line_id']);
 
         if ($line === null) {
-            return $this->refuse('line_id', 'That line no longer exists.');
+            // One sentence for a line that was deleted and a line that belongs
+            // to somebody else: saying which would confirm that the other one
+            // exists.
+            return $this->refuse('line_id', 'That line is not available.');
         }
 
         if (! (bool) $line->active) {
@@ -140,7 +223,7 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
             return $this->refuse('line_id', 'That line is not active, so nothing can be sent from it.');
         }
 
-        $sorted = $this->sortRecipients($this->recipientRows($request));
+        $sorted = $this->sortRecipients($this->recipientRows($request), $this->optOutClientId($request));
 
         if ($sorted['accepted'] === []) {
             return $this->refuse(
@@ -159,9 +242,11 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
             ));
         }
 
+        $actor = $this->actor($request);
+
         $campaign = SmsCampaign::create([
             'line_id' => $line->id,
-            'user_id' => $request->user()?->id,
+            'user_id' => $actor['user_id'] ?? null,
             'name' => $data['name'],
             'body' => $data['body'],
             // Snapshotted, so a config change next month cannot rewrite what
@@ -169,7 +254,7 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
             'footer' => $this->footer(),
             'status' => SmsCampaign::STATUS_DRAFT,
             'total' => count($sorted['accepted']),
-        ]);
+        ] + $this->createdByName($actor));
 
         $this->insertRecipients($campaign, $sorted['accepted']);
 
@@ -218,7 +303,7 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
     public function show(Request $request, $id)
     {
         return response()->json([
-            'campaign' => SmsPayload::campaign($this->campaign($id)),
+            'campaign' => SmsPayload::campaign($this->campaign($request, $id)),
         ]);
     }
 
@@ -232,7 +317,7 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
      */
     public function recipients(Request $request, $id)
     {
-        $campaign = $this->campaign($id);
+        $campaign = $this->campaign($request, $id);
 
         $query = $campaign->recipients()->orderBy('id');
 
@@ -272,7 +357,7 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
      */
     public function start(Request $request, $id)
     {
-        $campaign = $this->campaign($id);
+        $campaign = $this->campaign($request, $id);
 
         if (! in_array($campaign->status, [SmsCampaign::STATUS_DRAFT, SmsCampaign::STATUS_PAUSED], true)) {
             return $this->refuseTransition($campaign, 'started');
@@ -299,7 +384,7 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
      */
     public function pause(Request $request, $id)
     {
-        $campaign = $this->campaign($id);
+        $campaign = $this->campaign($request, $id);
 
         if ($campaign->status !== SmsCampaign::STATUS_SENDING) {
             return $this->refuseTransition($campaign, 'paused');
@@ -320,7 +405,7 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
      */
     public function cancel(Request $request, $id)
     {
-        $campaign = $this->campaign($id);
+        $campaign = $this->campaign($request, $id);
 
         if (! $campaign->isActive()) {
             return $this->refuseTransition($campaign, 'cancelled');
@@ -360,7 +445,7 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
      */
     public function retryFailed(Request $request, $id)
     {
-        $campaign = $this->campaign($id);
+        $campaign = $this->campaign($request, $id);
 
         $requeued = (int) $campaign->recipients()
             ->where('status', SmsCampaignRecipient::STATUS_FAILED)
@@ -400,7 +485,7 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
      */
     public function destroy(Request $request, $id)
     {
-        $campaign = $this->campaign($id);
+        $campaign = $this->campaign($request, $id);
 
         if ($campaign->status !== SmsCampaign::STATUS_DRAFT) {
             return $this->refuse(
@@ -475,7 +560,7 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
      *     opted_out: array<int, array<string, mixed>>
      * }
      */
-    private function sortRecipients(array $rows): array
+    private function sortRecipients(array $rows, int $optOutClientId = 0): array
     {
         $candidates = [];
         $invalid = [];
@@ -525,7 +610,7 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
             ];
         }
 
-        $optedOut = $this->optOuts->optedOutAmong(array_column($candidates, 'number'));
+        $optedOut = $this->optOuts->optedOutAmong(array_column($candidates, 'number'), $optOutClientId);
 
         $accepted = [];
         $refused = [];
@@ -604,11 +689,34 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
     }
 
     /**
-     * A campaign, or a 404.
+     * The `created_by_name` column, when it has been migrated.
+     *
+     * Asked rather than assumed: an application that has updated the package
+     * and not yet run 4.19.0's migration would otherwise fail every campaign
+     * create on a column it does not have.
+     *
+     * @param  array<string, mixed>  $actor
+     * @return array<string, mixed>
      */
-    private function campaign($id): SmsCampaign
+    private function createdByName(array $actor): array
     {
-        $campaign = SmsCampaign::query()->with(['line', 'user'])->find($id);
+        if (! SchemaColumns::has((new SmsCampaign())->getTable(), 'created_by_name')) {
+            return [];
+        }
+
+        $name = trim((string) ($actor['created_by_name'] ?? ''));
+
+        return ['created_by_name' => $name !== '' ? mb_substr($name, 0, 191) : null];
+    }
+
+    /**
+     * A campaign this controller may act on, or a 404 - including for one that
+     * exists outside campaignQuery(), which must read exactly like one that
+     * never did.
+     */
+    private function campaign(Request $request, $id): SmsCampaign
+    {
+        $campaign = $this->campaignQuery($request)->with(['line', 'user'])->find($id);
 
         if ($campaign === null) {
             abort(404, 'Not found.');

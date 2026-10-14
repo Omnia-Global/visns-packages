@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Log;
 use Visnsstudio\VisnsPackages\Models\SmsOptOut;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 use Visnsstudio\VisnsPackages\Support\PhoneNumber;
+use Visnsstudio\VisnsPackages\Support\SchemaColumns;
 
 /**
  * The opt-out register: who has asked not to be texted, and how we know.
@@ -32,6 +33,16 @@ use Visnsstudio\VisnsPackages\Support\PhoneNumber;
  * bulk; Zoom's block is the backstop underneath it, and the reason the
  * confirmation sent back to a STOP is the one message in this module allowed to
  * disappear rather than fail (Services\Sms\SmsService::readOptOutKeyword).
+ *
+ * ## Whose register (4.19.0)
+ *
+ * One register per SENDER: `client_id` 0 is the house's, any other id belongs
+ * to one of the host application's clients who texts from a line of their own.
+ * Somebody who texts STOP to a client's number has asked that client to stop -
+ * not us - and somebody who unsubscribed from our texts has not unsubscribed
+ * from a business we have never spoken for. Every method takes the client id
+ * last and defaults it to 0, so every caller written before this existed keeps
+ * asking about the house's register, which is the only one there was.
  *
  * ## What it does and does not stop
  *
@@ -92,14 +103,14 @@ class SmsOptOuts
      * canonicalised when they were imported is four hundred parses for nothing.
      * Callers holding raw input run normalise() first.
      */
-    public function isOptedOut(string $e164): bool
+    public function isOptedOut(string $e164, int $clientId = 0): bool
     {
         if (trim($e164) === '') {
             return false;
         }
 
         try {
-            return SmsOptOut::query()->where('number', $e164)->exists();
+            return SmsOptOut::query()->forClient($clientId)->where('number', $e164)->exists();
         } catch (QueryException $e) {
             return $this->registerUnreadable($e);
         }
@@ -113,9 +124,10 @@ class SmsOptOuts
      * checks to grey out a badge is the N+1 that makes a list feel broken.
      *
      * @param  array<int, string>  $numbers
+     * @param  int                 $clientId  Whose register; 0 = the house's.
      * @return array<string, bool>
      */
-    public function optedOutAmong(array $numbers): array
+    public function optedOutAmong(array $numbers, int $clientId = 0): array
     {
         $numbers = array_values(array_unique(array_filter(
             $numbers,
@@ -128,6 +140,7 @@ class SmsOptOuts
 
         try {
             return SmsOptOut::query()
+                ->forClient($clientId)
                 ->whereIn('number', $numbers)
                 ->pluck('number')
                 ->mapWithKeys(fn ($number) => [(string) $number => true])
@@ -178,6 +191,7 @@ class SmsOptOuts
      * @param  int|null     $lineId     The line that received the keyword.
      * @param  int|null     $messageId  The inbound message that triggered it - the evidence.
      * @param  mixed        $user       Who recorded a manual one.
+     * @param  int          $clientId   Whose register; 0 = the house's.
      */
     public function record(
         string $e164,
@@ -185,12 +199,13 @@ class SmsOptOuts
         ?int $lineId = null,
         ?int $messageId = null,
         $user = null,
-        ?string $note = null
+        ?string $note = null,
+        int $clientId = 0
     ): SmsOptOut {
         $userId = is_object($user) ? ($user->id ?? null) : $user;
 
         return SmsOptOut::updateOrCreate(
-            ['number' => $e164],
+            $this->key($e164, $clientId),
             [
                 'source' => $source,
                 'line_id' => $lineId,
@@ -214,9 +229,9 @@ class SmsOptOuts
      * number was not on the list" rather than reporting a success that did
      * nothing.
      */
-    public function release(string $e164): bool
+    public function release(string $e164, int $clientId = 0): bool
     {
-        return SmsOptOut::query()->where('number', $e164)->delete() > 0;
+        return SmsOptOut::query()->forClient($clientId)->where('number', $e164)->delete() > 0;
     }
 
     /**
@@ -266,6 +281,27 @@ class SmsOptOuts
     /* ---------------------------------------------------------------------
      | Internals
      | ------------------------------------------------------------------- */
+
+    /**
+     * The row's identity: (client_id, number), the register's unique key.
+     *
+     * Just the number until the 4.19.0 migration has run, when there is no
+     * client_id to write and only the house's register exists - a client's
+     * keyword arriving in that window lands in the house's, which is the
+     * direction an ambiguous opt-out should fall.
+     *
+     * @return array<string, mixed>
+     */
+    private function key(string $e164, int $clientId): array
+    {
+        $table = (new SmsOptOut())->getTable();
+
+        if (! SchemaColumns::has($table, 'client_id')) {
+            return ['number' => $e164];
+        }
+
+        return ['client_id' => $clientId, 'number' => $e164];
+    }
 
     /**
      * The three readings of a message that may be a command: the whole of it,

@@ -66,7 +66,10 @@ class ZoomSmsTransport implements SmsTransport
                 (string) $line->phone_number,
                 (string) $thread->external_number,
                 (string) $message->body,
-                $line->zoom_user_id !== null ? (string) $line->zoom_user_id : null
+                $line->zoom_user_id !== null ? (string) $line->zoom_user_id : null,
+                // The line decides WHOSE Zoom connection sends: a client's own
+                // line goes out on that client's token or not at all.
+                $line
             );
         } catch (\Throwable $e) {
             // A transport must not throw: the message row already exists and
@@ -83,6 +86,15 @@ class ZoomSmsTransport implements SmsTransport
         }
 
         $raw = is_array($result['data'] ?? null) ? $result['data'] : [];
+
+        if (($result['not_connected'] ?? false) === true) {
+            // A client's line with no usable Zoom connection of its own. Nothing
+            // was sent and nothing reached Zoom, so this is the dev transport's
+            // answer rather than a failure: stored `not_connected`, which is
+            // what makes a campaign pause and say why instead of burning every
+            // recipient's retries against a connection that is not there.
+            return SmsSendResult::notConnected($client->errorMessage($result), $raw);
+        }
 
         $this->lastStatus = (int) ($result['http_code'] ?? 0);
         $this->lastHeaders = $this->normaliseHeaders($result['headers'] ?? []);

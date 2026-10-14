@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 use Visnsstudio\VisnsPackages\Support\PhoneNumber;
+use Visnsstudio\VisnsPackages\Support\SchemaColumns;
 
 /**
  * One SMS-capable number the organisation sends and receives on.
@@ -14,6 +15,16 @@ use Visnsstudio\VisnsPackages\Support\PhoneNumber;
  * The pivot to users is this module's entire visibility model, so it lives on
  * the model as a scope (`visibleTo`) rather than being restated in each
  * controller method - every read path goes through it and a miss is a 404.
+ *
+ * ## The house and its clients (4.19.0)
+ *
+ * A line has an owner. `client_id` NULL is the HOUSE - the application's own
+ * numbers, which is every line that existed before 4.19.0 - and an id is one of
+ * the host application's clients, texting from their own Zoom tenant on their
+ * own user-level connection (`oauth_connection_id`). Staff work house lines
+ * only: `visibleTo` is house-only whatever permission is held, because a
+ * client's line is the client's conversations, reached through whatever screen
+ * the host builds for that client and never through the practice's inbox.
  */
 class SmsLine extends Model
 {
@@ -49,6 +60,55 @@ class SmsLine extends Model
     }
 
     /**
+     * A client line's own Zoom connection. Null on a house line, which sends on
+     * the house connection (or the Server-to-Server app) exactly as it always
+     * has - see Services\Zoom\ZoomSmsClient.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
+     */
+    public function connection()
+    {
+        return $this->belongsTo(OAuthConnection::class, 'oauth_connection_id');
+    }
+
+    /**
+     * Is this one of the house's own lines?
+     */
+    public function isHouse(): bool
+    {
+        return $this->client_id === null;
+    }
+
+    /**
+     * The house's lines: the ones staff work and the ones the application's own
+     * texts (login codes, reminders) may go out on.
+     *
+     * Before the 4.19.0 migration has run there is no `client_id` to read and
+     * every line is the house's, which is what this answers - see
+     * Support\SchemaColumns.
+     */
+    public function scopeHouse(Builder $query): Builder
+    {
+        if (! SchemaColumns::has($this->getTable(), 'client_id')) {
+            return $query;
+        }
+
+        return $query->whereNull($this->qualifyColumn('client_id'));
+    }
+
+    /**
+     * One client's lines.
+     */
+    public function scopeForClient(Builder $query, int $clientId): Builder
+    {
+        if (! SchemaColumns::has($this->getTable(), 'client_id')) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->where($this->qualifyColumn('client_id'), $clientId);
+    }
+
+    /**
      * @return \Illuminate\Database\Eloquent\Relations\HasMany
      */
     public function threads()
@@ -60,11 +120,17 @@ class SmsLine extends Model
      * The lines this user may work.
      *
      * Attached staff see their own lines; a holder of the manage permission sees
-     * every line, because somebody has to be able to set them up and to answer
-     * the number nobody is attached to.
+     * every HOUSE line, because somebody has to be able to set them up and to
+     * answer the number nobody is attached to.
+     *
+     * House only, manage or not. A client's line is that client's business and
+     * its conversations are theirs; "Messaging Manage" is an administrative
+     * grant over the practice's numbers, not a key to every client's.
      */
     public function scopeVisibleTo(Builder $query, $user, bool $manages = false): Builder
     {
+        $query->house();
+
         if ($manages) {
             return $query;
         }
@@ -104,6 +170,10 @@ class SmsLine extends Model
      *
      * The single join between "what Zoom sent" and "which inbox this is", used
      * by the webhook and by every send.
+     *
+     * Across EVERY owner, house and client alike: an inbound text from a
+     * client's tenant has to find the client's line, and a number is unique
+     * across the table, so there is never a question of which one was meant.
      */
     public static function findByNumber(?string $number): ?self
     {

@@ -70,7 +70,12 @@ class SmsSyncLinesCommand extends Command
         $updated = 0;
         $unmatched = 0;
 
-        foreach (SmsLine::all() as $line) {
+        // House lines only. Zoom's user list here is OUR account's, read on our
+        // Server-to-Server token; a client's line lives in the client's tenant,
+        // whose users this list does not contain - so every client line would be
+        // reported unmatched at best, and at worst a number ported between
+        // tenants would have its sender rewritten to one of our users.
+        foreach (SmsLine::query()->house()->get() as $line) {
             $zoomUser = $byNumber[(string) $line->phone_number] ?? null;
 
             if ($zoomUser === null) {

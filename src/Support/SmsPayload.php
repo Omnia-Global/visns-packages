@@ -146,10 +146,14 @@ class SmsPayload
             // a config change cannot rewrite what was actually sent.
             'body' => $campaign->body,
             'footer' => $campaign->footer,
-            'user' => $campaign->user === null ? null : [
-                'id' => $campaign->user->id,
-                'name' => self::displayName($campaign->user),
-            ],
+            'user' => self::campaignCreator($campaign),
+            // Who built it, as words, whatever kind of actor that was - a
+            // member of staff (`user`) or a person signed in to a client portal,
+            // who is not a row in `users` and is named by `created_by_name`
+            // alone (4.19.0). Null only when neither was recorded.
+            'user_name' => $campaign->user !== null
+                ? self::displayName($campaign->user)
+                : (self::filled($campaign->created_by_name ?? null)),
             'counts' => $counts,
             'progress' => self::progress($counts),
             'last_error' => $campaign->last_error,
@@ -260,6 +264,37 @@ class SmsPayload
         }
 
         return app(SmsOptOuts::class)->isOptedOut((string) $thread->external_number);
+    }
+
+    /**
+     * The campaign's `user` block.
+     *
+     * Staff exactly as before. A campaign created by somebody who is not a
+     * user gets `{id: null, name: <created_by_name>}`, because the campaign
+     * screen reads `user.name` for its "created by" line and a portal
+     * campaign would otherwise say nothing at all about who sent it.
+     *
+     * @return array{id: mixed, name: string}|null
+     */
+    private static function campaignCreator(SmsCampaign $campaign): ?array
+    {
+        if ($campaign->user !== null) {
+            return [
+                'id' => $campaign->user->id,
+                'name' => self::displayName($campaign->user),
+            ];
+        }
+
+        $name = self::filled($campaign->created_by_name ?? null);
+
+        return $name === null ? null : ['id' => null, 'name' => $name];
+    }
+
+    private static function filled($value): ?string
+    {
+        $value = is_string($value) ? trim($value) : '';
+
+        return $value !== '' ? $value : null;
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace Visnsstudio\VisnsPackages\Tests\Fixtures\Messaging;
 
+use Visnsstudio\VisnsPackages\Models\SmsLine;
 use Visnsstudio\VisnsPackages\Services\Zoom\ZoomSmsClient;
 
 /**
@@ -41,7 +42,7 @@ class FakeZoomSmsClient extends ZoomSmsClient
         self::$shouldThrow = false;
     }
 
-    public function sendSms(string $from, string $to, string $body, ?string $userId = null): array
+    public function sendSms(string $from, string $to, string $body, ?string $userId = null, ?SmsLine $line = null): array
     {
         if (self::$shouldThrow) {
             throw new \RuntimeException('zoom is on fire');
@@ -52,6 +53,7 @@ class FakeZoomSmsClient extends ZoomSmsClient
             'to' => $to,
             'body' => $body,
             'user_id' => $userId,
+            'line_id' => $line?->id,
             // The real body builder, not a copy of it - so the test pins the
             // shape that would actually go to Zoom.
             'request' => $this->sendBody($from, $to, $body, $userId),
