@@ -13,6 +13,7 @@ use Visnsstudio\VisnsPackages\Events\CallQueueAnswered;
 use Visnsstudio\VisnsPackages\Events\CallQueueEnded;
 use Visnsstudio\VisnsPackages\Events\CallQueueMissed;
 use Visnsstudio\VisnsPackages\Events\CallQueueRinging;
+use Visnsstudio\VisnsPackages\Models\OAuthConnection;
 use Visnsstudio\VisnsPackages\Models\ZoomCallQueueSetting;
 use Visnsstudio\VisnsPackages\Models\ZoomLiveQueueCall;
 use Visnsstudio\VisnsPackages\Services\Sms\SmsWebhookHandler;
@@ -132,6 +133,12 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
         'phone.sms_sent_failed',
     ];
 
+    /**
+     * Sent when a Zoom user removes our Marketplace app. Zoom's review requires
+     * a published OAuth app to stop using, and remove, that user's tokens.
+     */
+    private const DEAUTHORIZED_EVENT = 'app_deauthorized';
+
     public function handle(Request $request)
     {
         $body = $request->json()->all();
@@ -163,6 +170,12 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
                 $ledger->outcome('url_validation');
 
                 return $this->urlValidation($body, $request);
+            }
+
+            // A user removed our Marketplace app. About tokens, not SMS or
+            // calls, so it is handled whatever module is switched on.
+            if ($event === self::DEAUTHORIZED_EVENT) {
+                return $this->handleDeauthorized($body, $ledger);
             }
 
             /*
@@ -652,6 +665,65 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
 
             return $mutate($locked);
         });
+    }
+
+    /**
+     * `app_deauthorized`: a Zoom user removed the app.
+     *
+     * Every Zoom OAuth connection whose token belongs to that user - the
+     * house's and any client's - is deactivated and its tokens are cleared.
+     * The rows are KEPT, not deleted: `sms_lines.oauth_connection_id` points at
+     * them, and an inactive connection is what tells the client (and Settings)
+     * that the app needs connecting again.
+     *
+     * A user we never stored is the ordinary case - Zoom sends this for every
+     * removal - and is still `deauthorized` with `connections: 0`. Answered 200
+     * regardless. The signature and the tokens never reach the ledger or the log.
+     */
+    private function handleDeauthorized(array $body, WebhookLedger $ledger)
+    {
+        $userId = trim((string) Arr::get($body, 'payload.user_id', ''));
+
+        $connections = $userId === ''
+            ? collect()
+            : OAuthConnection::query()
+                ->where('provider', 'like', 'zoom%')
+                ->get()
+                ->filter(static fn (OAuthConnection $connection): bool => (string) Arr::get(
+                    (array) ($connection->metadata ?? []),
+                    'token_user.id',
+                    ''
+                ) === $userId);
+
+        $deauthorizedAt = now()->toIso8601String();
+
+        foreach ($connections as $connection) {
+            $connection->forceFill([
+                'is_active' => false,
+                // NOT NULL on the create migration, so emptied rather than nulled.
+                'access_token' => '',
+                'refresh_token' => null,
+                'expires_at' => null,
+                'metadata' => array_merge((array) ($connection->metadata ?? []), [
+                    'deauthorized_at' => $deauthorizedAt,
+                    'deauthorized_by_zoom' => true,
+                ]),
+            ])->save();
+        }
+
+        $count = $connections->count();
+
+        $ledger->outcome('deauthorized')->meta([
+            'user_id' => $userId === '' ? null : substr($userId, 0, 120),
+            'connections' => $count,
+        ]);
+
+        Log::info('zoom.webhook app deauthorized', [
+            'zoom_user_id' => $userId,
+            'connections' => $count,
+        ]);
+
+        return response()->json(['status' => 'ok']);
     }
 
     /**

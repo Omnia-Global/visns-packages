@@ -119,6 +119,18 @@ class WebhookLedger
     }
 
     /**
+     * Extra detail for a delivery that is not about a call, merged over whatever
+     * routing shape open() recorded. Callers pass identifiers and counts only -
+     * never a token, a signature or a payload.
+     */
+    public function meta(array $meta): self
+    {
+        $this->attributes['meta'] = array_merge($this->attributes['meta'] ?? [], $meta);
+
+        return $this;
+    }
+
+    /**
      * The call this delivery is about, when it was only discovered mid-flight.
      */
     public function callId(string $callId): self

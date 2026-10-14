@@ -2130,6 +2130,22 @@ therefore accepts any of `Support\ZoomWebhookSecret::candidates()`:
 
 The URL-validation challenge is answered with whichever secret signed it.
 
+##### App Deauthorized
+
+The webhook handles Zoom's **`app_deauthorized`** event, which Zoom's
+Marketplace review requires of a published OAuth app: **subscribe the
+Marketplace app to "App Deauthorized"** (the same event subscription and URL as
+the SMS events). On receipt, every `oauth_connections` row with a `zoom*`
+provider whose `metadata.token_user.id` is the deauthorising user — the house's
+and any client's — is set inactive, `access_token` is emptied (the column is
+NOT NULL), `refresh_token` and `expires_at` are nulled, and `metadata` gains
+`deauthorized_at` and `deauthorized_by_zoom: true`. The rows are kept, not
+deleted: `sms_lines.oauth_connection_id` points at them and an inactive
+connection reads as "needs reconnecting". It is handled whether or not the
+messaging module is on, always answers 200, and is ledgered as `deauthorized`
+with `{user_id, connections}` (0 for a user never stored) — never the
+signature or a token.
+
 #### Things a front end has to know
 
 - **Status first.** `GET {base}/status` says whether anything is actually

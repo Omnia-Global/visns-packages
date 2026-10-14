@@ -5,6 +5,24 @@ Notable changes to `visnsstudio/visns-packages`.
 Entries before 4.15.0 were not kept in a file; the git log and the README's
 per-module sections are the record for those.
 
+## 4.19.1 — Zoom App Deauthorized
+
+### Added
+
+- **`app_deauthorized` on the Zoom webhook.** When a Zoom user removes the
+  Marketplace app, every `oauth_connections` row with a `zoom*` provider whose
+  `metadata.token_user.id` is that user (house and client rows alike) is
+  deactivated: `is_active` false, `access_token` emptied (NOT NULL column),
+  `refresh_token` and `expires_at` nulled, and `deauthorized_at` /
+  `deauthorized_by_zoom` added to `metadata` with its other keys kept. Rows are
+  never deleted (`sms_lines.oauth_connection_id` references them). Handled
+  regardless of `messaging.enabled`, always 200, ledgered as outcome
+  `deauthorized` with meta `{user_id, connections}`, one
+  `zoom.webhook app deauthorized` log line. Subscribe the Marketplace app to
+  the App Deauthorized event. No migration.
+- **`WebhookLedger::meta(array)`**, merging identifiers and counts into a
+  delivery's meta.
+
 ## 4.19.0 — client-owned SMS lines
 
 A host application can give one of its clients a line of their own, sending
