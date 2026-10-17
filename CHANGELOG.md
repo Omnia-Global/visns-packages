@@ -5,6 +5,29 @@ Notable changes to `visnsstudio/visns-packages`.
 Entries before 4.15.0 were not kept in a file; the git log and the README's
 per-module sections are the record for those.
 
+## 4.19.2 — 2026-10-17
+
+### Changed
+
+- **`app_deauthorized` deletes the Zoom user's data, not only the tokens.**
+  The flow, end to end: Zoom posts `app_deauthorized` to `api/zoom/webhook`
+  (signature checked as for every event) → every `zoom*` connection whose
+  `metadata.token_user.id` is that user is deactivated, `access_token` emptied,
+  `refresh_token` and `expires_at` nulled → **`metadata.token_user` (the user's
+  id, name and email) and `metadata.phone_numbers` are now removed**, other keys
+  kept, `deauthorized_at` / `deauthorized_by_zoom` added → one
+  `OAuthConnectionDeauthorized` event per row → answered 200 and ledgered as
+  before. A second delivery for the same user matches nothing (the profile it
+  matched on is gone) and answers `connections: 0`.
+
+### Added
+
+- **`Events\OAuthConnectionDeauthorized`** `(connectionId, provider, clientId,
+  providerUserId)`, ids only, dispatched after each row is saved, so a host
+  application can remove what it holds about the connection (e.g. detach the
+  client's `sms_lines`). The package itself still never deletes the row or
+  touches a line.
+
 ## 4.19.1 — Zoom App Deauthorized
 
 ### Added

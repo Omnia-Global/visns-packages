@@ -13,6 +13,7 @@ use Visnsstudio\VisnsPackages\Events\CallQueueAnswered;
 use Visnsstudio\VisnsPackages\Events\CallQueueEnded;
 use Visnsstudio\VisnsPackages\Events\CallQueueMissed;
 use Visnsstudio\VisnsPackages\Events\CallQueueRinging;
+use Visnsstudio\VisnsPackages\Events\OAuthConnectionDeauthorized;
 use Visnsstudio\VisnsPackages\Models\OAuthConnection;
 use Visnsstudio\VisnsPackages\Models\ZoomCallQueueSetting;
 use Visnsstudio\VisnsPackages\Models\ZoomLiveQueueCall;
@@ -37,6 +38,9 @@ use Visnsstudio\VisnsPackages\Support\ModuleConfig;
  */
 class ZoomWebhookController extends \App\Http\Controllers\Controller
 {
+    /** Metadata keys about the Zoom USER, removed on `app_deauthorized`. */
+    private const PERSONAL_METADATA = ['token_user', 'phone_numbers'];
+
     /** Extension types Zoom uses for a call queue, across payload shapes. */
     private const QUEUE_EXTENSION_TYPES = [
         'callqueue',
@@ -671,10 +675,15 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
      * `app_deauthorized`: a Zoom user removed the app.
      *
      * Every Zoom OAuth connection whose token belongs to that user - the
-     * house's and any client's - is deactivated and its tokens are cleared.
-     * The rows are KEPT, not deleted: `sms_lines.oauth_connection_id` points at
-     * them, and an inactive connection is what tells the client (and Settings)
-     * that the app needs connecting again.
+     * house's and any client's - is deactivated, its tokens are cleared, and
+     * the Zoom user's profile (`token_user`) and the numbers Zoom reported
+     * (`phone_numbers`) are removed from its metadata: Zoom's terms require an
+     * app to delete the user's data on deauthorization, not merely stop using
+     * it. The rows are KEPT, not deleted: `sms_lines.oauth_connection_id`
+     * points at them, and an inactive connection is what tells the client (and
+     * Settings) that the app needs connecting again. One
+     * OAuthConnectionDeauthorized event per row lets the host application
+     * remove what IT holds (detaching its lines, say).
      *
      * A user we never stored is the ordinary case - Zoom sends this for every
      * removal - and is still `deauthorized` with `connections: 0`. Answered 200
@@ -704,11 +713,21 @@ class ZoomWebhookController extends \App\Http\Controllers\Controller
                 'access_token' => '',
                 'refresh_token' => null,
                 'expires_at' => null,
-                'metadata' => array_merge((array) ($connection->metadata ?? []), [
-                    'deauthorized_at' => $deauthorizedAt,
-                    'deauthorized_by_zoom' => true,
-                ]),
+                'metadata' => array_merge(
+                    array_diff_key((array) ($connection->metadata ?? []), array_flip(self::PERSONAL_METADATA)),
+                    [
+                        'deauthorized_at' => $deauthorizedAt,
+                        'deauthorized_by_zoom' => true,
+                    ]
+                ),
             ])->save();
+
+            OAuthConnectionDeauthorized::dispatch(
+                (int) $connection->id,
+                (string) $connection->provider,
+                $connection->client_id === null ? null : (int) $connection->client_id,
+                $userId,
+            );
         }
 
         $count = $connections->count();

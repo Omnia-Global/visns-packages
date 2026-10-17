@@ -2,6 +2,8 @@
 
 namespace Visnsstudio\VisnsPackages\Tests\Platform\Messaging;
 
+use Illuminate\Support\Facades\Event;
+use Visnsstudio\VisnsPackages\Events\OAuthConnectionDeauthorized;
 use Visnsstudio\VisnsPackages\Models\OAuthConnection;
 use Visnsstudio\VisnsPackages\Models\SmsLine;
 use Visnsstudio\VisnsPackages\Models\ZoomWebhookEvent;
@@ -75,7 +77,11 @@ class ZoomDeauthorizationTest extends MessagingTestCase
             'refresh_token' => 'refresh-' . $tokenUser,
             'expires_at' => now()->addHour(),
             'is_active' => true,
-            'metadata' => ['token_user' => ['id' => $tokenUser, 'email' => $tokenUser . '@acme.test'], 'other' => 'kept'],
+            'metadata' => [
+                'token_user' => ['id' => $tokenUser, 'email' => $tokenUser . '@acme.test', 'name' => 'Kim'],
+                'phone_numbers' => ['+61412000111'],
+                'other' => 'kept',
+            ],
         ]);
         $connection->client_id = $clientId;
         $connection->save();
@@ -103,12 +109,16 @@ class ZoomDeauthorizationTest extends MessagingTestCase
         $this->assertSame('', $fresh->access_token);
         $this->assertNull($fresh->refresh_token);
         $this->assertNull($fresh->expires_at);
-        $this->assertSame('zoom-user-1', $fresh->metadata['token_user']['id']);
+        // The Zoom user's profile and numbers are deleted, not kept.
+        $this->assertArrayNotHasKey('token_user', $fresh->metadata);
+        $this->assertArrayNotHasKey('phone_numbers', $fresh->metadata);
+        $this->assertStringNotContainsString('@acme.test', json_encode($fresh->metadata));
         $this->assertSame('kept', $fresh->metadata['other']);
         $this->assertTrue($fresh->metadata['deauthorized_by_zoom']);
         $this->assertNotEmpty($fresh->metadata['deauthorized_at']);
 
-        // The row and the line survive; the line still points at the row.
+        // The row and the line survive; detaching the line is the host
+        // application's call, through the event.
         $this->assertSame((int) $connection->id, (int) $line->fresh()->oauth_connection_id);
 
         $row = ZoomWebhookEvent::query()->sole();
@@ -116,6 +126,23 @@ class ZoomDeauthorizationTest extends MessagingTestCase
         $this->assertSame('deauthorized', $row->outcome);
         $this->assertSame(['user_id' => 'zoom-user-1', 'connections' => 1], $row->meta);
         $this->assertStringNotContainsString('827bdb0a9c1d', json_encode($row->getAttributes()));
+    }
+
+    public function test_an_event_is_dispatched_per_connection_with_ids_only(): void
+    {
+        Event::fake([OAuthConnectionDeauthorized::class]);
+
+        $house = $this->connection('zoom-user-1', null);
+        $client = $this->connection('zoom-user-1', self::CLIENT);
+        $this->connection('zoom-user-2', self::CLIENT);
+
+        $this->signed($this->deauthorized('zoom-user-1'))->assertOk();
+
+        Event::assertDispatchedTimes(OAuthConnectionDeauthorized::class, 2);
+        Event::assertDispatched(OAuthConnectionDeauthorized::class, fn($e) => $e->connectionId === (int) $client->id
+            && $e->clientId === self::CLIENT && $e->provider === 'zoom_sms' && $e->providerUserId === 'zoom-user-1');
+        Event::assertDispatched(OAuthConnectionDeauthorized::class, fn($e) => $e->connectionId === (int) $house->id
+            && $e->clientId === null);
     }
 
     public function test_a_house_connection_for_the_same_user_is_deactivated_too(): void
