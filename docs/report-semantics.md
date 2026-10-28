@@ -647,6 +647,8 @@ window the user picks":
 | `tests/Unit/ReportSemanticModelTest.php` | Registry normalisation, defaults, identifier/JSON-path rejection, client-payload stripping, enum key serialisation, registrar merge |
 | `tests/Feature/ReportSemanticsCompilerTest.php` | The compiler against in-memory SQLite: path resolution, 422s, operator/type validation, AND/OR nesting, parameters, aggregates and groupBy, sentinels, soft deletes, pagination, row keys, plus MySQL-only JSON and zero-FK SQL asserted on `toSql()` |
 | `tests/Unit/ReportSemanticsVersionDetectionTest.php` | v1 passthrough and v2 detection |
+| `tests/Platform/ReportSemantics/LegacyDefinitionConverterTest.php` | v1 to v2 mapping rules (section 11), pure |
+| `tests/Platform/ReportSemantics/ReportBuilderUpgradeLegacyCommandTest.php` | `report-builder:upgrade-legacy`: dry run, write + backup, skips, engine rejection |
 
 The package has no consuming application, so the suite is run file by file:
 
@@ -654,4 +656,57 @@ The package has no consuming application, so the suite is run file by file:
 vendor/bin/phpunit tests/Unit/ReportSemanticModelTest.php
 vendor/bin/phpunit tests/Unit/ReportSemanticsVersionDetectionTest.php
 vendor/bin/phpunit tests/Feature/ReportSemanticsCompilerTest.php
+vendor/bin/phpunit tests/Platform/ReportSemantics   # also part of the default Platform suite
 ```
+
+---
+
+## 11. Upgrading legacy (v1) reports
+
+```bash
+php artisan report-builder:upgrade-legacy --dry-run          # always look first
+php artisan report-builder:upgrade-legacy --id=1 --id=3      # only these reports
+php artisan report-builder:upgrade-legacy --backup-path=/tmp/rb-backup.jsonl
+```
+
+The command loads every live (not soft-deleted) `report_builders` row whose
+`detail` is v1 (has `mainTable`, no `schema_version`), converts it with
+`LegacyDefinitionConverter`, and then **compiles and runs the result (limit 1)
+through `QueryCompiler::execute()`** - the controller's own entry point - in
+dry-run too. A definition the engine rejects is reported as `failed` and left
+untouched. Otherwise the v2 JSON replaces `detail` on the same row (label,
+owner and visibility unchanged; `updated_at` touched), after the original
+`{id, label, detail}` has been appended to a JSON-lines backup
+(`storage/app/report-builder-legacy-backup-<YmdHis>.jsonl` by default; the
+path is printed). Rows that are already v2 are listed as skipped. Output is
+one block per report: `converted` / `skipped (reason)` / `failed (reason)`,
+the notes, and in dry-run (or on failure) the v2 JSON. The exit code is 0
+however many were skipped; only an exception is non-zero.
+
+To restore a row, copy its `detail` from the backup line back into the table.
+
+### Mapping rules
+
+Everything that cannot be expressed is dropped or approximated **with a note**;
+nothing is guessed.
+
+| v1 | v2 |
+| --- | --- |
+| `mainTable` | The entity whose `table` matches, preferring a non-hidden one (a hidden match is used, with a note). No match: **not convertible**, skipped. |
+| `joins[]` | A relation path, when a declared relation from an already-reached entity lands on the join's target table **and** joins on the same columns (`belongs_to`: `foreign_key`/`owner_key`; `has_*`: `local_key`/`foreign_key`). A join written from the far side is walked in reverse. No match (e.g. a manual `clients.mobile = users.name`): dropped, with every column/filter/sort on that table. A non-LEFT join is noted, since v2 joins are always LEFT. |
+| `columns[]` | The field whose `column` matches (visible fields preferred), prefixed with the relation path. A column published only as JSON sub-fields (`home_address`) becomes **all** of those fields, in registry order. Unpublished columns (`id`, `created_at`, ...), calculated columns and duplicates are dropped. v1 aliases/display names are not carried: headers come from the registry labels. No column left: **not convertible**. |
+| `sorting[]` | `sort: [{field, dir}]`, `dir` lower-cased; JSON columns sort by each part; unmapped columns dropped. |
+| `filters` | `{operator, groups:[{operator, filters}]}` becomes a nested `{op, items}` tree (group AND/OR preserved; empty groups and single-item groups collapse; the root is always a group). A bare v1 list is an AND group. |
+| `=` / `!=`, `<>` | `equals` / `not_equals`. Boolean fields: `is_true`/`is_false` from the value. `!=` on a date: `before OR after`. |
+| `LIKE` / `NOT LIKE` | `contains` / `not_contains` with surrounding `%` stripped (text fields only; a pattern of only `%` is dropped). |
+| `>` `<` `>=` `<=` | Numbers: `gt` `lt` `gte` `lte`. Dates: `after` / `before`; an inclusive bound on a bare date is shifted a day (`>= 2025-01-01` is `after 2024-12-31`), otherwise `equals OR after/before`. Other types: dropped. |
+| `IN` / `NOT IN` | Enum fields: `in` / `not_in` (labelled "is any of" / "is none of"). Elsewhere: OR-ed `equals` / AND-ed `not_equals`. Accepts an array or a comma-separated string. |
+| `IS NULL` / `IS NOT NULL` | `is_empty` / `not_empty` (text, number, date types). Boolean `IS NULL`: `is_false` (noted); otherwise dropped. |
+| `BETWEEN` | `between` on number/date fields with exactly two values. |
+| filter on a JSON column | The same condition on every part, OR-ed (AND-ed for negations: `not_equals`, `not_contains`, `not_in`, `is_empty`). Text elsewhere in the document, such as the street, is no longer searched. |
+| `groupBy`, `unique`, `excludedRows` | Dropped with a note. v2 `groupBy` / `parameters` are never produced. |
+
+**OR semantics change.** The v1 engine flattened every group and applied
+each condition with AND, whatever operators were saved. The upgrade honours
+the saved OR, so a report that used OR may return more rows than it did; such
+reports carry a note saying so.

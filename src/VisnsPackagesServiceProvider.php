@@ -17,6 +17,7 @@ use Visnsstudio\VisnsPackages\Controllers\ResendWebhookController;
 use Visnsstudio\VisnsPackages\Commands\SmsSimulateInboundCommand;
 use Visnsstudio\VisnsPackages\Commands\SmsSyncLinesCommand;
 use Visnsstudio\VisnsPackages\Commands\InstallChromiumCommand;
+use Visnsstudio\VisnsPackages\Commands\ReportBuilderUpgradeLegacyCommand;
 use Visnsstudio\VisnsPackages\Commands\MeilisearchConfigureCommand;
 use Visnsstudio\VisnsPackages\Commands\MeilisearchDebugCommand;
 use Visnsstudio\VisnsPackages\Commands\MeilisearchTestCommand;
@@ -74,6 +75,11 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             PublishMigrationsCommand::class,
             InstallChromiumCommand::class,
             UpdateModelsWithRelationshipSorting::class,
+
+            // One-off upgrade of saved v1 report definitions to the v2
+            // semantic format. Reads the semantic model; writes nothing
+            // under --dry-run.
+            ReportBuilderUpgradeLegacyCommand::class,
 
             // Vault maintenance. Registered unconditionally: a key rotation or
             // a log prune has to be runnable on an application that has just
