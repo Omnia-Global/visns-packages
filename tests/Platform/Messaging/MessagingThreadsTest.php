@@ -423,6 +423,55 @@ class MessagingThreadsTest extends MessagingTestCase
             ->assertJsonPath('total', 1);
     }
 
+    public function test_an_archived_thread_counts_as_unread_for_nobody_until_it_comes_back(): void
+    {
+        $alice = $this->member();
+        $bob = $this->member();
+        $line = $this->line([$alice, $bob]);
+        $thread = $this->thread($line, '+61412345678', ['last_message_at' => now()]);
+
+        $this->inbound($thread, 'Still waiting on that quote');
+
+        // Alice puts the conversation away without opening it. The inbox's
+        // All and Unread views both hide it from here on, so the header
+        // badge must stop counting it too - for Bob as well, or he carries a
+        // number no list can show him.
+        $this->actingAs($alice)
+            ->postJson(self::BASE . '/threads/' . $thread->id . '/archive')
+            ->assertStatus(204);
+
+        foreach ([$alice, $bob] as $user) {
+            $this->actingAs($user)
+                ->getJson(self::BASE . '/unread')
+                ->assertOk()
+                ->assertJsonPath('total', 0)
+                ->assertJsonMissingPath('by_thread.' . $thread->id);
+
+            $this->actingAs($user)
+                ->getJson(self::BASE . '/status')
+                ->assertJsonPath('unread_total', 0);
+
+            $this->actingAs($user)
+                ->getJson(self::BASE . '/threads?archived=1')
+                ->assertJsonPath('data.0.id', $thread->id)
+                ->assertJsonPath('data.0.unread_count', 0);
+        }
+
+        $this->assertSame(0, $thread->fresh()->unreadCountFor($bob));
+
+        // Nothing was marked read, so bringing it back restores the count.
+        $this->actingAs($alice)
+            ->postJson(self::BASE . '/threads/' . $thread->id . '/unarchive')
+            ->assertStatus(204);
+
+        $this->actingAs($bob)
+            ->getJson(self::BASE . '/unread')
+            ->assertJsonPath('total', 1)
+            ->assertJsonPath('by_thread.' . $thread->id, 1);
+
+        $this->assertSame(1, $thread->fresh()->unreadCountFor($bob));
+    }
+
     public function test_only_inbound_messages_count_as_unread(): void
     {
         $member = $this->member();

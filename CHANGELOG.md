@@ -5,6 +5,19 @@ Notable changes to `visnsstudio/visns-packages`.
 Entries before 4.15.0 were not kept in a file; the git log and the README's
 per-module sections are the record for those.
 
+## 4.20.1 — 2026-10-28
+
+### Fixed
+
+- **An archived SMS thread no longer counts as unread for anybody.**
+  `SmsThread::unreadCountsFor()` (the header badge's `status.unread_total`,
+  `/unread`, the per-line counts) and `unreadCountFor()` skip threads with an
+  `archived_at`. The inbox's All and Unread views already hid archived
+  threads, so a thread archived with a reply still unread left a number on
+  the badge that no list could show or clear — four people carried a stuck
+  "1" for weeks over one thread. Read marks are untouched: un-archiving
+  restores the count, and a reply un-archives the thread as before.
+
 ## 4.19.2 — 2026-10-17
 
 ### Changed

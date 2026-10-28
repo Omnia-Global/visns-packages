@@ -250,6 +250,15 @@ class SmsThread extends Model
      * joins to nulls and every inbound message counts, which is exactly the
      * "never opened" rule.
      *
+     * An ARCHIVED thread counts for nobody. Archiving is "I am done with
+     * this", and the inbox's default and unread views both hide archived
+     * threads - so a count that included them put a number on the header
+     * badge that no list could show or clear (four people carried a stuck
+     * "1" for weeks over one thread archived with a reply still unread). The
+     * read marks are left alone, so un-archiving brings the unread state
+     * straight back, and a reply un-archives the thread anyway
+     * (SmsService::recordInbound).
+     *
      * @param  array<int, int>|null  $threadIds  Restrict to these threads.
      * @param  array<int, int>|null  $lineIds    Restrict to threads on these lines.
      * @return array<int, int>
@@ -267,10 +276,12 @@ class SmsThread extends Model
         $threads = (string) ModuleConfig::get('messaging.tables.threads', 'sms_threads');
 
         $query = \Illuminate\Support\Facades\DB::table($messages)
+            ->join($threads, $threads . '.id', '=', $messages . '.thread_id')
             ->leftJoin($reads, function ($join) use ($reads, $messages, $id) {
                 $join->on($reads . '.thread_id', '=', $messages . '.thread_id')
                     ->where($reads . '.user_id', '=', $id);
             })
+            ->whereNull($threads . '.archived_at')
             ->where($messages . '.direction', self::inboundDirection())
             ->where(function ($q) use ($reads, $messages) {
                 $q->whereNull($reads . '.last_read_message_id')
@@ -290,9 +301,7 @@ class SmsThread extends Model
                 return [];
             }
 
-            $query->whereIn($messages . '.thread_id', function ($q) use ($threads, $lineIds) {
-                $q->select('id')->from($threads)->whereIn('line_id', $lineIds);
-            });
+            $query->whereIn($threads . '.line_id', $lineIds);
         }
 
         return $query
@@ -314,12 +323,13 @@ class SmsThread extends Model
     /**
      * How many inbound messages in this thread are newer than the given user's
      * read mark. No read row at all means "never opened" - everything counts.
+     * An archived thread answers zero, as unreadCountsFor does.
      */
     public function unreadCountFor($user): int
     {
         $id = is_object($user) ? ($user->id ?? null) : $user;
 
-        if ($id === null) {
+        if ($id === null || $this->archived_at !== null) {
             return 0;
         }
 
