@@ -30,6 +30,7 @@ class SubscriptionSync
         private Billables $billables,
         private BillingCustomers $customers,
         private Entitlements $entitlements,
+        private Comps $comps,
     ) {
     }
 
@@ -104,7 +105,9 @@ class SubscriptionSync
             'last_event_at' => now(),
         ]);
 
-        if ($settled && $row->first_paid_at === null) {
+        $firstPayment = $settled && $row->first_paid_at === null;
+
+        if ($firstPayment) {
             $row->first_paid_at = now();
         }
 
@@ -123,6 +126,12 @@ class SubscriptionSync
 
         if ($before !== $row->status) {
             Log::info('billing.subscription_status', ['subscription_id' => $row->id, 'from' => $before, 'to' => $row->status]);
+        }
+
+        // The subscription now carries access: the dated comp that bridged
+        // to it ends, with the reason written on it.
+        if ($firstPayment && $row->entitles()) {
+            $this->comps->endOnFirstPayment($type, $billableId, $feature);
         }
 
         $this->entitlements->record($type, $billableId, $feature, 'subscription:' . $row->status);

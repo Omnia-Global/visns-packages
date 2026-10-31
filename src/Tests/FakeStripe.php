@@ -28,6 +28,7 @@ use Visnsstudio\VisnsPackages\Services\Billing\StripeClientFactory;
  *     `customer_update[name]=auto`, or `mode: subscription` without a Price.
  *   - a Price update that tries to change an amount, currency, interval or
  *     product: a Price's amount can never be edited.
+ *   - a Checkout `subscription_data.trial_end` under 48 hours away.
  */
 class FakeStripe implements ClientInterface
 {
@@ -277,6 +278,12 @@ class FakeStripe implements ClientInterface
             if (! empty($params['customer']) && ! empty($params['tax_id_collection']['enabled'])
                 && ($params['customer_update']['name'] ?? null) !== 'auto') {
                 return 'tax_id_collection with an existing customer requires customer_update[name] to be auto.';
+            }
+
+            $trialEnd = $params['subscription_data']['trial_end'] ?? null;
+
+            if ($trialEnd !== null && (int) $trialEnd < time() + 48 * 3600) {
+                return 'subscription_data[trial_end] must be at least 48 hours in the future.';
             }
 
             if (($params['mode'] ?? null) === 'subscription' && empty($params['line_items'][0]['price']) && empty($params['line_items'][0]['price_data'])) {

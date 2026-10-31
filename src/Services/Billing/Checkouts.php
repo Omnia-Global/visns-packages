@@ -7,7 +7,9 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Visnsstudio\VisnsPackages\Exceptions\Billing\BillingRefusal;
 use Visnsstudio\VisnsPackages\Models\BillingCheckout;
+use Visnsstudio\VisnsPackages\Models\BillingComp;
 use Visnsstudio\VisnsPackages\Models\BillingFeature;
+use Visnsstudio\VisnsPackages\Models\BillingSubscription;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 
 /**
@@ -17,9 +19,17 @@ use Visnsstudio\VisnsPackages\Support\ModuleConfig;
  * `client_reference_id`, the GST rate as the subscription's default tax rate
  * and NO `payment_method_types`: which methods are offered (card, BECS direct
  * debit) is set in the Dashboard, not here.
+ *
+ * OVER A DATED COMP. A party on a comp with an end date may subscribe before
+ * it ends: when the end is at least 48 hours away (Stripe's minimum) it is
+ * sent as `subscription_data.trial_end`, so billing starts the day the comp
+ * would have ended. A comp with no end date still refuses (409).
  */
 class Checkouts
 {
+    /** Stripe refuses a Checkout trial_end closer than this. */
+    public const MIN_TRIAL_HOURS = 48;
+
     public function __construct(
         private StripeClientFactory $stripe,
         private Billables $billables,
@@ -40,23 +50,21 @@ class Checkouts
             throw new BillingRefusal('Choose monthly or annual billing.');
         }
 
-        if (! $feature->available) {
-            throw new BillingRefusal("{$feature->name} is not available yet.");
+        if ($feature->amountFor($interval) === null && $feature->available) {
+            throw new BillingRefusal("{$feature->name} is not offered " . ($interval === BillingFeature::INTERVAL_YEAR ? 'annually.' : 'monthly.'));
         }
 
-        if ($feature->amountFor($interval) === null) {
-            throw new BillingRefusal("{$feature->name} is not offered " . ($interval === BillingFeature::INTERVAL_YEAR ? 'annually.' : 'monthly.'));
+        $eligibility = $this->eligibility($billable, $feature);
+
+        if ($eligibility['refusal']) {
+            throw $eligibility['refusal'];
         }
 
         $livemode = $this->stripe->livemode();
         $priceId = $feature->priceIdFor($interval);
 
-        if (! $priceId || $feature->stripe_livemode !== $livemode) {
+        if (! $priceId) {
             throw new BillingRefusal("{$feature->name} is not ready to buy yet.");
-        }
-
-        if ($this->entitlements->whyFeature($billable, $feature)['entitled']) {
-            throw BillingRefusal::conflict("{$feature->name} is already included.");
         }
 
         if ($resumed = $this->resumeOpen($billable, $feature, $interval)) {
@@ -74,6 +82,8 @@ class Checkouts
             'interval' => $interval,
             'status' => BillingCheckout::STATUS_OPEN,
             'livemode' => $livemode,
+            'comp_id' => $eligibility['comp']?->id,
+            'trial_end' => $eligibility['trial_end'],
             'created_by' => $createdBy,
         ])->save();
 
@@ -89,6 +99,10 @@ class Checkouts
 
         if ($taxRate = $this->stripe->taxRateId()) {
             $subscriptionData['default_tax_rates'] = [$taxRate];
+        }
+
+        if ($eligibility['trial_end']) {
+            $subscriptionData['trial_end'] = $eligibility['trial_end']->getTimestamp();
         }
 
         $params = [
@@ -122,9 +136,67 @@ class Checkouts
         $checkout->forceFill(['stripe_session_id' => $session->id])->save();
 
         // Never the URL: it is a bearer link to pay.
-        Log::info('billing.checkout_started', ['checkout_id' => $checkout->id, 'feature_id' => $feature->id, 'billable_id' => $id, 'interval' => $interval]);
+        Log::info('billing.checkout_started', ['checkout_id' => $checkout->id, 'feature_id' => $feature->id, 'billable_id' => $id, 'interval' => $interval, 'trial' => $eligibility['trial_end'] !== null]);
 
         return ['url' => (string) $session->url, 'checkout' => $checkout];
+    }
+
+    /**
+     * May this party start a checkout for this feature, and on what terms?
+     * The one reading, for start() and for the portal's feature list.
+     *
+     * @return array{can_subscribe: bool, refusal: ?BillingRefusal, comp: ?BillingComp, included_until: ?\Illuminate\Support\Carbon, trial_end: ?\Illuminate\Support\Carbon}
+     */
+    public function eligibility(Model $billable, BillingFeature $feature): array
+    {
+        $answer = fn (?BillingRefusal $refusal, ?BillingComp $comp = null, $trialEnd = null) => [
+            'can_subscribe' => $refusal === null,
+            'refusal' => $refusal,
+            'comp' => $comp,
+            'included_until' => $comp?->ends_at,
+            'trial_end' => $trialEnd,
+        ];
+
+        $comp = $this->billables->scope(BillingComp::query(), $billable)
+            ->where('feature_id', $feature->id)
+            ->current()
+            ->orderByDesc('id')
+            ->first();
+
+        if (! $feature->available) {
+            return $answer(new BillingRefusal("{$feature->name} is not available yet."), $comp);
+        }
+
+        $priced = $feature->stripe_price_monthly_id || $feature->stripe_price_annual_id;
+
+        if (! $this->stripe->configured() || ! $priced || $feature->stripe_livemode !== $this->stripe->livemode()) {
+            return $answer(new BillingRefusal("{$feature->name} is not ready to buy yet."), $comp);
+        }
+
+        // One Stripe subscription per feature: any that Stripe still holds
+        // (trialing, past_due, unpaid...) is changed in the portal, not doubled.
+        $live = $this->billables->scope(BillingSubscription::query(), $billable)
+            ->where('feature_id', $feature->id)
+            ->where('livemode', $this->stripe->livemode())
+            ->whereNotIn('status', ['canceled', 'incomplete_expired'])
+            ->orderByDesc('id')
+            ->get();
+
+        if ($live->contains(fn (BillingSubscription $s) => $s->entitles())) {
+            return $answer(BillingRefusal::conflict("{$feature->name} is already included."), $comp);
+        }
+
+        if ($live->isNotEmpty()) {
+            return $answer(BillingRefusal::conflict("{$feature->name} already has a subscription. Use Manage billing to change it."), $comp);
+        }
+
+        if ($comp && $comp->ends_at === null) {
+            return $answer(BillingRefusal::conflict("{$feature->name} is already included."), $comp);
+        }
+
+        $trialEnd = $comp && $comp->ends_at->gte(now()->addHours(self::MIN_TRIAL_HOURS)) ? $comp->ends_at->copy() : null;
+
+        return $answer(null, $comp, $trialEnd);
     }
 
     /**
@@ -188,7 +260,8 @@ class Checkouts
             if ($session->status === 'complete') {
                 $this->fulfilment->fromCheckout($session->id);
 
-                if ($this->entitlements->whyFeature($billable, $feature)['entitled']) {
+                // Fulfilled (a paid one, or a trial over a comp): a subscription exists.
+                if ($checkout->refresh()->status === BillingCheckout::STATUS_COMPLETE) {
                     throw BillingRefusal::conflict("{$feature->name} is already included.");
                 }
 

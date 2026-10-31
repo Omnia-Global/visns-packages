@@ -38,8 +38,15 @@ per-module sections are the record for those.
 - **`Tests\FakesStripe` / `Tests\FakeStripe`**: a scripted Stripe under the
   SDK (`ApiRequestor::setHttpClient()`) that throws on any unscripted request
   and enforces Stripe's rules, `payment_method_types` refused first.
-- **`Events\BillingAttention`** (refund, dispute, early fraud warning; ids
-  only) and **`Events\BillingEntitlementChanged`**.
+- **`Events\BillingAttention`** (refund, dispute, early fraud warning, and
+  `handler_failed` when a webhook handler throws; ids and the event type only)
+  and **`Events\BillingEntitlementChanged`**.
+- **Subscribe over a dated comp.** A comp ending 48 hours or more away is sent
+  as `subscription_data.trial_end`; the trial's fulfilment stretches the comp
+  to 7 days past the trial end, and the first settled payment ends it
+  (`billing_comps.end_reason = first_payment`). Open-ended comps still refuse.
+  The portal's feature list gains `can_subscribe`, `included_until` and
+  `billing_starts_at`.
 - **Integrations: a `validate` hook.** An integration definition may name a
   static callable that receives the credentials as they would be saved and
   answers null or a refusal sentence (422). Stripe uses it to refuse `sk_`.

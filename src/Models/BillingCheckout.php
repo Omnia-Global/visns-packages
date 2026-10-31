@@ -30,6 +30,8 @@ class BillingCheckout extends Model
         'feature_id' => 'integer',
         'livemode' => 'boolean',
         'created_by' => 'integer',
+        'comp_id' => 'integer',
+        'trial_end' => 'datetime',
         'fulfilled_at' => 'datetime',
     ];
 

@@ -82,6 +82,8 @@ class WebhookProcessor
 
             Log::warning('billing.webhook_failed', ['event_id' => $eventId, 'type' => $type, 'exception' => class_basename($e)]);
 
+            $this->failedAttention($event);
+
             return ['status' => 500, 'outcome' => BillingEvent::OUTCOME_FAILED];
         }
 
@@ -94,6 +96,16 @@ class WebhookProcessor
         Log::info('billing.webhook', ['event_id' => $eventId, 'type' => $type, 'outcome' => $outcome]);
 
         return ['status' => 200, 'outcome' => $outcome];
+    }
+
+    /** Ids and the event type only. A listener that throws must not change the 500. */
+    private function failedAttention(Event $event): void
+    {
+        try {
+            BillingAttention::dispatch('handler_failed', (string) $event->id, $event->data->object->id ?? null, null, null, null, null, (string) $event->type);
+        } catch (\Throwable $e) {
+            Log::warning('billing.attention_listener_failed', ['event_id' => $event->id, 'exception' => class_basename($e)]);
+        }
     }
 
     /** Strip anything shaped like a Stripe key or secret from an error. */
@@ -222,6 +234,7 @@ class WebhookProcessor
             $row?->id,
             $row?->billable_type,
             $row ? (int) $row->billable_id : null,
+            (string) $event->type,
         );
 
         Log::warning('billing.attention', ['kind' => $kind, 'event_id' => $event->id, 'subscription_id' => $row?->id]);

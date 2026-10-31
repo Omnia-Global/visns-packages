@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Log;
 use Stripe\Checkout\Session;
 use Stripe\Subscription;
 use Visnsstudio\VisnsPackages\Models\BillingCheckout;
+use Visnsstudio\VisnsPackages\Models\BillingComp;
 
 /**
  * The one idempotent fulfilment of a Checkout, called by the webhook
@@ -16,12 +17,22 @@ use Visnsstudio\VisnsPackages\Models\BillingCheckout;
  * It trusts nothing it is handed: it retrieves the Session from Stripe and
  * acts only when `payment_status` is `paid`. A direct debit still clearing
  * reads `unpaid` and is left open until Stripe says it succeeded.
+ *
+ * The one exception is a checkout WE started with a trial, over a dated comp:
+ * it completes `no_payment_required`. That creates the trialing mirror (no
+ * access of its own: nothing has been paid) and stretches the comp to
+ * TRIAL_CUSHION_DAYS past the trial's end, so access holds while the first
+ * real payment settles. That payment ends the comp (SubscriptionSync).
  */
 class Fulfilment
 {
+    /** How long a bridging comp outlives the trial, for a slow first payment. */
+    public const TRIAL_CUSHION_DAYS = 7;
+
     public function __construct(
         private StripeClientFactory $stripe,
         private SubscriptionSync $sync,
+        private Comps $comps,
     ) {
     }
 
@@ -46,7 +57,10 @@ class Fulfilment
             }
         }
 
-        if ($paymentStatus !== 'paid' || ($session->mode ?? null) !== 'subscription') {
+        $paid = $paymentStatus === 'paid';
+        $trialStarted = $paymentStatus === 'no_payment_required' && $checkout?->trial_end !== null;
+
+        if (! ($paid || $trialStarted) || ($session->mode ?? null) !== 'subscription') {
             $checkout?->save();
 
             return $checkout;
@@ -58,7 +72,11 @@ class Fulfilment
             $subscription = $this->stripe->make()->subscriptions->retrieve($subscription);
         }
 
-        $row = $subscription instanceof Subscription ? $this->sync->apply($subscription, true, $checkout) : null;
+        $row = $subscription instanceof Subscription ? $this->sync->apply($subscription, $paid, $checkout) : null;
+
+        if ($trialStarted && $checkout->comp_id && ($comp = BillingComp::query()->find($checkout->comp_id))) {
+            $this->comps->extendTo($comp, $checkout->trial_end->copy()->addDays(self::TRIAL_CUSHION_DAYS));
+        }
 
         if ($checkout) {
             $checkout->forceFill([

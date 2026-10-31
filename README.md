@@ -2183,6 +2183,16 @@ subscription in step. One Stripe Subscription per feature. Off by default.
 > `unpaid` end it. `Entitlements::has($billable, 'feature_key')` is the only
 > place this is decided; `why()` says why for a screen.
 
+> **Subscribing over a dated comp.** A party on a comp with an end date (the
+> `migrated` notice period, say) may subscribe before it ends. When the end is
+> at least 48 hours away it goes to Stripe as `subscription_data.trial_end`,
+> so billing starts the day the comp would have ended; the trial checkout
+> completes `no_payment_required`, which fulfils only for a checkout we sent
+> with a trial, and stretches the comp to 7 days past the trial's end while
+> the first payment settles. The first settled payment ends the comp
+> (`end_reason = first_payment`). A comp with no end date still refuses (409),
+> as does any subscription Stripe still holds for the feature.
+
 > **A feature switches on only when money moves.** Fulfilment acts on a
 > Checkout Session whose `payment_status` is `paid`
 > (`checkout.session.completed`, or `checkout.session.async_payment_succeeded`
@@ -2261,7 +2271,8 @@ subscription metadata is a fallback only. Subscribe the endpoint to:
 `invoice.payment_failed`, `charge.refunded`, `charge.dispute.created`,
 `radar.early_fraud_warning.created`, `customer.updated`. Refunds, disputes and
 fraud warnings revoke nothing; they dispatch `Events\BillingAttention` (ids
-only). Every gain or loss of a feature writes `billing_entitlement_log` and
+only), as does a handler that throws (`kind = handler_failed`, with the event
+id and `eventType`). Every gain or loss of a feature writes `billing_entitlement_log` and
 dispatches `Events\BillingEntitlementChanged`.
 
 **Staff API** (`routes_middleware` + `permission:<permissions.manage>`):
@@ -2292,6 +2303,12 @@ Route::middleware(['web', 'auth:portal'])->prefix('portal/ajax/billing')->group(
     Route::post('/manage', [PortalBillingController::class, 'manage']);               // Customer Portal → {url}
 });
 ```
+
+Each feature in the `features` answer carries `can_subscribe` (about the
+party; `can_manage` says whether this person may press it), `included_until`
+(a current comp's end, or null) and `billing_starts_at` (when Stripe would
+first charge on subscribing now, or null for at checkout), from the same
+`Checkouts::eligibility()` that `checkout` refuses by.
 
 Answers: unconfigured `200 {ok:false, reason:'unconfigured'}`; Stripe down
 `200 {ok:false, reason:'stripe_unavailable'}`; may not manage 403 with a

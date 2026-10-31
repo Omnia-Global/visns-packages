@@ -18,6 +18,10 @@ class BillingComp extends Model
 
     public const SOURCE_MIGRATED = 'migrated';
 
+    public const END_STAFF = 'staff';
+
+    public const END_FIRST_PAYMENT = 'first_payment';
+
     protected $guarded = ['*'];
 
     protected $casts = [

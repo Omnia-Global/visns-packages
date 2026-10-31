@@ -74,20 +74,61 @@ class Comps
     }
 
     /** @throws BillingRefusal */
-    public function end(BillingComp $comp, ?int $endedBy = null): BillingComp
+    public function end(BillingComp $comp, ?int $endedBy = null, string $why = BillingComp::END_STAFF): BillingComp
     {
         if ($comp->ends_at !== null && ! $comp->ends_at->isFuture()) {
             throw BillingRefusal::conflict('That comp has already ended.');
         }
 
-        $comp->forceFill(['ends_at' => now(), 'ended_by' => $endedBy])->save();
+        $comp->forceFill(['ends_at' => now(), 'ended_by' => $endedBy, 'end_reason' => mb_substr($why, 0, 64)])->save();
 
-        Log::info('billing.comp_ended', ['comp_id' => $comp->id, 'feature_id' => $comp->feature_id, 'by' => $endedBy]);
+        Log::info('billing.comp_ended', ['comp_id' => $comp->id, 'feature_id' => $comp->feature_id, 'by' => $endedBy, 'why' => $why]);
 
         if ($feature = $comp->feature) {
             $this->entitlements->record($comp->billable_type, (int) $comp->billable_id, $feature, 'comp:ended');
         }
 
         return $comp;
+    }
+
+    /**
+     * Keep a dated comp running past a trial's end, while the first real
+     * payment settles (a direct debit takes days). Never shortens a comp, and
+     * never touches one with no end date.
+     */
+    public function extendTo(BillingComp $comp, CarbonInterface $until): BillingComp
+    {
+        if ($comp->ends_at === null || ! $comp->ends_at->lt($until)) {
+            return $comp;
+        }
+
+        $comp->forceFill(['ends_at' => $until])->save();
+
+        Log::info('billing.comp_extended', ['comp_id' => $comp->id, 'feature_id' => $comp->feature_id, 'until' => $until->toIso8601String()]);
+
+        return $comp;
+    }
+
+    /**
+     * A subscription's first settled payment takes over from the dated comps
+     * that bridged to it. Open-ended comps are a staff decision and stay.
+     *
+     * @return int how many comps ended
+     */
+    public function endOnFirstPayment(string $billableType, int $billableId, BillingFeature $feature): int
+    {
+        $comps = BillingComp::query()
+            ->where('billable_type', $billableType)
+            ->where('billable_id', $billableId)
+            ->where('feature_id', $feature->id)
+            ->whereNotNull('ends_at')
+            ->current()
+            ->get();
+
+        foreach ($comps as $comp) {
+            $this->end($comp, null, BillingComp::END_FIRST_PAYMENT);
+        }
+
+        return $comps->count();
     }
 }

@@ -119,6 +119,12 @@ return new class extends Migration {
                 $t->string('payment_status', 32)->nullable();
                 $t->boolean('livemode');
                 $t->string('stripe_subscription_id', 64)->nullable();
+
+                // A checkout started over a dated comp: the comp it replaces,
+                // and the trial end sent to Stripe so billing starts when the
+                // comp would have ended (null when it was under 48 hours away).
+                $t->unsignedBigInteger('comp_id')->nullable();
+                $t->timestamp('trial_end')->nullable();
                 $t->unsignedBigInteger('created_by')->nullable();
                 $t->timestamp('fulfilled_at')->nullable();
                 $t->timestamps();
@@ -140,6 +146,10 @@ return new class extends Migration {
                 $t->timestamp('ends_at')->nullable();
                 $t->unsignedBigInteger('granted_by')->nullable();
                 $t->unsignedBigInteger('ended_by')->nullable();
+
+                // Why it ended: staff, or first_payment when a subscription's
+                // first settled payment took over from it.
+                $t->string('end_reason', 64)->nullable();
 
                 // staff | migrated
                 $t->string('source', 16)->default('staff');

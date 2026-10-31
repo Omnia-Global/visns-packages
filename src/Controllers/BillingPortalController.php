@@ -97,14 +97,15 @@ class BillingPortalController extends \App\Http\Controllers\Controller
      | ------------------------------------------------------------------- */
 
     /** Every catalogue feature with its price and this party's state. */
-    public function features(Request $request, BillingCustomers $customers): JsonResponse
+    public function features(Request $request, BillingCustomers $customers, Checkouts $checkouts): JsonResponse
     {
-        return $this->answer(function () use ($request, $customers) {
+        return $this->answer(function () use ($request, $customers, $checkouts) {
             $billable = $this->party($request);
             $livemode = $this->stripe->livemode();
             $configured = $this->stripe->configured();
 
             $features = BillingFeature::query()->ordered()->get()->map(fn (BillingFeature $f) => [
+                ...$this->subscribeTerms($checkouts->eligibility($billable, $f)),
                 'key' => $f->key,
                 'name' => $f->name,
                 'blurb' => $f->blurb,
@@ -194,6 +195,22 @@ class BillingPortalController extends \App\Http\Controllers\Controller
     }
 
     /* ------------------------------------------------------------------- */
+
+    /**
+     * What Subscribe would do, from Checkouts::eligibility() (the same reading
+     * start() refuses by). `can_subscribe` is about the party, not the person:
+     * `can_manage` says whether this person may press it. On a dated comp,
+     * `included_until` is its end and `billing_starts_at` is when Stripe would
+     * first charge (null: at checkout, the comp being under 48 hours from its end).
+     */
+    private function subscribeTerms(array $eligibility): array
+    {
+        return [
+            'can_subscribe' => $eligibility['can_subscribe'],
+            'included_until' => $eligibility['included_until']?->toIso8601String(),
+            'billing_starts_at' => $eligibility['trial_end']?->toIso8601String(),
+        ];
+    }
 
     private function party(Request $request): Model
     {
