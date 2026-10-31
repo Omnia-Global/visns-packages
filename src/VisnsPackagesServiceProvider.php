@@ -14,6 +14,10 @@ use Visnsstudio\VisnsPackages\Commands\SmsSendCampaignsCommand;
 use Visnsstudio\VisnsPackages\Commands\EmailCampaignsSyncCommand;
 use Visnsstudio\VisnsPackages\Controllers\EmailCampaignController;
 use Visnsstudio\VisnsPackages\Controllers\ResendWebhookController;
+use Visnsstudio\VisnsPackages\Controllers\BillingController;
+use Visnsstudio\VisnsPackages\Controllers\StripeWebhookController;
+use Visnsstudio\VisnsPackages\Middleware\VerifyStripeSignature;
+use Visnsstudio\VisnsPackages\Services\Billing\StripeIntegration;
 use Visnsstudio\VisnsPackages\Commands\SmsSimulateInboundCommand;
 use Visnsstudio\VisnsPackages\Commands\SmsSyncLinesCommand;
 use Visnsstudio\VisnsPackages\Commands\InstallChromiumCommand;
@@ -283,6 +287,13 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             ResolveWebAuthnRelyingParty::class
         );
 
+        // The billing webhook's signature check, on the raw body.
+        $this->aliasMiddlewareUnlessClaimed(
+            $router,
+            'billing.stripe-signature',
+            VerifyStripeSignature::class
+        );
+
         // The opt-in modules gate their routes with `permission:...`, an alias
         // normally declared in the application's own bootstrap.
         if (class_exists(\Spatie\Permission\Middleware\PermissionMiddleware::class)) {
@@ -292,6 +303,9 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                 \Spatie\Permission\Middleware\PermissionMiddleware::class
             );
         }
+
+        // The Stripe integration card, before the routes read `integrations`.
+        $this->registerBillingIntegration();
 
         // Register routes
         $this->registerRoutes();
@@ -758,6 +772,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             $this->registerIntegrationRoutes($middleware, $prefix);
             $this->registerMessagingRoutes($middleware, $prefix);
             $this->registerEmailCampaignRoutes($prefix);
+            $this->registerBillingRoutes($prefix);
 
             // Register dynamic entity routes first (they will be more general)
             $this->registerDynamicEntityRoutes($middleware);
@@ -1780,6 +1795,68 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                 Route::delete($base . '/templates/{id}', [EmailCampaignController::class, 'destroyTemplate'])->whereNumber('id');
 
                 Route::post($base . '/images', [EmailCampaignController::class, 'uploadImage']);
+            });
+    }
+
+    /**
+     * Declare the `stripe` integration when billing is on and the host's own
+     * `integrations` has nothing under that name. Set at boot, so a cached
+     * config is untouched and a host's own definition always wins.
+     */
+    protected function registerBillingIntegration(): void
+    {
+        if (!config('visns-packages.billing.enabled', false)) {
+            return;
+        }
+
+        $provider = (string) config('visns-packages.billing.integration', 'stripe');
+
+        if ($provider === '' || config('visns-packages.integrations.' . $provider) !== null) {
+            return;
+        }
+
+        config(['visns-packages.integrations.' . $provider => StripeIntegration::definition()]);
+    }
+
+    /**
+     * Billing (Stripe subscriptions). Nothing at all unless enabled.
+     *
+     * The webhook is outside session and CSRF and signed instead
+     * (`billing.stripe-signature`). The staff API is one group behind
+     * `permissions.manage`. The buyer's side (BillingPortalController) is NOT
+     * registered here: the host mounts its subclass behind its own guard.
+     */
+    protected function registerBillingRoutes(string $prefix): void
+    {
+        if (!config('visns-packages.billing.enabled', false)) {
+            return;
+        }
+
+        $base = trim((string) config('visns-packages.billing.uris.base', 'ajax/billing'), '/') ?: 'ajax/billing';
+        $middleware = (array) (config('visns-packages.billing.routes_middleware') ?: ['web', 'auth']);
+        $manage = config('visns-packages.billing.permissions.manage', 'Settings');
+
+        Route::middleware(array_merge(
+            (array) config('visns-packages.billing.webhook_middleware', ['api']),
+            ['billing.stripe-signature']
+        ))->post(
+            trim((string) config('visns-packages.billing.uris.webhook', 'api/billing/stripe/webhook'), '/'),
+            StripeWebhookController::class
+        );
+
+        Route::middleware($this->withPermission($middleware, $manage))
+            ->prefix($prefix)
+            ->group(function () use ($base) {
+                Route::get($base . '/status', [BillingController::class, 'status']);
+                Route::post($base . '/probe', [BillingController::class, 'probe']);
+                Route::get($base . '/features', [BillingController::class, 'features']);
+                Route::post($base . '/features', [BillingController::class, 'storeFeature']);
+                Route::post($base . '/features/{id}', [BillingController::class, 'updateFeature'])->whereNumber('id');
+                Route::post($base . '/features/{id}/sync', [BillingController::class, 'syncFeature'])->whereNumber('id');
+                Route::get($base . '/events', [BillingController::class, 'events']);
+                Route::post($base . '/comps/{id}/end', [BillingController::class, 'endComp'])->whereNumber('id');
+                Route::get($base . '/billables/{type}/{id}', [BillingController::class, 'billable'])->where('type', '[^/]+')->whereNumber('id');
+                Route::post($base . '/billables/{type}/{id}/comps', [BillingController::class, 'grantComp'])->where('type', '[^/]+')->whereNumber('id');
             });
     }
 

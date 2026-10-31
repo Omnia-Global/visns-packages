@@ -5,6 +5,49 @@ Notable changes to `visnsstudio/visns-packages`.
 Entries before 4.15.0 were not kept in a file; the git log and the README's
 per-module sections are the record for those.
 
+## 4.21.0 — unreleased
+
+### Added
+
+- **Billing module (`billing`, Stripe subscriptions), off by default.** A CRM
+  catalogue of features (`billing_features`) pushed to Stripe as one Product
+  with a monthly and an optional annual Price each; hosted Checkout in
+  `mode: subscription` with no `payment_method_types`; the hosted Customer
+  Portal; and a signed webhook (`POST api/billing/stripe/webhook`,
+  `billing.stripe-signature`) that mirrors each subscription
+  (`billing_subscriptions`) from a fresh retrieve, so delivery order does not
+  matter. Event ledger `billing_events` (ids, never payloads; redeliveries
+  answer 200 `duplicate`; a failed handler answers 500 and reruns on retry),
+  `billing_checkouts`, `billing_customers` (per Stripe mode), append-only
+  `billing_comps` and `billing_entitlement_log`. Migration
+  `2026_10_31_100000_create_billing_tables.php`.
+- **The entitlement rule** in `Services\Billing\Entitlements::has()`: an
+  active, trialing or past_due subscription whose period has not ended and
+  whose first payment settled, or a current comp. Access is kept through
+  `past_due`, withdrawn at `canceled` or `unpaid`.
+- **`Contracts\BillableResolver`** (`billing.hooks.billable`): the host names
+  the billable party and who may commit it to a charge.
+- **`Controllers\BillingPortalController`**, for the host to extend and mount
+  behind its own client guard (features, checkout, checkout poll, Customer
+  Portal). The staff API under `ajax/billing/*` behind
+  `billing.permissions.manage` (default `Settings`).
+- **The `stripe` integration** (restricted key, webhook secret, mode, GST tax
+  rate id, portal configuration id), declared by the package when the host
+  has none, with `Services\Billing\Probes::stripe`. API version pinned in
+  `StripeClientFactory::API_VERSION` (`2026-10-28.endive`, stripe-php 22.1.0).
+- **`Tests\FakesStripe` / `Tests\FakeStripe`**: a scripted Stripe under the
+  SDK (`ApiRequestor::setHttpClient()`) that throws on any unscripted request
+  and enforces Stripe's rules, `payment_method_types` refused first.
+- **`Events\BillingAttention`** (refund, dispute, early fraud warning; ids
+  only) and **`Events\BillingEntitlementChanged`**.
+- **Integrations: a `validate` hook.** An integration definition may name a
+  static callable that receives the credentials as they would be saved and
+  answers null or a refusal sentence (422). Stripe uses it to refuse `sk_`.
+
+### Requires
+
+- `stripe/stripe-php` ^22.
+
 ## 4.20.1 — 2026-10-28
 
 ### Fixed

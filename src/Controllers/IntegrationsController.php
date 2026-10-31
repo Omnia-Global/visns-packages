@@ -74,7 +74,24 @@ class IntegrationsController extends \App\Http\Controllers\Controller
 
         $setting = IntegrationSetting::firstOrNew(['provider' => $provider]);
 
-        $setting->credentials = $setting->mergeCredentials($incoming);
+        $merged = $setting->mergeCredentials($incoming);
+
+        // An integration may refuse what it was handed (Stripe refuses a
+        // secret key) with a sentence: `validate` in its definition, a static
+        // callable receiving the credentials as they would be saved and
+        // answering null or the refusal.
+        if (is_callable($definition['validate'] ?? null)) {
+            $refusal = ($definition['validate'])($merged);
+
+            if (is_string($refusal) && $refusal !== '') {
+                return response()->json([
+                    'message' => $refusal,
+                    'errors' => ['credentials' => [$refusal]],
+                ], 422);
+            }
+        }
+
+        $setting->credentials = $merged;
 
         if (array_key_exists('options', $validated)) {
             $setting->options = array_merge($setting->options ?? [], $validated['options']);

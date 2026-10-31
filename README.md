@@ -32,6 +32,7 @@ A comprehensive Laravel package that provides enhanced authentication, file mana
         -   [Zoom Phone call queue pop](#zoom-phone-call-queue-pop)
         -   [Vault (staff password manager)](#vault-staff-password-manager)
         -   [Messaging (SMS)](#messaging-sms)
+        -   [Billing (Stripe subscriptions)](#billing-stripe-subscriptions)
         -   [Middleware aliases](#middleware-aliases)
         -   [Testing](#testing)
     -   [File Management](#file-management)
@@ -2166,11 +2167,169 @@ signature or a token.
   above the compose box; do not disable it. An opt-out stops bulk, and a staff
   member answering somebody who has written in is a conversation.
 
+### Billing (Stripe subscriptions)
+
+Added in 4.21.0. Self-service subscriptions to a host application's features:
+staff keep a catalogue in the CRM, the module pushes it to Stripe as Products
+and Prices, a buyer subscribes through hosted Checkout and manages it in
+Stripe's hosted Customer Portal, and a signed webhook keeps our mirror of each
+subscription in step. One Stripe Subscription per feature. Off by default.
+
+> **The entitlement rule, and its one reading.** A billable party has a
+> feature while EITHER a mirrored subscription for it (in the current Stripe
+> mode) is `active`, `trialing` or `past_due`, its period has not ended **and
+> its first payment has settled**; OR a comp for it has started and not
+> ended. `past_due` keeps access while Stripe retries; `canceled` and
+> `unpaid` end it. `Entitlements::has($billable, 'feature_key')` is the only
+> place this is decided; `why()` says why for a screen.
+
+> **A feature switches on only when money moves.** Fulfilment acts on a
+> Checkout Session whose `payment_status` is `paid`
+> (`checkout.session.completed`, or `checkout.session.async_payment_succeeded`
+> for AU BECS direct debit), or on `invoice.paid` with money on it. A direct
+> debit still clearing grants nothing, whatever the subscription's status says.
+
+```php
+'billing' => [
+    'enabled' => true,
+    'integration' => 'stripe',                 // the Settings → Integrations card
+    'currency' => 'aud',
+    'tax_rate_id' => env('BILLING_STRIPE_TAX_RATE_ID'),   // fallback; the card's field wins
+    'tax_percentage' => 10,                    // what the probe expects (exclusive)
+    'portal_configuration_id' => null,         // bpc_..., null = the account default
+    'collect_tax_id' => true,                  // ABN at Checkout
+    'integration_identifier' => 'visns_billing_qhzmtrwk', // one fixed value, every session
+    'lookup_key_prefix' => 'visns',            // <prefix>_<key>_monthly|annual
+    'success_path' => '/portal/portal?section=billing&checkout={CHECKOUT_SESSION_ID}',
+    'cancel_path' => '/portal/portal?section=billing',
+    'return_path' => '/portal/portal?section=billing',
+    'open_checkout_hours' => 24,
+    'uris' => ['base' => 'ajax/billing', 'webhook' => 'api/billing/stripe/webhook'],
+    'routes_middleware' => ['web', 'auth'],
+    'webhook_middleware' => ['api'],
+    'permissions' => ['manage' => 'Settings'],
+    'hooks' => ['billable' => App\Helpers\BillingCustomers::class],
+    'tables' => [
+        'features' => 'billing_features', 'customers' => 'billing_customers',
+        'subscriptions' => 'billing_subscriptions', 'checkouts' => 'billing_checkouts',
+        'comps' => 'billing_comps', 'events' => 'billing_events',
+        'entitlement_log' => 'billing_entitlement_log',
+    ],
+],
+```
+
+**Keys.** Nothing secret is in config. With the module on, the package declares
+a `stripe` integration (unless the host declares its own) with five fields:
+`restricted_key` (secret), `webhook_secret` (secret), `livemode` (`test` /
+`live`), `tax_rate_id`, `portal_configuration_id`. A secret key (`sk_`) is
+refused with a 422 when it is saved, and again before any client is built; the
+mode must agree with the key's prefix. `Services\Billing\StripeClientFactory`
+builds a `StripeClient` instance (never the global key) pinned to
+`StripeClientFactory::API_VERSION` = `2026-10-28.endive`, stripe-php 22.1.0's
+own version. Create the Workbench endpoint at that version.
+`Services\Billing\Probes::stripe` is the card's Test connection: it reads
+`/v1/balance` and, if set, checks the tax rate is active, 10% and exclusive.
+
+**The host hook.** `hooks.billable` names a class implementing
+`Contracts\BillableResolver`. The billable party is any Eloquent model (the
+host's client); the package stores it as a morph and never names the class.
+
+```php
+interface BillableResolver
+{
+    public function resolve(Request $request): ?Model;           // the portal session's party
+    public function canManage(Request $request, Model $billable): bool; // may commit it to a charge
+    public function find(string $type, int $id): ?Model;         // a stored morph back; refuse types you do not bill
+    public function describe(Model $billable): array;            // ['name' => ..., 'email' => ...] for the Stripe Customer
+}
+```
+
+**The webhook.** `POST api/billing/stripe/webhook`, behind
+`billing.stripe-signature` (`Webhook::constructEvent`, raw body, 300 s
+tolerance; no secret 401, bad or stale signature 400). Outside session and CSRF;
+a host with a deny-by-default route guard must open this path. Events are
+ledgered in `billing_events` by id (no payload), a redelivery answers 200
+`duplicate`, a handler that throws answers 500 so Stripe retries and the retry
+runs again. Every handler re-reads Stripe, so order does not matter, and
+resolves through Stripe's object graph (session → subscription → customer →
+`billing_customers`, price → product → `billing_features`; charges, disputes
+and fraud warnings through PaymentIntent → InvoicePayment → invoice);
+subscription metadata is a fallback only. Subscribe the endpoint to:
+`checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+`checkout.session.async_payment_failed`, `checkout.session.expired`,
+`customer.subscription.created|updated|deleted`, `invoice.paid`,
+`invoice.payment_failed`, `charge.refunded`, `charge.dispute.created`,
+`radar.early_fraud_warning.created`, `customer.updated`. Refunds, disputes and
+fraud warnings revoke nothing; they dispatch `Events\BillingAttention` (ids
+only). Every gain or loss of a feature writes `billing_entitlement_log` and
+dispatches `Events\BillingEntitlementChanged`.
+
+**Staff API** (`routes_middleware` + `permission:<permissions.manage>`):
+
+| Route | Does |
+| --- | --- |
+| `GET ajax/billing/status` | configured, mode, webhook secret set, tax rate, resolver, API version, webhook URL, last event |
+| `POST ajax/billing/probe` | `Probes::stripe` on the stored credentials |
+| `GET ajax/billing/features` | the catalogue, with Stripe ids and `needs_sync` |
+| `POST ajax/billing/features` | create: `key` (fixed), `name`, `blurb`, `monthly_amount_cents`, `annual_amount_cents`, `available`, `sort_order`; amounts ex GST, ≥ 50 |
+| `POST ajax/billing/features/{id}` | edit (never `key`, never Stripe ids) |
+| `POST ajax/billing/features/{id}/sync` | push to Stripe; a changed amount makes a new Price and archives the old |
+| `GET ajax/billing/billables/{type}/{id}` | entitlements, customers, subscriptions, comps, recent checkouts |
+| `POST ajax/billing/billables/{type}/{id}/comps` | grant `{feature, reason, ends_at?}`; 409 while Stripe bills for it |
+| `POST ajax/billing/comps/{id}/end` | end a comp (sets `ends_at`; rows are never deleted) |
+| `GET ajax/billing/events` | the webhook ledger, `?outcome=` / `?type=` |
+
+**The buyer's side** is `Controllers\BillingPortalController`, which the package
+does **not** route. Extend it, override its protected hooks (`billable()`,
+`mayManage()`, `successUrl()`, `cancelUrl()`, `returnUrl()`, `actorId()`), and
+mount it behind your own client guard:
+
+```php
+Route::middleware(['web', 'auth:portal'])->prefix('portal/ajax/billing')->group(function () {
+    Route::get('/', [PortalBillingController::class, 'features']);                    // list, prices, state
+    Route::post('/checkout', [PortalBillingController::class, 'checkout']);           // {feature, interval} → {url}
+    Route::get('/checkout/{session}', [PortalBillingController::class, 'checkoutStatus']); // the success-page poll
+    Route::post('/manage', [PortalBillingController::class, 'manage']);               // Customer Portal → {url}
+});
+```
+
+Answers: unconfigured `200 {ok:false, reason:'unconfigured'}`; Stripe down
+`200 {ok:false, reason:'stripe_unavailable'}`; may not manage 403 with a
+sentence; another party's checkout the same 404 as an invented one; already
+included or a debit still clearing 409; anything fixable 422 with a sentence.
+The poll calls the same `Fulfilment::fromCheckout()` as the webhook. Redirect
+URLs are built from `config('app.url')`, never the request host. Checkout
+Sessions are `mode: subscription`, carry `client_reference_id` (our checkout
+id), the GST rate as `subscription_data.default_tax_rates`, the fixed
+`integration_identifier`, and **no `payment_method_types`** (methods are set in
+the Dashboard). An open session for the same feature is resumed rather than
+duplicated.
+
+**Testing.** stripe-php has its own HTTP client, so `Http::fake()` and
+`preventStrayRequests()` never see it. Use the `Tests\FakesStripe` trait (in
+`src/Tests`, so a host's tests can use it too):
+
+```php
+use Visnsstudio\VisnsPackages\Tests\FakeStripe;
+use Visnsstudio\VisnsPackages\Tests\FakesStripe;
+
+$stripe = $this->fakeStripe();     // installed via ApiRequestor::setHttpClient()
+$stripe->on('GET', '/v1/subscriptions/*', fn ($params, $request) => FakeStripe::subscription('sub_1', 'cus_1', 'price_1', 'prod_1'));
+$this->postStripeEvent($this->stripeEvent('invoice.paid', FakeStripe::invoice('in_1', 'sub_1')), 'whsec_...');
+$stripe->assertSent('POST', '/v1/checkout/sessions', fn ($p) => $p['mode'] === 'subscription');
+```
+
+An unscripted request throws. A request breaking Stripe's rules (any
+`payment_method_types`, a secret key, another API version, `customer` with
+`customer_email`, tax id collection without `customer_update[name]=auto`, a
+Price amount edit) is answered with Stripe's 400 and fails the test at
+teardown even if the code swallowed it.
+
 ### Middleware aliases
 
 The package fills in the aliases its own routes need — `zoom-webhook` and
-`zoom_webhook` (both spellings, so route definitions move across untouched) and,
-when Spatie is installed, `permission`. Each is only registered **if the
+`zoom_webhook` (both spellings, so route definitions move across untouched),
+`billing.stripe-signature` and, when Spatie is installed, `permission`. Each is only registered **if the
 application has not already claimed that name**: service providers boot after an
 application's own middleware registration, so a package that registered
 unconditionally would always win and silently change what every route carrying

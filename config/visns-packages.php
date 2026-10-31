@@ -2113,6 +2113,108 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Billing (Stripe subscriptions)
+    |--------------------------------------------------------------------------
+    |
+    | Self-service subscriptions to a host application's features, paid
+    | through Stripe Checkout and managed in Stripe's hosted Customer Portal.
+    | Off by default: no routes, no webhook, no integration card until
+    | `enabled` is true.
+    |
+    | The keys are NOT here. Staff paste a restricted key (rk_...) and the
+    | webhook signing secret (whsec_...) into Settings → Integrations → Stripe,
+    | where they are stored encrypted and never read back. A secret key
+    | (sk_...) is refused when it is saved.
+    |
+    | THE ENTITLEMENT RULE. A billable party has a feature while either
+    |  - a mirrored subscription for it is active, trialing or past_due, its
+    |    period has not ended and its first payment has settled; or
+    |  - a staff comp for it has started and not ended.
+    | Access is kept through past_due (Stripe is still retrying) and withdrawn
+    | at canceled or unpaid. Entitlements::has() is the one reading.
+    */
+    'billing' => [
+        'enabled' => false,
+
+        // The IntegrationRegistry provider holding the key and the secret. The
+        // package declares it when the host's `integrations` does not.
+        'integration' => 'stripe',
+
+        // Prices are stored ex GST; GST is one fixed Stripe Tax Rate, applied
+        // to every subscription through Checkout. Optional here: the
+        // integration's own `tax_rate_id` field wins, because a sandbox and the
+        // live account have different rate ids.
+        'currency' => 'aud',
+        'tax_rate_id' => env('BILLING_STRIPE_TAX_RATE_ID'),
+        // What the probe expects that rate to be.
+        'tax_percentage' => 10,
+
+        // An optional Customer Portal configuration id (bpc_...). Null uses the
+        // account's default configuration.
+        'portal_configuration_id' => env('BILLING_STRIPE_PORTAL_CONFIGURATION_ID'),
+
+        // Ask Checkout for the buyer's tax id (an ABN, validated by Stripe).
+        'collect_tax_id' => true,
+
+        // Sent on every Checkout Session so this integration's sessions can be
+        // told apart in Stripe. One fixed value, not one per session.
+        'integration_identifier' => 'visns_billing_qhzmtrwk',
+
+        // Lookup keys on the Prices the catalogue creates: <prefix>_<key>_<interval>.
+        'lookup_key_prefix' => 'visns',
+
+        // Where Stripe sends the browser back to, relative to config('app.url')
+        // (never the request host). {CHECKOUT_SESSION_ID} is Stripe's own
+        // placeholder and must stay in success_path; {feature} is the key.
+        'success_path' => '/portal/portal?section=billing&checkout={CHECKOUT_SESSION_ID}',
+        'cancel_path' => '/portal/portal?section=billing',
+        'return_path' => '/portal/portal?section=billing',
+
+        // A checkout younger than this blocks a second one for the same
+        // feature (409). Stripe expires a session after 24 hours.
+        'open_checkout_hours' => 24,
+
+        'uris' => [
+            'base' => 'ajax/billing',
+            'webhook' => 'api/billing/stripe/webhook',
+        ],
+
+        'routes_middleware' => ['web', 'auth'],
+
+        // No session and no CSRF: the request is Stripe's, signed instead.
+        'webhook_middleware' => ['api'],
+
+        /*
+        | `manage` gates the whole staff API: the catalogue, the sync to
+        | Stripe, the probe, comps and the ledgers.
+        */
+        'permissions' => [
+            'manage' => 'Settings',
+        ],
+
+        'hooks' => [
+            /*
+            | REQUIRED for checkout: a class implementing
+            | Visnsstudio\VisnsPackages\Contracts\BillableResolver. It names the
+            | billable party (the host's client model) and who may commit it to
+            | a charge. The package never names a host model.
+            */
+            'billable' => null,
+        ],
+
+        'tables' => [
+            'features' => 'billing_features',
+            'customers' => 'billing_customers',
+            'subscriptions' => 'billing_subscriptions',
+            'checkouts' => 'billing_checkouts',
+            'comps' => 'billing_comps',
+            'events' => 'billing_events',
+            'entitlement_log' => 'billing_entitlement_log',
+        ],
+    ],
+
     'user_dynamic_relationships' => [
         // Example:
         // 'profile' => [
