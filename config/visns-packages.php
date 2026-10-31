@@ -2158,6 +2158,15 @@ return [
         // Ask Checkout for the buyer's tax id (an ABN, validated by Stripe).
         'collect_tax_id' => true,
 
+        // Stripe's Managed Payments makes Stripe the merchant of record and
+        // has it work out the tax itself; newer accounts have it on by
+        // default, and a session that names our own tax rate is then refused
+        // (seen 2026-10-31). The host company is the merchant and charges its
+        // own GST, so every session opts out. Set true only if the account
+        // should sell through Stripe as merchant of record; `tax_rate_id` is
+        // then not sent.
+        'managed_payments' => false,
+
         // Sent on every Checkout Session so this integration's sessions can be
         // told apart in Stripe. One fixed value, not one per session.
         'integration_identifier' => 'visns_billing_qhzmtrwk',

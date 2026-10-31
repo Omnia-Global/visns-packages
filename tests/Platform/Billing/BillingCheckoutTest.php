@@ -37,6 +37,8 @@ class BillingCheckoutTest extends BillingTestCase
         $this->assertSame((string) $checkout->id, $params['subscription_data']['metadata']['billing_checkout_id']);
         $this->assertSame('portal_messaging', $params['subscription_data']['metadata']['billing_feature_key']);
         $this->assertSame('auto', $params['customer_update']['name']);
+        // Stripe's Managed Payments would otherwise refuse our tax rate (2026-10-31).
+        $this->assertTrue(in_array($params['managed_payments']['enabled'], [false, 'false'], true), 'managed_payments[enabled] must be false');
 
         // The customer is created once, for the client, with an idempotency key.
         $customer = BillingCustomer::query()->sole();

@@ -275,6 +275,12 @@ class FakeStripe implements ClientInterface
                 return 'You may only specify one of these parameters: customer, customer_email.';
             }
 
+            // The SDK sends booleans as the strings 'true' / 'false'.
+            $managed = $params['managed_payments']['enabled'] ?? null;
+            if (! empty($params['subscription_data']['default_tax_rates'])
+                && ! in_array($managed, [false, 'false', '0', 0], true)) {
+                return 'Unsupported parameter: subscription_data.default_tax_rates. Managed Payments handles taxes; pass managed_payments[enabled]=false.';
+            }
             if (! empty($params['customer']) && ! empty($params['tax_id_collection']['enabled'])
                 && ($params['customer_update']['name'] ?? null) !== 'auto') {
                 return 'tax_id_collection with an existing customer requires customer_update[name] to be auto.';

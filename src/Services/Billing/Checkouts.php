@@ -97,7 +97,8 @@ class Checkouts
             ],
         ];
 
-        if ($taxRate = $this->stripe->taxRateId()) {
+        $managedPayments = (bool) ModuleConfig::get('billing.managed_payments', false);
+        if (! $managedPayments && ($taxRate = $this->stripe->taxRateId())) {
             $subscriptionData['default_tax_rates'] = [$taxRate];
         }
 
@@ -115,6 +116,11 @@ class Checkouts
             'subscription_data' => $subscriptionData,
             'integration_identifier' => $this->integrationIdentifier(),
         ];
+        if (! $managedPayments) {
+            // Opt out per request: the merchant of record is the host company,
+            // and only then may the session carry our tax rate (config note).
+            $params['managed_payments'] = ['enabled' => false];
+        }
 
         if (ModuleConfig::get('billing.collect_tax_id', true)) {
             // With an existing customer, Stripe requires the name to be
