@@ -1605,6 +1605,9 @@ return [
             'threads' => 'sms_threads',
             'messages' => 'sms_messages',
             'thread_reads' => 'sms_thread_reads',
+            // Read marks for a reader who is not a `users` row (a client
+            // portal's people); `thread_reads` is keyed on users.id.
+            'thread_reader_marks' => 'sms_thread_reader_marks',
             'templates' => 'sms_templates',
             'system_messages' => 'sms_system_messages',
 

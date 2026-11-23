@@ -13,6 +13,7 @@ use Visnsstudio\VisnsPackages\Models\SmsOptOut;
 use Visnsstudio\VisnsPackages\Models\SmsThread;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 use Visnsstudio\VisnsPackages\Support\PhoneNumber;
+use Visnsstudio\VisnsPackages\Support\SchemaColumns;
 
 /**
  * Everything that happens to a message between "somebody pressed send" and "the
@@ -122,13 +123,19 @@ class SmsService
      * Synchronous rather than queued because the composer waits for the result -
      * and because an AFSL practice sending a client a text wants to be told
      * immediately if it failed.
+     *
+     * `$sentByName` is for a sender who is NOT a `users` row - a person signed
+     * in to a client portal - and is written to `sent_by_name` so the message
+     * still says who sent it. Only when it is non-empty, and only once the
+     * column has been migrated (SchemaColumns): before that it is dropped
+     * rather than costing the send.
      */
-    public function send(SmsThread $thread, string $body, $user = null): SmsMessage
+    public function send(SmsThread $thread, string $body, $user = null, ?string $sentByName = null): SmsMessage
     {
         // Never suppressed: a message somebody typed is a message somebody is
         // owed an answer about, whatever the provider said. Only the module's
         // own opt-out confirmation may vanish - see deliver().
-        return $this->deliver($thread, $body, $user, false);
+        return $this->deliver($thread, $body, $user, false, $sentByName);
     }
 
     /**
@@ -150,15 +157,29 @@ class SmsService
      *
      * @return SmsMessage|null  Null only when the send was suppressed.
      */
-    private function deliver(SmsThread $thread, string $body, $user, bool $suppressWhenBlocked): ?SmsMessage
-    {
-        $message = SmsMessage::create([
+    private function deliver(
+        SmsThread $thread,
+        string $body,
+        $user,
+        bool $suppressWhenBlocked,
+        ?string $sentByName = null
+    ): ?SmsMessage {
+        $attributes = [
             'thread_id' => $thread->id,
             'direction' => SmsMessage::DIRECTION_OUT,
             'body' => $body,
             'status' => SmsMessage::STATUS_QUEUED,
             'user_id' => is_object($user) ? ($user->id ?? null) : $user,
-        ]);
+        ];
+
+        $sentByName = trim((string) $sentByName);
+
+        if ($sentByName !== ''
+            && SchemaColumns::has((new SmsMessage())->getTable(), 'sent_by_name')) {
+            $attributes['sent_by_name'] = mb_substr($sentByName, 0, 191);
+        }
+
+        $message = SmsMessage::create($attributes);
 
         // The transport reads both, and a lazily-loaded relation inside a
         // transport is a query per send.

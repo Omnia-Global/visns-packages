@@ -2,6 +2,7 @@
 
 namespace Visnsstudio\VisnsPackages\Controllers;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Visnsstudio\VisnsPackages\Models\SmsLine;
@@ -32,16 +33,134 @@ use Visnsstudio\VisnsPackages\Support\SmsPayload;
  * **A send always leaves a row.** Even with no transport connected, the message
  * is stored - `not_connected` - so the practice can see what it tried to send.
  * See Services\Sms\NullSmsTransport.
+ *
+ * ## Extending it for an actor who is not staff
+ *
+ * The defaults below are the staff inbox: the actor is a row in `users` and
+ * only HOUSE lines exist. A host application that needs the same inbox for
+ * somebody else - a person signed in to a client portal, who is not a user and
+ * may see ONE client's lines - extends this class and overrides the protected
+ * hooks, exactly as it does SmsCampaignController's:
+ *
+ *   lineQuery()        the lines the actor may work
+ *   lineIds()          their ids, for the unread totals
+ *   threadQuery()      the threads the actor may work
+ *   unreadCounts()     unread per thread, as the actor reads them
+ *   markThreadRead()   move the actor's read mark
+ *   sender()           who to record as having sent a message
+ *   optOutClientId()   whose opt-out register `opted_out` reads
+ *   presentThread()    the last word on every thread payload (strip keys)
+ *
+ * Every action reaches its lines, threads, counts and payloads through these
+ * and nothing else, so a subclass that narrows lineQuery() and threadQuery()
+ * cannot be walked around by any endpoint. The defaults reproduce the staff
+ * inbox byte for byte; the package's own routes mount this class unchanged and
+ * the host mounts its subclass on routes of its own.
  */
 class SmsController extends \App\Http\Controllers\Controller
 {
-    private const MAX_PER_PAGE = 100;
-    private const DEFAULT_MESSAGE_LIMIT = 50;
-    private const MAX_MESSAGE_LIMIT = 200;
+    protected const MAX_PER_PAGE = 100;
+    protected const DEFAULT_MESSAGE_LIMIT = 50;
+    protected const MAX_MESSAGE_LIMIT = 200;
 
-    public function __construct(private SmsService $sms)
+    public function __construct(protected SmsService $sms)
     {
     }
+
+    /* ---------------------------------------------------------------------
+     | Hooks - override in a subclass to serve an actor who is not staff
+     | ------------------------------------------------------------------- */
+
+    /**
+     * The lines this actor may work. Staff: the house lines they are on, or
+     * every house line for a manager (SmsLine::scopeVisibleTo).
+     */
+    protected function lineQuery(Request $request): Builder
+    {
+        $user = $request->user();
+
+        return SmsLine::query()->visibleTo($user, SmsAccess::manages($user));
+    }
+
+    /**
+     * The ids of lineQuery()'s lines, for the unread totals.
+     *
+     * @return array<int, int>
+     */
+    protected function lineIds(Request $request): array
+    {
+        return SmsAccess::lineIds($request->user());
+    }
+
+    /**
+     * The threads this actor may work. Kept separate from lineQuery() rather
+     * than derived from it because the staff scope is written against the
+     * pivot directly (SmsThread::scopeVisibleTo) and must stay exactly that.
+     */
+    protected function threadQuery(Request $request): Builder
+    {
+        $user = $request->user();
+
+        return SmsThread::query()->visibleTo($user, SmsAccess::manages($user));
+    }
+
+    /**
+     * Unread inbound messages per thread for this actor, `[thread id => count]`.
+     * Same arguments and reading as SmsThread::unreadCountsFor().
+     *
+     * @param  array<int, int>|null  $threadIds
+     * @param  array<int, int>|null  $lineIds
+     * @return array<int, int>
+     */
+    protected function unreadCounts(Request $request, ?array $threadIds = null, ?array $lineIds = null): array
+    {
+        return SmsThread::unreadCountsFor($request->user(), $threadIds, $lineIds);
+    }
+
+    /**
+     * Move this actor's read mark to the newest message in the thread.
+     */
+    protected function markThreadRead(Request $request, SmsThread $thread): void
+    {
+        $this->markRead($thread, $request->user());
+    }
+
+    /**
+     * Who is sending: a `users` row, and/or a name to record when there is no
+     * user (SmsService::send()'s `$sentByName`).
+     *
+     * @return array{user: mixed, name: ?string}
+     */
+    protected function sender(Request $request): array
+    {
+        return ['user' => $request->user(), 'name' => null];
+    }
+
+    /**
+     * Whose opt-out register a thread's `opted_out` is read from. 0 is the
+     * house's - see Services\Sms\SmsOptOuts.
+     */
+    protected function optOutClientId(Request $request): int
+    {
+        return 0;
+    }
+
+    /**
+     * The last step applied to every thread payload this controller answers -
+     * list rows and single threads alike - so a subclass can remove or reshape
+     * keys in ONE place rather than chasing six call sites.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    protected function presentThread(Request $request, array $payload): array
+    {
+        return $payload;
+    }
+
+    /* ---------------------------------------------------------------------
+     | Actions
+     | ------------------------------------------------------------------- */
 
     /**
      * Is messaging actually wired to anything, and is there anything waiting?
@@ -51,14 +170,13 @@ class SmsController extends \App\Http\Controllers\Controller
      */
     public function status(Request $request)
     {
-        $user = $request->user();
-        $lineIds = SmsAccess::lineIds($user);
+        $lineIds = $this->lineIds($request);
 
         return response()->json([
             'transport' => $this->sms->transportName(),
             'connected' => $this->sms->connected(),
             'lines_count' => count($lineIds),
-            'unread_total' => array_sum(SmsThread::unreadCountsFor($user, null, $lineIds)),
+            'unread_total' => array_sum($this->unreadCounts($request, null, $lineIds)),
         ]);
     }
 
@@ -67,15 +185,12 @@ class SmsController extends \App\Http\Controllers\Controller
      */
     public function lines(Request $request)
     {
-        $user = $request->user();
-
-        $lines = SmsLine::query()
-            ->visibleTo($user, SmsAccess::manages($user))
+        $lines = $this->lineQuery($request)
             ->orderBy('label')
             ->get();
 
-        $unread = SmsThread::unreadCountsFor(
-            $user,
+        $unread = $this->unreadCounts(
+            $request,
             null,
             $lines->pluck('id')->map(fn ($id) => (int) $id)->all()
         );
@@ -104,10 +219,7 @@ class SmsController extends \App\Http\Controllers\Controller
      */
     public function unread(Request $request)
     {
-        $user = $request->user();
-        $lineIds = SmsAccess::lineIds($user);
-
-        $byThread = SmsThread::unreadCountsFor($user, null, $lineIds);
+        $byThread = $this->unreadCounts($request, null, $this->lineIds($request));
 
         return response()->json([
             'total' => array_sum($byThread),
@@ -121,19 +233,15 @@ class SmsController extends \App\Http\Controllers\Controller
      */
     public function threads(Request $request)
     {
-        $user = $request->user();
-        $manages = SmsAccess::manages($user);
-
         // Filtering a page after the fact would give pages of wildly different
         // sizes, so the unread view is its own query.
         if ($request->boolean('unread_only')) {
             return response()->json(
-                $this->unreadOnlyPage($request, $user, $manages, $this->perPage($request))
+                $this->unreadOnlyPage($request, $this->perPage($request))
             );
         }
 
-        $query = SmsThread::query()
-            ->visibleTo($user, $manages)
+        $query = $this->threadQuery($request)
             ->search($request->input('search'));
 
         if ($request->filled('line_id')) {
@@ -141,7 +249,7 @@ class SmsController extends \App\Http\Controllers\Controller
 
             // A line the user cannot see is not a 403 here either - it simply
             // has no threads.
-            if (! $this->canSeeLine($user, $manages, $lineId)) {
+            if (! $this->canSeeLine($request, $lineId)) {
                 $query->whereRaw('1 = 0');
             } else {
                 $query->where('line_id', $lineId);
@@ -168,15 +276,15 @@ class SmsController extends \App\Http\Controllers\Controller
             ->orderByDesc('id')
             ->paginate($perPage);
 
-        $unread = SmsThread::unreadCountsFor(
-            $user,
+        $unread = $this->unreadCounts(
+            $request,
             $threads->pluck('id')->map(fn ($id) => (int) $id)->all()
         );
 
-        $optedOut = $this->optedOutAmong($threads->pluck('external_number')->all());
+        $optedOut = $this->optedOutAmong($request, $threads->pluck('external_number')->all());
 
         return response()->json(
-            $threads->through(fn (SmsThread $thread) => $this->threadRow($thread, $unread, $optedOut))
+            $threads->through(fn (SmsThread $thread) => $this->threadRow($request, $thread, $unread, $optedOut))
         );
     }
 
@@ -185,18 +293,13 @@ class SmsController extends \App\Http\Controllers\Controller
      */
     public function storeThread(Request $request)
     {
-        $user = $request->user();
-        $manages = SmsAccess::manages($user);
-
         $data = $request->validate([
             'line_id' => ['required', 'integer'],
             'to' => ['required', 'string', 'max:32'],
             'body' => ['nullable', 'string', 'max:' . $this->maxBodyLength()],
         ]);
 
-        $line = SmsLine::query()
-            ->visibleTo($user, $manages)
-            ->find((int) $data['line_id']);
+        $line = $this->lineQuery($request)->find((int) $data['line_id']);
 
         if ($line === null) {
             abort(404, 'Not found.');
@@ -231,11 +334,13 @@ class SmsController extends \App\Http\Controllers\Controller
         $message = null;
 
         if (isset($data['body']) && trim((string) $data['body']) !== '') {
-            $message = $this->sms->send($thread, (string) $data['body'], $user);
+            $sender = $this->sender($request);
+
+            $message = $this->sms->send($thread, (string) $data['body'], $sender['user'], $sender['name']);
         }
 
         return response()->json([
-            'thread' => SmsPayload::thread($thread->fresh(), $user),
+            'thread' => $this->threadPayload($request, $thread->fresh()),
             'message' => $message === null ? null : SmsPayload::message($message),
         ], 201);
     }
@@ -250,7 +355,6 @@ class SmsController extends \App\Http\Controllers\Controller
      */
     public function showThread(Request $request, $id)
     {
-        $user = $request->user();
         $thread = $this->visibleThread($request, $id);
 
         $limit = (int) $request->input('limit', self::DEFAULT_MESSAGE_LIMIT);
@@ -269,10 +373,10 @@ class SmsController extends \App\Http\Controllers\Controller
 
         $messages = $page->take($limit)->reverse()->values();
 
-        $this->markRead($thread, $user);
+        $this->markThreadRead($request, $thread);
 
         return response()->json([
-            'thread' => $this->withClientDetails(SmsPayload::thread($thread->fresh(), $user)),
+            'thread' => $this->threadPayload($request, $thread->fresh(), true),
             'messages' => $messages->map(fn (SmsMessage $m) => SmsPayload::message($m))->values(),
             'has_more' => $hasMore,
         ]);
@@ -283,7 +387,6 @@ class SmsController extends \App\Http\Controllers\Controller
      */
     public function storeMessage(Request $request, $id)
     {
-        $user = $request->user();
         $thread = $this->visibleThread($request, $id);
 
         // A thread opened by an inbound message from a sender ID - `Apple`,
@@ -307,11 +410,13 @@ class SmsController extends \App\Http\Controllers\Controller
             'body' => ['required', 'string', 'max:' . $this->maxBodyLength()],
         ]);
 
-        $message = $this->sms->send($thread, $data['body'], $user);
+        $sender = $this->sender($request);
+
+        $message = $this->sms->send($thread, $data['body'], $sender['user'], $sender['name']);
 
         return response()->json([
             'message' => SmsPayload::message($message->load('user')),
-            'thread' => SmsPayload::thread($thread->fresh(), $user),
+            'thread' => $this->threadPayload($request, $thread->fresh()),
         ], 201);
     }
 
@@ -320,10 +425,9 @@ class SmsController extends \App\Http\Controllers\Controller
      */
     public function read(Request $request, $id)
     {
-        $user = $request->user();
         $thread = $this->visibleThread($request, $id);
 
-        $this->markRead($thread, $user);
+        $this->markThreadRead($request, $thread);
 
         return response()->noContent();
     }
@@ -360,7 +464,6 @@ class SmsController extends \App\Http\Controllers\Controller
      */
     public function updateThread(Request $request, $id)
     {
-        $user = $request->user();
         $thread = $this->visibleThread($request, $id);
 
         $data = $request->validate([
@@ -384,7 +487,7 @@ class SmsController extends \App\Http\Controllers\Controller
 
         $thread->save();
 
-        return response()->json(['thread' => SmsPayload::thread($thread->fresh(), $user)]);
+        return response()->json(['thread' => $this->threadPayload($request, $thread->fresh())]);
     }
 
     /**
@@ -453,7 +556,7 @@ class SmsController extends \App\Http\Controllers\Controller
 
         return response()->json([
             'message' => $message === null ? null : SmsPayload::message($message),
-            'thread' => SmsPayload::thread($thread->fresh(), $user),
+            'thread' => $this->threadPayload($request, $thread->fresh()),
         ], 201);
     }
 
@@ -464,13 +567,9 @@ class SmsController extends \App\Http\Controllers\Controller
     /**
      * A thread this user may work, or a 404.
      */
-    private function visibleThread(Request $request, $id): SmsThread
+    protected function visibleThread(Request $request, $id): SmsThread
     {
-        $user = $request->user();
-
-        $thread = SmsThread::query()
-            ->visibleTo($user, SmsAccess::manages($user))
-            ->find($id);
+        $thread = $this->threadQuery($request)->find($id);
 
         if ($thread === null) {
             abort(404, 'Not found.');
@@ -493,7 +592,7 @@ class SmsController extends \App\Http\Controllers\Controller
      *
      * @param  \Illuminate\Database\Eloquent\Builder  $query
      */
-    private function applyClientFilter($query, Request $request): void
+    protected function applyClientFilter($query, Request $request): void
     {
         if (! $request->filled('client_id')) {
             return;
@@ -505,21 +604,69 @@ class SmsController extends \App\Http\Controllers\Controller
         $query->where('client_id', (int) $request->input('client_id'));
     }
 
-    private function canSeeLine($user, bool $manages, int $lineId): bool
+    /**
+     * Is this one of lineQuery()'s lines?
+     *
+     * For staff that is the same answer as before the hook existed: a manager
+     * sees every HOUSE line (scopeVisibleTo with `$manages` is house() and
+     * nothing else) and a member the house lines they are attached to.
+     */
+    protected function canSeeLine(Request $request, int $lineId): bool
     {
-        if ($manages) {
-            // House only: a manager administers the practice's numbers, and a
-            // client's line is not one of them.
-            return SmsLine::query()->house()->whereKey($lineId)->exists();
+        return $this->lineQuery($request)->whereKey($lineId)->exists();
+    }
+
+    /**
+     * One thread as this actor sees it - the shape every single-thread answer
+     * (store, show, send, update, simulate) goes out in.
+     *
+     * Built from the same pieces as a list row rather than through
+     * SmsPayload::thread()'s `$user` path, because that path reads unread from
+     * `sms_thread_reads` and the opt-out from the house register, and an actor
+     * who is not staff has neither. For staff the values are identical:
+     * unreadCounts() is unreadCountsFor(), which (like unreadCountFor()) answers
+     * 0 for an archived thread, and the opt-out is SmsPayload's own reading
+     * against register 0, the default SmsOptOuts would have used.
+     *
+     * `$withClientDetails` is the opened thread's enrichment (showThread only),
+     * applied BEFORE presentThread() so the subclass still has the last word.
+     *
+     * @return array<string, mixed>
+     */
+    protected function threadPayload(Request $request, SmsThread $thread, bool $withClientDetails = false): array
+    {
+        $payload = SmsPayload::thread($thread, null, $this->threadOptedOut($request, $thread));
+
+        $payload['unread_count'] = $this->unreadCounts($request, [(int) $thread->id])[$thread->id] ?? 0;
+
+        if ($withClientDetails) {
+            $payload = $this->withClientDetails($payload);
         }
 
-        return SmsLine::query()->visibleTo($user, false)->whereKey($lineId)->exists();
+        return $this->presentThread($request, $payload);
+    }
+
+    /**
+     * Has this thread's number opted out of optOutClientId()'s register?
+     * SmsPayload::optedOut()'s rule, with the register named: a sender ID has
+     * no handset and is answered without a query.
+     */
+    protected function threadOptedOut(Request $request, SmsThread $thread): bool
+    {
+        if (PhoneNumber::isSenderId($thread->external_number)) {
+            return false;
+        }
+
+        return app(SmsOptOuts::class)->isOptedOut(
+            (string) $thread->external_number,
+            $this->optOutClientId($request)
+        );
     }
 
     /**
      * Move this user's read mark to the newest message in the thread.
      */
-    private function markRead(SmsThread $thread, $user): void
+    protected function markRead(SmsThread $thread, $user): void
     {
         $userId = is_object($user) ? ($user->id ?? null) : $user;
 
@@ -557,7 +704,7 @@ class SmsController extends \App\Http\Controllers\Controller
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
-    private function withClientDetails(array $payload): array
+    protected function withClientDetails(array $payload): array
     {
         $client = $payload['client'] ?? null;
 
@@ -603,7 +750,7 @@ class SmsController extends \App\Http\Controllers\Controller
      * @param  array<string, bool>  $optedOut  number => true, for the whole page
      * @return array<string, mixed>
      */
-    private function threadRow(SmsThread $thread, array $unread, array $optedOut = []): array
+    protected function threadRow(Request $request, SmsThread $thread, array $unread, array $optedOut = []): array
     {
         // The opt-out flag is passed in rather than looked up, for the same
         // reason the unread count is: one query per row on a fifty-row list is
@@ -618,7 +765,7 @@ class SmsController extends \App\Http\Controllers\Controller
         // unread_count would be one query each.
         $row['unread_count'] = $unread[$thread->id] ?? 0;
 
-        return $row;
+        return $this->presentThread($request, $row);
     }
 
     /**
@@ -631,10 +778,11 @@ class SmsController extends \App\Http\Controllers\Controller
      * @param  array<int, mixed>  $numbers
      * @return array<string, bool>
      */
-    private function optedOutAmong(array $numbers): array
+    protected function optedOutAmong(Request $request, array $numbers): array
     {
         return app(SmsOptOuts::class)->optedOutAmong(
-            array_map(fn ($number) => (string) $number, $numbers)
+            array_map(fn ($number) => (string) $number, $numbers),
+            $this->optOutClientId($request)
         );
     }
 
@@ -644,7 +792,7 @@ class SmsController extends \App\Http\Controllers\Controller
      * @param  array<int, int>  $byThread
      * @return array<int, int>
      */
-    private function unreadByLine(array $byThread): array
+    protected function unreadByLine(array $byThread): array
     {
         if ($byThread === []) {
             return [];
@@ -678,12 +826,11 @@ class SmsController extends \App\Http\Controllers\Controller
      *
      * @return \Illuminate\Contracts\Pagination\LengthAwarePaginator
      */
-    private function unreadOnlyPage(Request $request, $user, bool $manages, int $perPage)
+    protected function unreadOnlyPage(Request $request, int $perPage)
     {
-        $unread = SmsThread::unreadCountsFor($user, null, SmsAccess::lineIds($user));
+        $unread = $this->unreadCounts($request, null, $this->lineIds($request));
 
-        $query = SmsThread::query()
-            ->visibleTo($user, $manages)
+        $query = $this->threadQuery($request)
             ->search($request->input('search'))
             ->whereIn('id', array_keys($unread) ?: [0]);
 
@@ -704,14 +851,14 @@ class SmsController extends \App\Http\Controllers\Controller
             ->orderByDesc('id')
             ->paginate($perPage);
 
-        $optedOut = $this->optedOutAmong($page->pluck('external_number')->all());
+        $optedOut = $this->optedOutAmong($request, $page->pluck('external_number')->all());
 
         return $page->through(
-            fn (SmsThread $thread) => $this->threadRow($thread, $unread, $optedOut)
+            fn (SmsThread $thread) => $this->threadRow($request, $thread, $unread, $optedOut)
         );
     }
 
-    private function perPage(Request $request): int
+    protected function perPage(Request $request): int
     {
         $default = (int) ModuleConfig::get('messaging.page_size', 50);
         $perPage = (int) $request->input('per_page', $default > 0 ? $default : 50);
@@ -719,14 +866,14 @@ class SmsController extends \App\Http\Controllers\Controller
         return max(1, min($perPage, self::MAX_PER_PAGE));
     }
 
-    private function maxBodyLength(): int
+    protected function maxBodyLength(): int
     {
         $max = (int) ModuleConfig::get('messaging.max_body_length', 1600);
 
         return $max > 0 ? $max : 1600;
     }
 
-    private function country(): string
+    protected function country(): string
     {
         return (string) ModuleConfig::get('messaging.default_country', 'AU');
     }

@@ -202,7 +202,13 @@ class SmsThread extends Model
 
         $client = null;
 
-        if ($resolver !== null && ! $isSenderId) {
+        // A CLIENT's line is never resolved. The resolver is the host's own
+        // client book; the texter on a client's line is one of THAT client's
+        // customers, and matching them against the host's would put one
+        // tenant's client name on another tenant's conversation (and hand the
+        // client's portal a name from the host's records). House lines are
+        // resolved exactly as before.
+        if ($resolver !== null && ! $isSenderId && $line->isHouse()) {
             try {
                 $resolved = $resolver($address);
                 $client = is_array($resolved) ? $resolved : null;
@@ -271,36 +277,107 @@ class SmsThread extends Model
             return [];
         }
 
-        $messages = (string) ModuleConfig::get('messaging.tables.messages', 'sms_messages');
         $reads = (string) ModuleConfig::get('messaging.tables.thread_reads', 'sms_thread_reads');
+
+        return static::unreadCountsAgainst(
+            $reads,
+            fn ($join) => $join->where($reads . '.user_id', '=', $id),
+            $threadIds,
+            $lineIds
+        );
+    }
+
+    /**
+     * unreadCountsFor() for a reader who is NOT a row in `users` - a person
+     * signed in to a client portal, say - read against
+     * `sms_thread_reader_marks` instead of `sms_thread_reads` (whose `user_id`
+     * is a foreign key to users and cannot hold anybody else).
+     *
+     * The same reading in every other respect, because it is the same query:
+     * inbound only, an archived thread counts for nobody, a missing mark is
+     * "never opened", empty-array arguments answer `[]`.
+     *
+     * `$readerType` names the kind of reader (`portal_user`), so two kinds of
+     * non-user reader with overlapping ids never share a mark.
+     *
+     * Answers `[]` until the marks table has been migrated: an application
+     * that updated the package and has not run the migration yet loses an
+     * unread badge for the length of a deploy, never the page.
+     *
+     * @param  array<int, int>|null  $threadIds  Restrict to these threads.
+     * @param  array<int, int>|null  $lineIds    Restrict to threads on these lines.
+     * @return array<int, int>
+     */
+    public static function unreadCountsForReader(
+        string $readerType,
+        int $readerId,
+        ?array $threadIds = null,
+        ?array $lineIds = null
+    ): array {
+        $marks = SmsThreadReaderMark::tableName();
+
+        if (! SmsThreadReaderMark::tableExists()) {
+            return [];
+        }
+
+        return static::unreadCountsAgainst(
+            $marks,
+            fn ($join) => $join->where($marks . '.reader_type', '=', $readerType)
+                ->where($marks . '.reader_id', '=', $readerId),
+            $threadIds,
+            $lineIds
+        );
+    }
+
+    /**
+     * The one unread query, against whichever table holds the reader's
+     * high-water marks.
+     *
+     * One grouped query with a LEFT JOIN onto the marks: a thread with no mark
+     * row joins to nulls and every inbound message counts, which is exactly
+     * the "never opened" rule. `$narrowMark` adds the reader's identity to the
+     * join condition (it must be IN the join, not a WHERE, or a thread with no
+     * mark would drop out instead of counting everything).
+     *
+     * @param  callable(\Illuminate\Database\Query\JoinClause): mixed  $narrowMark
+     * @param  array<int, int>|null  $threadIds
+     * @param  array<int, int>|null  $lineIds
+     * @return array<int, int>
+     */
+    private static function unreadCountsAgainst(
+        string $marks,
+        callable $narrowMark,
+        ?array $threadIds,
+        ?array $lineIds
+    ): array {
+        // Checked before any query is built: an empty restriction is "none of
+        // them", and asking the database to confirm that is a wasted round trip.
+        if ($threadIds === [] || $lineIds === []) {
+            return [];
+        }
+
+        $messages = (string) ModuleConfig::get('messaging.tables.messages', 'sms_messages');
         $threads = (string) ModuleConfig::get('messaging.tables.threads', 'sms_threads');
 
         $query = \Illuminate\Support\Facades\DB::table($messages)
             ->join($threads, $threads . '.id', '=', $messages . '.thread_id')
-            ->leftJoin($reads, function ($join) use ($reads, $messages, $id) {
-                $join->on($reads . '.thread_id', '=', $messages . '.thread_id')
-                    ->where($reads . '.user_id', '=', $id);
+            ->leftJoin($marks, function ($join) use ($marks, $messages, $narrowMark) {
+                $join->on($marks . '.thread_id', '=', $messages . '.thread_id');
+
+                $narrowMark($join);
             })
             ->whereNull($threads . '.archived_at')
             ->where($messages . '.direction', self::inboundDirection())
-            ->where(function ($q) use ($reads, $messages) {
-                $q->whereNull($reads . '.last_read_message_id')
-                    ->orWhereColumn($messages . '.id', '>', $reads . '.last_read_message_id');
+            ->where(function ($q) use ($marks, $messages) {
+                $q->whereNull($marks . '.last_read_message_id')
+                    ->orWhereColumn($messages . '.id', '>', $marks . '.last_read_message_id');
             });
 
         if ($threadIds !== null) {
-            if ($threadIds === []) {
-                return [];
-            }
-
             $query->whereIn($messages . '.thread_id', $threadIds);
         }
 
         if ($lineIds !== null) {
-            if ($lineIds === []) {
-                return [];
-            }
-
             $query->whereIn($threads . '.line_id', $lineIds);
         }
 

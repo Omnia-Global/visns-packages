@@ -94,10 +94,7 @@ class SmsPayload
             'body' => $message->body,
             'status' => $message->status,
             'error' => $message->error,
-            'user' => $message->user === null ? null : [
-                'id' => $message->user->id,
-                'name' => self::displayName($message->user),
-            ],
+            'user' => self::messageSender($message),
             'attachments' => is_array($message->attachments) ? $message->attachments : [],
             'created_at' => $message->created_at?->toIso8601String(),
             'sent_at' => $message->sent_at?->toIso8601String(),
@@ -264,6 +261,31 @@ class SmsPayload
         }
 
         return app(SmsOptOuts::class)->isOptedOut((string) $thread->external_number);
+    }
+
+    /**
+     * A message's `user` block.
+     *
+     * Staff exactly as before: `{id, name}` from the `users` relation. A message
+     * sent by somebody who is not a user (a person signed in to a client
+     * portal) gets `{id: null, name: <sent_by_name>}`, so the thread still says
+     * who wrote it; with neither it is null, as an inbound message always is.
+     * The same shape campaignCreator() gives a campaign.
+     *
+     * @return array{id: mixed, name: ?string}|null
+     */
+    private static function messageSender(SmsMessage $message): ?array
+    {
+        if ($message->user !== null) {
+            return [
+                'id' => $message->user->id,
+                'name' => self::displayName($message->user),
+            ];
+        }
+
+        $name = self::filled($message->sent_by_name ?? null);
+
+        return $name === null ? null : ['id' => null, 'name' => $name];
     }
 
     /**
