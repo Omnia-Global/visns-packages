@@ -111,6 +111,18 @@ class BillingQuantitiesTest extends BillingTestCase
         $this->assertSame('stripe', $answer['reason']);
     }
 
+    public function test_a_subscription_on_a_replaced_price_is_never_multiplied(): void
+    {
+        [$client, $feature] = $this->subscribed();
+        $this->subscriptions['sub_1']['items']['data'][0]['price']['id'] = 'price_old_flat';
+        StubQuantityResolver::$count = 3;
+
+        $answer = app(Quantities::class)->sync($client, $feature);
+
+        $this->assertSame(['ok' => true, 'changed' => false, 'quantity' => 3, 'from' => 1, 'reason' => 'old_price'], $answer);
+        $this->stripe->assertNotSent('POST', '/v1/subscription_items/*');
+    }
+
     private function subscribed($client = null, $feature = null): array
     {
         $client ??= $this->client();

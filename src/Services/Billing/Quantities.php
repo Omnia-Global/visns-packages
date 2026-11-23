@@ -58,7 +58,8 @@ class Quantities
      * Make the live Stripe subscription carry the host's count.
      *
      * @return array{ok: bool, changed: bool, quantity: int, from: ?int, reason: ?string}
-     *   reason: none (nothing live to change), flat, unconfigured, stripe (a
+     *   reason: none (nothing live to change), flat, unconfigured, old_price
+     *   (on a Price the catalogue replaced: never multiplied), stripe (a
      *   Stripe error, logged without detail beyond its class)
      */
     public function sync(Model $billable, BillingFeature $feature, bool $dryRun = false): array
@@ -101,6 +102,18 @@ class Quantities
             }
 
             $from = isset($item['quantity']) ? (int) $item['quantity'] : 1;
+            $price = $item['price'] ?? null;
+            $priceId = is_array($price) ? ($price['id'] ?? null) : $price;
+
+            // A subscription still on a Price the catalogue has replaced (a flat
+            // price before the feature went per unit) is never multiplied: the
+            // old amount times the count is not a price anybody agreed to.
+            // Staff move it to the current Price first.
+            if (! in_array($priceId, array_filter([$feature->stripe_price_monthly_id, $feature->stripe_price_annual_id]), true)) {
+                Log::warning('billing.quantity_old_price', ['subscription_id' => $row->id, 'feature_id' => $feature->id]);
+
+                return $answer(true, false, $quantity, $from, 'old_price');
+            }
 
             if ($from === $quantity) {
                 return $answer(true, false, $quantity, $from, null);
