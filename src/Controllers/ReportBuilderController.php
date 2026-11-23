@@ -787,45 +787,52 @@ class ReportBuilderController extends \App\Http\Controllers\Controller
     private function getAllDatabaseTables()
     {
         try {
+            // The schema builder lists tables on every driver (MySQL, MariaDB,
+            // SQLite, Postgres): `SHOW TABLES` was MySQL-only, so the builder
+            // offered nothing on a SQLite development database.
+            $schema = DB::connection()->getSchemaBuilder();
+            $tableNames = method_exists($schema, 'getTableListing')
+                ? $schema->getTableListing(schemaQualified: false)
+                : $this->tablesViaShowTables();
 
-            // Use the simplest and most reliable method - SHOW TABLES
-            $databaseName = DB::connection()->getDatabaseName();
-
-            $tables = DB::select('SHOW TABLES');
-            if (!empty($tables)) {
-
-                // Determine the property name from the first table
-                $firstTable = $tables[0];
-
-
-                $propertyName = 'Tables_in_' . strtolower($databaseName);
-
-                // If the property doesn't exist, try to find the first property
-                if (!property_exists($firstTable, $propertyName)) {
-                    $vars = get_object_vars($firstTable);
-                    if (!empty($vars)) {
-                        $propertyName = array_key_first($vars);
-                    } else {
-                        Log::warning('No properties found in table object');
-                        return [];
-                    }
-                }
-
-                $tableNames = array_map(function ($table) use ($propertyName) {
-                    return $table->$propertyName;
-                }, $tables);
-
-
-                return $this->schemaPolicy()->filterTables($tableNames);
+            if (empty($tableNames)) {
+                Log::warning('No tables found in the database');
+                return [];
             }
 
-            Log::warning('No tables found using SHOW TABLES');
-            return [];
+            return $this->schemaPolicy()->filterTables($tableNames);
         } catch (\Exception $e) {
             Log::error('Error getting database tables: ' . $e->getMessage());
             Log::error('Stack trace: ' . $e->getTraceAsString());
             return [];
         }
+    }
+
+    /**
+     * `SHOW TABLES`, for a framework without Schema::getTableListing() (MySQL only).
+     *
+     * @return array<int, string>
+     */
+    private function tablesViaShowTables()
+    {
+        $databaseName = DB::connection()->getDatabaseName();
+        $tables = DB::select('SHOW TABLES');
+        if (empty($tables)) {
+            return [];
+        }
+
+        $propertyName = 'Tables_in_' . strtolower($databaseName);
+        if (!property_exists($tables[0], $propertyName)) {
+            $vars = get_object_vars($tables[0]);
+            if (empty($vars)) {
+                return [];
+            }
+            $propertyName = array_key_first($vars);
+        }
+
+        return array_map(function ($table) use ($propertyName) {
+            return $table->$propertyName;
+        }, $tables);
     }
 
     /**
