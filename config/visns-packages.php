@@ -2211,6 +2211,15 @@ return [
             | a charge. The package never names a host model.
             */
             'billable' => null,
+
+            /*
+            | OPTIONAL: a class implementing
+            | Visnsstudio\VisnsPackages\Contracts\BillingQuantityResolver, for
+            | features priced per unit (per number, per seat). Checkout sends
+            | its count; Services\Billing\Quantities::sync() keeps the live
+            | subscription on it. Null = every feature is a flat quantity of 1.
+            */
+            'quantity' => null,
         ],
 
         'tables' => [

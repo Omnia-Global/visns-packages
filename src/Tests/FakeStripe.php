@@ -210,6 +210,7 @@ class FakeStripe implements ClientInterface
                 'data' => [[
                     'id' => 'si_' . substr(md5($id), 0, 10),
                     'object' => 'subscription_item',
+                    'quantity' => 1,
                     'current_period_end' => $periodEnd,
                     'price' => ['id' => $price, 'object' => 'price', 'product' => $product, 'recurring' => ['interval' => 'month']],
                 ]],
@@ -294,6 +295,18 @@ class FakeStripe implements ClientInterface
 
             if (($params['mode'] ?? null) === 'subscription' && empty($params['line_items'][0]['price']) && empty($params['line_items'][0]['price_data'])) {
                 return 'A subscription-mode Checkout Session needs at least one recurring Price.';
+            }
+        }
+
+        if ($request['method'] === 'post' && preg_match('#^/v1/subscription_items/[^/]+$#', $request['path'])) {
+            if (array_key_exists('quantity', $params) && (! is_numeric($params['quantity']) || (int) $params['quantity'] < 0)) {
+                return 'Invalid integer: quantity.';
+            }
+
+            $proration = $params['proration_behavior'] ?? null;
+
+            if ($proration !== null && ! in_array($proration, ['create_prorations', 'none', 'always_invoice'], true)) {
+                return 'Invalid proration_behavior.';
             }
         }
 

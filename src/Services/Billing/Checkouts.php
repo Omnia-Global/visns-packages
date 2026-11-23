@@ -15,7 +15,8 @@ use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 /**
  * Starts a hosted Checkout for one feature, and answers the success-page poll.
  *
- * The session is `mode: subscription` with one Price, our checkout id as
+ * The session is `mode: subscription` with one Price (quantity from
+ * Quantities::for(): the host's count for a per-unit feature, else 1), our checkout id as
  * `client_reference_id`, the GST rate as the subscription's default tax rate
  * and NO `payment_method_types`: which methods are offered (card, BECS direct
  * debit) is set in the Dashboard, not here.
@@ -36,6 +37,7 @@ class Checkouts
         private BillingCustomers $customers,
         private Entitlements $entitlements,
         private Fulfilment $fulfilment,
+        private Quantities $quantities,
     ) {
     }
 
@@ -109,7 +111,8 @@ class Checkouts
         $params = [
             'mode' => 'subscription',
             'customer' => $customer->stripe_customer_id,
-            'line_items' => [['price' => $priceId, 'quantity' => 1]],
+            // Per-unit features carry the host's count (Quantities); flat ones 1.
+            'line_items' => [['price' => $priceId, 'quantity' => $this->quantities->for($billable, $feature)]],
             'success_url' => $this->withSessionPlaceholder($successUrl),
             'cancel_url' => $cancelUrl,
             'client_reference_id' => (string) $checkout->id,
