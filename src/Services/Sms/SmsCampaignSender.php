@@ -168,6 +168,17 @@ class SmsCampaignSender
         // for a request made a minute ago.
         $this->attempted = false;
 
+        // Scheduled campaigns whose time has come become `sending` here, so
+        // dueQuery() below picks them up in this same run (one past its grace
+        // is paused instead - see SmsCampaign::promoteDue). Inside the lock, so
+        // two runs cannot both promote and both stamp. Guarded: a failure to
+        // promote must not stop the campaigns already sending.
+        try {
+            SmsCampaign::promoteDue();
+        } catch (\Throwable $e) {
+            Log::warning('sms.campaign schedule_failed', ['error' => get_class($e)]);
+        }
+
         foreach (SmsCampaign::dueQuery()->get() as $campaign) {
             if ($budget <= 0) {
                 break;

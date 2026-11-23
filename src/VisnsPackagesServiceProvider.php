@@ -1723,6 +1723,10 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                     SmsCampaignController::class,
                     'pause',
                 ])->whereNumber('id');
+                Route::post($base . '/campaigns/{id}/unschedule', [
+                    SmsCampaignController::class,
+                    'unschedule',
+                ])->whereNumber('id');
                 Route::post($base . '/campaigns/{id}/cancel', [
                     SmsCampaignController::class,
                     'cancel',

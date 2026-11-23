@@ -61,6 +61,9 @@ abstract class MessagingTestCase extends TestCase
             // path is exactly the one it was without the table.
             '2025_01_01_000020_create_oauth_connections_table.php',
             '2026_10_14_100000_add_client_scope_to_sms_tables.php',
+
+            // 4.24.0: scheduled campaigns.
+            '2026_11_24_100000_add_scheduled_at_to_sms_campaigns_table.php',
         ] as $migration) {
             $this->runPackageMigration($migration);
         }

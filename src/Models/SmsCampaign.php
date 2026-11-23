@@ -3,14 +3,17 @@
 namespace Visnsstudio\VisnsPackages\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Log;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
+use Visnsstudio\VisnsPackages\Support\SmsCampaignSchedule;
 
 /**
  * One bulk send.
  *
- * The five statuses are the whole state machine and the controller is the only
+ * The six statuses are the whole state machine and the controller is the only
  * thing that moves between them by hand; the sender moves `sending` to
- * `completed` (nothing left to do) and to `paused` (nothing can be sent). Every
+ * `completed` (nothing left to do) and to `paused` (nothing can be sent), and
+ * `scheduled` to `sending` when its time comes (promoteDue()). Every
  * illegal transition is refused with a sentence rather than silently ignored -
  * a campaign that answered 200 to "start" and did not start would be the worst
  * available behaviour on a screen whose whole job is to say what is happening.
@@ -25,6 +28,13 @@ class SmsCampaign extends Model
 {
     /** Built, not started. The only status a campaign may be deleted in. */
     public const STATUS_DRAFT = 'draft';
+
+    /**
+     * Waiting for its time; nothing sent yet (4.24.0). `scheduled_at` says
+     * when. Its recipients stay `pending`, and it can be unscheduled back to a
+     * draft, sent now, rescheduled or cancelled.
+     */
+    public const STATUS_SCHEDULED = 'scheduled';
 
     /** The scheduled command is working through it. */
     public const STATUS_SENDING = 'sending';
@@ -44,6 +54,7 @@ class SmsCampaign extends Model
      */
     public const OPEN_STATUSES = [
         self::STATUS_DRAFT,
+        self::STATUS_SCHEDULED,
         self::STATUS_SENDING,
         self::STATUS_PAUSED,
     ];
@@ -57,6 +68,7 @@ class SmsCampaign extends Model
         'skipped' => 'integer',
         'started_at' => 'datetime',
         'completed_at' => 'datetime',
+        'scheduled_at' => 'datetime',
     ];
 
     public function getTable()
@@ -91,8 +103,9 @@ class SmsCampaign extends Model
     /**
      * Is this campaign still going to text anybody?
      *
-     * Draft, sending and paused all answer yes - a paused campaign is one press
-     * away from resuming, and a draft is one press away from starting. Completed
+     * Draft, scheduled, sending and paused all answer yes - a paused campaign is
+     * one press away from resuming, a draft is one press away from starting,
+     * and a scheduled one will start by itself. Completed
      * and cancelled answer no. Deliberately NOT "is it sending right now": that
      * question has a status of its own and reading `isActive()` as though it
      * meant that is how a paused campaign gets quietly deleted.
@@ -185,5 +198,85 @@ class SmsCampaign extends Model
             ->orderByRaw('CASE WHEN started_at IS NULL THEN 1 ELSE 0 END')
             ->orderBy('started_at')
             ->orderBy('id');
+    }
+
+    /**
+     * Move every scheduled campaign whose time has come.
+     *
+     * Called by the sender at the start of every run, inside its lock and
+     * before dueQuery(), so a campaign promoted here is sent in the same run.
+     *
+     * A campaign found more than `messaging.bulk.schedule_grace_minutes` late
+     * (the server was down, the scheduler stopped) is NOT sent: it is paused
+     * with a sentence saying so. A reminder that arrives hours after the
+     * appointment it was reminding somebody of is worse than one never sent,
+     * and the decision to send it anyway belongs to a person pressing Resume.
+     *
+     * `scheduled_at` is left on a promoted campaign as the record of what was
+     * asked for; `started_at` says when it actually began.
+     *
+     * Never throws: one campaign's problem is logged and the rest are still
+     * promoted. Returns what happened, keyed by campaign id.
+     *
+     * @return array<int, string> campaign id => 'started' | 'missed'
+     */
+    public static function promoteDue(): array
+    {
+        if (! SmsCampaignSchedule::available()) {
+            return [];
+        }
+
+        $now = now();
+        $lateBefore = $now->copy()->subMinutes(SmsCampaignSchedule::graceMinutes());
+        $done = [];
+
+        $due = static::query()
+            ->where('status', self::STATUS_SCHEDULED)
+            ->whereNotNull('scheduled_at')
+            ->where('scheduled_at', '<=', $now)
+            ->orderBy('scheduled_at')
+            ->orderBy('id')
+            ->get();
+
+        foreach ($due as $campaign) {
+            try {
+                if ($campaign->scheduled_at->lt($lateBefore)) {
+                    $campaign->forceFill([
+                        'status' => self::STATUS_PAUSED,
+                        'last_error' => SmsCampaignSchedule::missedSentence($campaign->scheduled_at),
+                    ])->save();
+
+                    $done[$campaign->id] = 'missed';
+
+                    Log::info('sms.campaign schedule_missed', [
+                        'campaign_id' => $campaign->id,
+                        'line_id' => $campaign->line_id,
+                    ]);
+
+                    continue;
+                }
+
+                $campaign->forceFill([
+                    'status' => self::STATUS_SENDING,
+                    'started_at' => $campaign->started_at ?? $now,
+                    'last_error' => null,
+                ])->save();
+
+                $done[$campaign->id] = 'started';
+
+                Log::info('sms.campaign schedule_started', [
+                    'campaign_id' => $campaign->id,
+                    'line_id' => $campaign->line_id,
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('sms.campaign schedule_failed', [
+                    'campaign_id' => $campaign->id,
+                    'line_id' => $campaign->line_id,
+                    'error' => get_class($e),
+                ]);
+            }
+        }
+
+        return $done;
     }
 }

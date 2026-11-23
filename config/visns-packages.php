@@ -1897,6 +1897,24 @@ return [
             'max_recipients' => 500,
 
             /*
+            | Scheduling (4.24.0): a campaign may be set to start at a chosen
+            | time instead of now. The furthest ahead a time may be, in days. A
+            | list imported today and sent in four months is a list of people
+            | some of whom have since opted out or moved on - the opt-out
+            | register is still checked at send time, but the rest is not.
+            */
+            'schedule_max_days' => 90,
+
+            /*
+            | How late, in minutes, a scheduled campaign may still start. One
+            | found later than this (the server was down, the scheduler
+            | stopped) is PAUSED with a sentence instead of sent: a reminder
+            | that lands hours after the thing it reminds somebody of is worse
+            | than one never sent, and sending it anyway is a person's call.
+            */
+            'schedule_grace_minutes' => 60,
+
+            /*
             | Appended to every rendered body unless it is already in there - see
             | `footer_required`. The unsubscribe instruction IS the compliance
             | requirement; it is snapshotted onto the campaign at create time so

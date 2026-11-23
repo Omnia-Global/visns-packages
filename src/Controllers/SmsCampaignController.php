@@ -13,6 +13,7 @@ use Visnsstudio\VisnsPackages\Services\Sms\SmsOptOuts;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 use Visnsstudio\VisnsPackages\Support\PhoneNumber;
 use Visnsstudio\VisnsPackages\Support\SchemaColumns;
+use Visnsstudio\VisnsPackages\Support\SmsCampaignSchedule;
 use Visnsstudio\VisnsPackages\Support\SmsPayload;
 
 /**
@@ -181,6 +182,10 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
                 'footer' => $this->footer(),
                 'footer_required' => (bool) ModuleConfig::get('messaging.bulk.footer_required', true),
                 'max_body_length' => $this->maxBodyLength(),
+                // What a "send later" picker may offer (4.24.0): the zone the
+                // times are in and the earliest/latest values, already in
+                // `Y-m-d\TH:i`, so a browser never does date arithmetic.
+                'schedule' => SmsCampaignSchedule::window(),
             ],
         ]);
     }
@@ -348,18 +353,35 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
     }
 
     /**
-     * Start, or resume.
+     * Start, resume, send a scheduled campaign now - or, with `send_at`,
+     * schedule it.
      *
      * `started_at` is stamped ONCE. A resume after a pause keeps the original,
      * because "when did this campaign begin" has one answer and a screen showing
      * the time somebody pressed resume would be answering a question nobody
      * asked.
+     *
+     * `send_at` (4.24.0) is the wall clock `Y-m-d\TH:i` in the app's timezone -
+     * what an `<input type="datetime-local">` posts. Only a draft or an
+     * already-scheduled campaign takes one: a paused campaign has sent part of
+     * its list, and holding the rest until a later time is a resume somebody
+     * has not pressed yet. See Support\SmsCampaignSchedule for the rules.
      */
     public function start(Request $request, $id)
     {
         $campaign = $this->campaign($request, $id);
 
-        if (! in_array($campaign->status, [SmsCampaign::STATUS_DRAFT, SmsCampaign::STATUS_PAUSED], true)) {
+        $sendAt = $request->input('send_at');
+
+        if ($sendAt !== null && ! (is_string($sendAt) && trim($sendAt) === '')) {
+            return $this->schedule($campaign, $sendAt);
+        }
+
+        if (! in_array($campaign->status, [
+            SmsCampaign::STATUS_DRAFT,
+            SmsCampaign::STATUS_SCHEDULED,
+            SmsCampaign::STATUS_PAUSED,
+        ], true)) {
             return $this->refuseTransition($campaign, 'started');
         }
 
@@ -370,6 +392,28 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
             // somebody who has looked at it, and leaving the sentence up would
             // make a running campaign read as a broken one.
             'last_error' => null,
+        ] + $this->clearSchedule())->save();
+
+        return response()->json(['campaign' => SmsPayload::campaign($campaign->fresh(['line', 'user']))]);
+    }
+
+    /**
+     * Put a scheduled campaign back to a draft, keeping everything else.
+     *
+     * The way to delete one, too: delete stays drafts-only, so a campaign
+     * somebody is waiting on cannot vanish with one press.
+     */
+    public function unschedule(Request $request, $id)
+    {
+        $campaign = $this->campaign($request, $id);
+
+        if ($campaign->status !== SmsCampaign::STATUS_SCHEDULED) {
+            return $this->refuseTransition($campaign, 'unscheduled');
+        }
+
+        $campaign->forceFill([
+            'status' => SmsCampaign::STATUS_DRAFT,
+            'scheduled_at' => null,
         ])->save();
 
         return response()->json(['campaign' => SmsPayload::campaign($campaign->fresh(['line', 'user']))]);
@@ -487,6 +531,15 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
     {
         $campaign = $this->campaign($request, $id);
 
+        if ($campaign->status === SmsCampaign::STATUS_SCHEDULED) {
+            // Nothing has been sent, so "what it has already sent is a record"
+            // would be untrue; the way out is one press away.
+            return $this->refuse(
+                'status',
+                'Only a draft can be deleted. Unschedule this campaign first, then delete it.'
+            );
+        }
+
         if ($campaign->status !== SmsCampaign::STATUS_DRAFT) {
             return $this->refuse(
                 'status',
@@ -510,6 +563,64 @@ class SmsCampaignController extends \App\Http\Controllers\Controller
     /* ---------------------------------------------------------------------
      | Internals
      | ------------------------------------------------------------------- */
+
+    /**
+     * The `send_at` half of start(): validate, then mark it scheduled.
+     *
+     * `started_at` stays null - nothing has started - and `last_error` is
+     * cleared like any other press that overrules what came before.
+     */
+    private function schedule(SmsCampaign $campaign, $sendAt)
+    {
+        if ($campaign->status === SmsCampaign::STATUS_PAUSED) {
+            return $this->refuse(
+                'send_at',
+                'A paused campaign is already part sent: resume it instead of scheduling it.'
+            );
+        }
+
+        if (! in_array($campaign->status, [SmsCampaign::STATUS_DRAFT, SmsCampaign::STATUS_SCHEDULED], true)) {
+            return $this->refuseTransition($campaign, 'scheduled');
+        }
+
+        if (! SmsCampaignSchedule::available()) {
+            // The package is newer than the database: 4.24.0's migration has
+            // not run, so there is nowhere to keep the time.
+            return $this->refuse('send_at', 'Scheduling is not available yet. Send it now, or try again later.');
+        }
+
+        $at = SmsCampaignSchedule::parse($sendAt);
+
+        if ($at === null) {
+            return $this->refuse('send_at', SmsCampaignSchedule::BAD_FORMAT);
+        }
+
+        $problem = SmsCampaignSchedule::problem($at);
+
+        if ($problem !== null) {
+            return $this->refuse('send_at', $problem);
+        }
+
+        $campaign->forceFill([
+            'status' => SmsCampaign::STATUS_SCHEDULED,
+            'scheduled_at' => $at,
+            'last_error' => null,
+        ])->save();
+
+        return response()->json(['campaign' => SmsPayload::campaign($campaign->fresh(['line', 'user']))]);
+    }
+
+    /**
+     * `scheduled_at => null` for a start, when the column exists - so a start
+     * on a database that has not run 4.24.0's migration writes exactly what it
+     * always did.
+     *
+     * @return array<string, null>
+     */
+    private function clearSchedule(): array
+    {
+        return SmsCampaignSchedule::available() ? ['scheduled_at' => null] : [];
+    }
 
     /**
      * The imported rows, IN THE ORDER THEY WERE SENT.

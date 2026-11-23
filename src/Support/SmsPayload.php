@@ -157,6 +157,12 @@ class SmsPayload
             'started_at' => $campaign->started_at?->toIso8601String(),
             'completed_at' => $campaign->completed_at?->toIso8601String(),
             'created_at' => $campaign->created_at?->toIso8601String(),
+            // When it was asked to start (4.24.0), and the same time ready to
+            // print: `schedule` is null exactly when `scheduled_at` is. Left in
+            // place once the sender has started it, as the record of what was
+            // asked for - read `status` to know whether it is still waiting.
+            'scheduled_at' => $campaign->scheduled_at?->toIso8601String(),
+            'schedule' => SmsCampaignSchedule::describe($campaign->scheduled_at),
             // Kept, and kept meaning exactly what it always did, because a
             // front end is already reading it. What changed is that it now
             // knows about the interval and the daily allowance, so a campaign
