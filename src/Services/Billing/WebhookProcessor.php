@@ -34,6 +34,8 @@ class WebhookProcessor
         private StripeObjectGraph $graph,
         private BillingCustomers $customers,
         private StripeClientFactory $stripe,
+        private Billables $billables,
+        private Quantities $quantities,
     ) {
     }
 
@@ -146,7 +148,7 @@ class WebhookProcessor
             case 'customer.subscription.created':
             case 'customer.subscription.updated':
             case 'customer.subscription.deleted':
-                return $this->subscription((string) $objectId, $object, $ids);
+                return $this->subscription((string) $objectId, $object, $ids, $event->type !== 'customer.subscription.deleted');
 
             case 'invoice.paid':
             case 'invoice.payment_failed':
@@ -180,7 +182,7 @@ class WebhookProcessor
         return [BillingEvent::OUTCOME_IGNORED, $ids];
     }
 
-    private function subscription(string $subscriptionId, array $object, array $ids): array
+    private function subscription(string $subscriptionId, array $object, array $ids, bool $enforceQuantity = false): array
     {
         try {
             $row = $this->sync->byId($subscriptionId);
@@ -191,6 +193,14 @@ class WebhookProcessor
 
             // Gone at Stripe: the event's own copy is the last word there is.
             $row = $this->sync->apply(Subscription::constructFrom($object));
+        }
+
+        // A per-unit feature's quantity is the host's count, never the
+        // buyer's: a change made in the Customer Portal (or the Dashboard) is
+        // put back at once. Quantities::sync() writes only when it differs,
+        // so the update event our own write causes ends here.
+        if ($row && $enforceQuantity && ($feature = $row->feature) && ($billable = $this->billables->find($row->billable_type, (int) $row->billable_id))) {
+            $this->quantities->sync($billable, $feature);
         }
 
         return [$row ? BillingEvent::OUTCOME_APPLIED : BillingEvent::OUTCOME_IGNORED, $ids + ['subscription' => $subscriptionId] + $this->subscriptionIds($row)];

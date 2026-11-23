@@ -123,6 +123,26 @@ class BillingQuantitiesTest extends BillingTestCase
         $this->stripe->assertNotSent('POST', '/v1/subscription_items/*');
     }
 
+    public function test_a_quantity_the_buyer_changed_in_stripe_is_put_back_by_the_webhook(): void
+    {
+        [$client, $feature] = $this->subscribed();
+        StubQuantityResolver::$count = 2;
+        $this->subscriptions['sub_1']['items']['data'][0]['quantity'] = 5;
+
+        $this->stripe->on('POST', '/v1/subscription_items/*', function ($p) {
+            $this->subscriptions['sub_1']['items']['data'][0]['quantity'] = (int) $p['quantity'];
+
+            return $this->subscriptions['sub_1']['items']['data'][0];
+        });
+
+        $this->webhook('customer.subscription.updated', $this->subscriptions['sub_1'])->assertOk();
+        $this->assertSame(2, $this->subscriptions['sub_1']['items']['data'][0]['quantity']);
+
+        // The update our own write causes changes nothing more.
+        $this->webhook('customer.subscription.updated', $this->subscriptions['sub_1'], ['id' => 'evt_second'])->assertOk();
+        $this->assertSame(1, $this->stripe->count('POST', '/v1/subscription_items/*'));
+    }
+
     private function subscribed($client = null, $feature = null): array
     {
         $client ??= $this->client();
