@@ -38,6 +38,12 @@ abstract class EmailCampaignTestCase extends TestCase
 
     protected string $broadcastStatus = 'sent';
 
+    /** @var array<string, array<string, mixed>> Resend's templates, id => full template */
+    protected array $resendTemplates = [];
+
+    /** How many templates one `GET templates` page answers. */
+    protected int $templatePageSize = 100;
+
     protected function defineEnvironment($app)
     {
         parent::defineEnvironment($app);
@@ -52,6 +58,7 @@ abstract class EmailCampaignTestCase extends TestCase
         $app['config']->set('visns-packages.email_campaigns.brand.address', '1 Hay St, Perth WA 6000');
         // No pacing in tests: the sleep is replaced, but keep the budget roomy.
         $app['config']->set('visns-packages.email_campaigns.sync.per_second', 1000);
+        $app['config']->set('visns-packages.email_campaigns.import.pace_ms', 0);
     }
 
     protected function defineDatabaseMigrations()
@@ -130,6 +137,28 @@ abstract class EmailCampaignTestCase extends TestCase
 
             if ($path === 'emails') {
                 return Http::response(['id' => 'em_1']);
+            }
+
+            if ($path === 'templates' && $method === 'GET') {
+                parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+                $ids = array_keys($this->resendTemplates);
+                $from = isset($query['after']) ? array_search($query['after'], $ids, true) + 1 : 0;
+                $size = min((int) ($query['limit'] ?? 20), $this->templatePageSize);
+                $page = array_slice($ids, $from, $size);
+
+                return Http::response([
+                    'object' => 'list',
+                    'has_more' => $from + $size < count($ids),
+                    'data' => array_map(fn ($id) => array_intersect_key($this->resendTemplates[$id], array_flip(['id', 'name', 'alias', 'status', 'created_at', 'updated_at'])), $page),
+                ]);
+            }
+
+            if (preg_match('#^templates/([^/]+)$#', $path, $m) && $method === 'GET') {
+                $template = $this->resendTemplates[urldecode($m[1])] ?? null;
+
+                return $template
+                    ? Http::response(['object' => 'template'] + $template)
+                    : Http::response(['message' => 'Template not found'], 404);
             }
 
             if (preg_match('#^segments/#', $path) && $method === 'DELETE') {

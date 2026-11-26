@@ -2132,6 +2132,12 @@ return [
             'seconds' => 45,
         ],
 
+        // Import from Resend: milliseconds between Resend calls (Resend
+        // allows 10 requests a second a team).
+        'import' => [
+            'pace_ms' => 200,
+        ],
+
         'max_list_size' => 20000,
 
         'tables' => [

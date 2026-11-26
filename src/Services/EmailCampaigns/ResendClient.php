@@ -115,6 +115,29 @@ class ResendClient
         return $this->send('post', 'emails', $parameters);
     }
 
+    /**
+     * One page of the team's templates (summaries only: id, name, status,
+     * updated_at). Page on with `$after` = the last id while `has_more`.
+     */
+    public function listTemplates(?string $after = null): ResendResult
+    {
+        $query = ['limit' => 100];
+
+        if ($after !== null && $after !== '') {
+            $query['after'] = $after;
+        }
+
+        // As the query ARRAY: a query string written into the path is
+        // replaced by the client's (empty) query option and lost.
+        return $this->send('get', 'templates', $query);
+    }
+
+    /** One template in full: html, text, subject, variables. */
+    public function getTemplate(string $id): ResendResult
+    {
+        return $this->send('get', 'templates/' . rawurlencode($id));
+    }
+
     private function send(string $method, string $path, array $body = []): ResendResult
     {
         if (! $this->configured()) {
@@ -123,7 +146,8 @@ class ResendClient
 
         try {
             /** @var Response $response */
-            $response = $this->http()->{$method}($path, $method === 'get' ? [] : $body);
+            // For a GET, `$body` is the query string.
+            $response = $this->http()->{$method}($path, $body);
         } catch (\Throwable $e) {
             return ResendResult::failure(null, 'Resend could not be reached: ' . $e->getMessage());
         }

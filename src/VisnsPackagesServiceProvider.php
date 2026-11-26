@@ -1796,6 +1796,8 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                 Route::delete($base . '/lists/{id}', [EmailCampaignController::class, 'destroyList'])->whereNumber('id');
 
                 Route::post($base . '/templates', [EmailCampaignController::class, 'storeTemplate']);
+                Route::post($base . '/templates/import-resend', [EmailCampaignController::class, 'importResendTemplates'])
+                    ->middleware('throttle:6,1');
                 Route::delete($base . '/templates/{id}', [EmailCampaignController::class, 'destroyTemplate'])->whereNumber('id');
 
                 Route::post($base . '/images', [EmailCampaignController::class, 'uploadImage']);

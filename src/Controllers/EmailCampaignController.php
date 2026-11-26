@@ -20,6 +20,7 @@ use Visnsstudio\VisnsPackages\Services\EmailCampaigns\EmailContent;
 use Visnsstudio\VisnsPackages\Services\EmailCampaigns\EmailEditorHtml;
 use Visnsstudio\VisnsPackages\Services\EmailCampaigns\EmailListBuilder;
 use Visnsstudio\VisnsPackages\Services\EmailCampaigns\ResendClient;
+use Visnsstudio\VisnsPackages\Services\EmailCampaigns\ResendTemplateImport;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
 
 /**
@@ -103,7 +104,7 @@ class EmailCampaignController extends Controller
 
         if (! empty($data['template_id'])) {
             $template = EmailTemplate::query()->find((int) $data['template_id']);
-            $content = $template ? (array) $template->content : $content;
+            $content = $template ? self::templateContent((array) $template->content) : $content;
         }
 
         $campaign = EmailCampaign::create([
@@ -414,8 +415,35 @@ class EmailCampaignController extends Controller
                 // A block count means nothing for an editor email: null, not a number.
                 'blocks' => EmailContent::isEditor((array) $template->content) ? null : count((array) $template->content),
                 'updated_at' => $template->updated_at?->toIso8601String(),
+                // 'resend' when the row came from Import from Resend.
+                'source' => (((array) $template->content)['source']['provider'] ?? null) === ResendTemplateImport::PROVIDER
+                    ? ResendTemplateImport::PROVIDER
+                    : null,
             ])->values(),
         ]);
+    }
+
+    /**
+     * `POST {base}/templates/import-resend` — copy the team's Resend templates
+     * in (idempotent: see ResendTemplateImport). Not connected is a 422;
+     * Resend down is `200 {ok:false, reason}`.
+     */
+    public function importResendTemplates(Request $request, ResendTemplateImport $import): JsonResponse
+    {
+        if (! $this->resend->configured()) {
+            return $this->refuse('Resend is not connected (RESEND_KEY).');
+        }
+
+        $userId = $request->user()?->getAuthIdentifier();
+        $result = $import->run($userId === null ? null : (int) $userId);
+
+        if ($result['reason'] !== null) {
+            return response()->json(['ok' => false, 'reason' => $result['reason']]);
+        }
+
+        unset($result['reason']);
+
+        return response()->json(['ok' => true] + $result);
     }
 
     public function storeTemplate(Request $request): JsonResponse
@@ -643,6 +671,20 @@ class EmailCampaignController extends Controller
         }
 
         return EmailContent::storedEditor($raw, $this->editorHtml);
+    }
+
+    /**
+     * A template's content as a new campaign gets it. Editor content keeps
+     * its four keys only: an imported template's `source` and `subject` are
+     * the template's bookkeeping, not the campaign's.
+     *
+     * @return array<int|string, mixed>
+     */
+    private static function templateContent(array $content): array
+    {
+        return EmailContent::isEditor($content)
+            ? array_intersect_key($content, array_flip(['format', 'doc', 'html', 'text']))
+            : $content;
     }
 
     /** @return array<int, array<string, mixed>> */
