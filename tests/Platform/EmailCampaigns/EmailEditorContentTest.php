@@ -246,6 +246,58 @@ class EmailEditorContentTest extends EmailCampaignTestCase
         $this->assertSame($this->editorContent(), $campaign->fresh()->content);
     }
 
+    public function test_mode_round_trips_on_a_campaign_and_a_bad_mode_is_refused(): void
+    {
+        $campaign = $this->editorCampaign();
+        $post = fn (array $content) => $this->actingAs($this->manager())->postJson(self::BASE . '/campaigns/' . $campaign->id, ['content' => $content]);
+
+        $post(['format' => 'editor', 'doc' => null, 'html' => self::FIXTURE, 'text' => '', 'mode' => 'html'])->assertOk()
+            ->assertJsonPath('campaign.content.mode', 'html')
+            ->assertJsonPath('campaign.content.doc', null);
+        $this->assertSame(['format', 'doc', 'html', 'text', 'mode'], array_keys($campaign->fresh()->content));
+
+        $post($this->editorContent() + ['mode' => 'visual'])->assertOk()->assertJsonPath('campaign.content.mode', 'visual');
+
+        $post($this->editorContent() + ['mode' => 'code'])->assertStatus(422);
+        $post($this->editorContent() + ['mode' => ['html']])->assertStatus(422);
+        $this->assertSame('visual', $campaign->fresh()->content['mode']);
+
+        // No mode posted: stored exactly as before the HTML view existed.
+        $post($this->editorContent())->assertOk();
+        $this->assertSame(['format', 'doc', 'html', 'text'], array_keys($campaign->fresh()->content));
+    }
+
+    public function test_html_mode_content_with_no_text_sends_a_text_derived_from_the_html(): void
+    {
+        $campaign = $this->editorCampaign();
+
+        $this->actingAs($this->manager())->postJson(self::BASE . '/campaigns/' . $campaign->id, [
+            'content' => ['format' => 'editor', 'doc' => null, 'html' => self::FIXTURE, 'text' => '', 'mode' => 'html'],
+        ])->assertOk();
+
+        $this->actingAs($this->manager())->postJson(self::BASE . '/campaigns/' . $campaign->id . '/test')->assertOk();
+        $email = $this->sent('POST', 'emails');
+        $this->assertStringContainsString('Hello Dana', $email['text']);
+        $this->assertStringContainsString('Some bold text', $email['text']);
+
+        $this->actingAs($this->manager())->postJson(self::BASE . '/campaigns/' . $campaign->id . '/send')->assertOk();
+        $broadcast = $this->sent('POST', 'broadcasts');
+        $this->assertStringContainsString('Hello {{{contact.first_name|there}}}', $broadcast['text']);
+        $this->assertStringContainsString('Some bold text', $broadcast['text']);
+        $this->assertStringNotContainsString('<h1', $broadcast['text']);
+    }
+
+    public function test_a_campaign_from_a_template_keeps_its_mode(): void
+    {
+        $template = $this->actingAs($this->manager())->postJson(self::BASE . '/templates', [
+            'name' => 'Coded',
+            'content' => ['format' => 'editor', 'doc' => null, 'html' => self::FIXTURE, 'text' => '', 'mode' => 'html'],
+        ])->assertCreated();
+
+        $copy = $this->actingAs($this->manager())->postJson(self::BASE . '/campaigns', ['name' => 'From coded', 'template_id' => $template->json('template.id')])->assertCreated();
+        $this->assertSame('html', EmailCampaign::findOrFail($copy->json('campaign.id'))->content['mode']);
+    }
+
     /* -- configuration ---------------------------------------------------- */
 
     public function test_a_new_campaign_starts_in_the_configured_editor(): void

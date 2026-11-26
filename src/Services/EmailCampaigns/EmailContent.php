@@ -22,6 +22,14 @@ class EmailContent
 {
     public const FORMAT_EDITOR = 'editor';
 
+    /**
+     * Which view the person edits editor content in: the visual editor
+     * (`doc` + its html) or the html as code (`doc` null, `text` possibly
+     * empty: compose() derives the plain text from the html then). Absent on
+     * content saved before the HTML view existed.
+     */
+    public const MODES = ['visual', 'html'];
+
     /** Bytes of JSON a Tiptap document may take. */
     public const DOC_MAX_BYTES = 1000000;
 
@@ -64,6 +72,7 @@ class EmailContent
                 'content.doc' => ['nullable', 'array'],
                 'content.html' => ['required', 'string', 'max:' . self::HTML_MAX],
                 'content.text' => ['nullable', 'string', 'max:' . self::TEXT_MAX],
+                'content.mode' => ['nullable', 'string', Rule::in(self::MODES)],
             ];
         }
 
@@ -90,21 +99,29 @@ class EmailContent
     }
 
     /**
-     * Editor content as it is stored: the four keys and nothing else, the html
-     * cleaned (a document stays a document, the starter fragment a fragment).
+     * Editor content as it is stored: the four keys (plus `mode` when one was
+     * posted) and nothing else, the html cleaned (a document stays a
+     * document, the starter fragment a fragment).
      *
-     * @return array{format: string, doc: ?array, html: string, text: string}
+     * @return array{format: string, doc: ?array, html: string, text: string, mode?: string}
      */
     public static function storedEditor(array $raw, EmailEditorHtml $sanitiser): array
     {
         $html = (string) ($raw['html'] ?? '');
 
-        return [
+        $stored = [
             'format' => self::FORMAT_EDITOR,
             'doc' => is_array($raw['doc'] ?? null) ? $raw['doc'] : null,
             'html' => $sanitiser->isDocument($html) ? $sanitiser->clean($html) : $sanitiser->cleanFragment($html),
             'text' => (string) ($raw['text'] ?? ''),
         ];
+
+        // Only when posted, so content without one stores exactly as before.
+        if (in_array($raw['mode'] ?? null, self::MODES, true)) {
+            $stored['mode'] = $raw['mode'];
+        }
+
+        return $stored;
     }
 
     /**

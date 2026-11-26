@@ -234,7 +234,9 @@ class ResendTemplateImportTest extends EmailCampaignTestCase
         $created = $this->actingAs($this->manager())->postJson(self::BASE . '/campaigns', ['name' => 'From Resend', 'template_id' => $template->id])->assertCreated();
         $content = EmailCampaign::findOrFail($created->json('campaign.id'))->content;
 
-        $this->assertSame(['format', 'doc', 'html', 'text'], array_keys($content));
+        // No source/subject; an imported email opens as code (mode html).
+        $this->assertSame(['format', 'doc', 'html', 'text', 'mode'], array_keys($content));
+        $this->assertSame('html', $content['mode']);
         $this->assertSame($template->content['html'], $content['html']);
     }
 

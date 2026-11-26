@@ -216,4 +216,33 @@ class EmailTemplateEditTest extends EmailCampaignTestCase
         $this->assertSame(1, EmailTemplate::query()->count());
         $this->assertStringContainsString('Our own words', $template->fresh()->content['html']);
     }
+
+    public function test_mode_round_trips_and_the_import_bookkeeping_is_kept_with_it(): void
+    {
+        $source = ['provider' => 'resend', 'id' => 'tpl_1', 'updated_at' => '2026-11-01T00:00:00.000Z', 'hash' => hash('sha256', self::HTML)];
+        $template = $this->editorTemplate(['subject' => 'News for {first_name}', 'source' => $source]);
+        $html = '<html><body><table width="600"><tr><td><h1>Coded {first_name}</h1></td></tr></table></body></html>';
+
+        $this->actingAs($this->manager())->postJson($this->url($template), [
+            'content' => ['format' => 'editor', 'doc' => null, 'html' => $html, 'text' => '', 'mode' => 'html'],
+        ])->assertOk()
+            ->assertJsonPath('template.content.mode', 'html')
+            ->assertJsonPath('template.source', 'resend')
+            ->assertJsonPath('template.subject', 'News for {first_name}');
+
+        $stored = $template->fresh()->content;
+        $this->assertSame(['format', 'doc', 'html', 'text', 'mode', 'subject', 'source'], array_keys($stored));
+        $this->assertSame('html', $stored['mode']);
+        $this->assertSame($source, $stored['source']);
+        $this->assertNull($stored['doc']);
+
+        $this->actingAs($this->manager())->postJson($this->url($template), [
+            'content' => ['format' => 'editor', 'doc' => ['type' => 'doc', 'content' => []], 'html' => $html, 'text' => 'Coded', 'mode' => 'visual'],
+        ])->assertOk()->assertJsonPath('template.content.mode', 'visual');
+
+        $this->actingAs($this->manager())->postJson($this->url($template), [
+            'content' => ['format' => 'editor', 'html' => $html, 'mode' => 'code'],
+        ])->assertStatus(422);
+        $this->assertSame('visual', $template->fresh()->content['mode']);
+    }
 }

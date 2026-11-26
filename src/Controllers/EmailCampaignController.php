@@ -758,16 +758,27 @@ class EmailCampaignController extends Controller
 
     /**
      * A template's content as a new campaign gets it. Editor content keeps
-     * its four keys only: an imported template's `source` and `subject` are
-     * the template's bookkeeping, not the campaign's.
+     * its four keys (and `mode`, so a hand-coded email opens as code) only: an
+     * imported template's `source` and `subject` are the template's
+     * bookkeeping, not the campaign's.
      *
      * @return array<int|string, mixed>
      */
     private static function templateContent(array $content): array
     {
-        return EmailContent::isEditor($content)
-            ? array_intersect_key($content, array_flip(['format', 'doc', 'html', 'text']))
-            : $content;
+        if (! EmailContent::isEditor($content)) {
+            return $content;
+        }
+
+        $copy = array_intersect_key($content, array_flip(['format', 'doc', 'html', 'text', 'mode']));
+
+        // An imported (hand-built) email that was never given a mode is code:
+        // the campaign opens in the HTML view, never rebuilt by the visual editor.
+        if (! isset($copy['mode']) && isset($content['source'])) {
+            $copy['mode'] = 'html';
+        }
+
+        return $copy;
     }
 
     /** @return array<int, array<string, mixed>> */
