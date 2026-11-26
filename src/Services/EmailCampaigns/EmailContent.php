@@ -117,7 +117,7 @@ class EmailContent
     public static function editorStarter(array $brand): array
     {
         $logo = ($brand['logo_url'] ?? '') !== ''
-            ? '<p><img src="' . e($brand['logo_url']) . '" alt="' . e($brand['company'] ?? '') . '" style="display:block; max-height:40px; max-width:220px; border:0;"></p>'
+            ? '<p><img src="' . e($brand['logo_url']) . '" alt="' . e($brand['company'] ?? '') . '" width="160" style="display:block; max-width:160px; height:auto; border:0;"></p>'
             : '';
 
         return [
