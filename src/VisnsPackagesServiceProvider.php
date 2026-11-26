@@ -1774,6 +1774,8 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                 Route::get($base, [EmailCampaignController::class, 'index']);
                 Route::get($base . '/groups', [EmailCampaignController::class, 'groups']);
                 Route::get($base . '/templates', [EmailCampaignController::class, 'templates']);
+                Route::get($base . '/templates/{id}', [EmailCampaignController::class, 'showTemplate'])->whereNumber('id');
+                Route::post($base . '/templates/{id}/preview', [EmailCampaignController::class, 'previewTemplate'])->whereNumber('id');
                 Route::get($base . '/campaigns/{id}', [EmailCampaignController::class, 'show'])->whereNumber('id');
                 Route::post($base . '/campaigns/{id}/preview', [EmailCampaignController::class, 'preview'])->whereNumber('id');
                 Route::get($base . '/lists/{id}', [EmailCampaignController::class, 'showList'])->whereNumber('id');
@@ -1798,6 +1800,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                 Route::post($base . '/templates', [EmailCampaignController::class, 'storeTemplate']);
                 Route::post($base . '/templates/import-resend', [EmailCampaignController::class, 'importResendTemplates'])
                     ->middleware('throttle:6,1');
+                Route::post($base . '/templates/{id}', [EmailCampaignController::class, 'updateTemplate'])->whereNumber('id');
                 Route::delete($base . '/templates/{id}', [EmailCampaignController::class, 'destroyTemplate'])->whereNumber('id');
 
                 Route::post($base . '/images', [EmailCampaignController::class, 'uploadImage']);

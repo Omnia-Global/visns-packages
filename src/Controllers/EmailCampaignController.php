@@ -466,6 +466,75 @@ class EmailCampaignController extends Controller
         return response()->json(['template' => ['id' => $template->id, 'name' => $template->name], 'message' => 'Saved as a template.'], 201);
     }
 
+    /** `GET {base}/templates/{id}` — one template, to edit or look at. */
+    public function showTemplate(int $id): JsonResponse
+    {
+        return response()->json(['template' => $this->templateDetail(EmailTemplate::query()->findOrFail($id))]);
+    }
+
+    /**
+     * `POST {base}/templates/{id}` — rename it and/or replace its content,
+     * cleaned exactly as a campaign's. An imported template keeps its
+     * `source` and `subject` (the browser never sends them, and they are never
+     * taken from the request): with its html changed, `source.hash` no longer
+     * matches, so Import from Resend leaves the edited template alone.
+     */
+    public function updateTemplate(Request $request, int $id): JsonResponse
+    {
+        $template = EmailTemplate::query()->findOrFail($id);
+
+        $data = $request->validate([
+            'name' => ['sometimes', 'required', 'string', 'max:191'],
+        ] + EmailContent::rules($request->input('content'), false));
+
+        if (array_key_exists('content', $data)) {
+            // The whole content, not the validated keys — see update().
+            $content = $this->postedContent($request);
+
+            if ($content instanceof JsonResponse) {
+                return $content;
+            }
+
+            $stored = (array) $template->content;
+
+            if (EmailContent::isEditor($content)) {
+                // Bookkeeping the import wrote, carried over untouched.
+                foreach (['subject', 'source'] as $key) {
+                    if (EmailContent::isEditor($stored) && array_key_exists($key, $stored)) {
+                        $content[$key] = $stored[$key];
+                    }
+                }
+            } elseif (is_array($stored['source'] ?? null)) {
+                // Blocks cannot carry `source`: the import would lose track of
+                // the template and copy it in a second time.
+                return $this->refuse('A template imported from Resend stays in the email editor.');
+            }
+
+            $data['content'] = $content;
+        }
+
+        $template->fill($data)->save();
+
+        return response()->json(['template' => $this->templateDetail($template->fresh())]);
+    }
+
+    /** `POST {base}/templates/{id}/preview` — the template as a reader would see it, sample filled. */
+    public function previewTemplate(Request $request, int $id): JsonResponse
+    {
+        $template = EmailTemplate::query()->findOrFail($id);
+        $stored = (array) $template->content;
+        // Unsaved content from the editor, or what is stored; compose() cleans
+        // editor html on read either way.
+        $content = $request->has('content') ? (array) $request->input('content', []) : $stored;
+        $subject = (string) (self::templateSubject($stored) ?? '');
+        $sample = $this->sample($request);
+
+        return response()->json([
+            'html' => $this->renderer->compose($content, ['subject' => $subject, 'preview_text' => null], $sample)['html'],
+            'subject' => $this->renderer->line($subject, $sample),
+        ]);
+    }
+
     public function destroyTemplate(int $id): JsonResponse
     {
         EmailTemplate::query()->findOrFail($id)->delete();
@@ -574,6 +643,34 @@ class EmailCampaignController extends Controller
             'synced_at' => $list->synced_at?->toIso8601String(),
             'sync_error' => $list->sync_error,
         ];
+    }
+
+    /** @return array<string, mixed> one template as its editor reads it */
+    private function templateDetail(EmailTemplate $template): array
+    {
+        $content = (array) $template->content;
+        $editor = EmailContent::isEditor($content);
+
+        return [
+            'id' => $template->id,
+            'name' => $template->name,
+            'content' => $content,
+            'format' => $editor ? EmailContent::FORMAT_EDITOR : 'blocks',
+            // 'resend' when the row came from Import from Resend.
+            'source' => $editor && (($content['source']['provider'] ?? null) === ResendTemplateImport::PROVIDER)
+                ? ResendTemplateImport::PROVIDER
+                : null,
+            'subject' => self::templateSubject($content),
+            'updated_at' => $template->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /** An imported template's subject, else null. */
+    private static function templateSubject(array $content): ?string
+    {
+        $subject = EmailContent::isEditor($content) ? ($content['subject'] ?? null) : null;
+
+        return is_scalar($subject) && (string) $subject !== '' ? (string) $subject : null;
     }
 
     /** @return array<string, string> the merge-tag sample for previews and tests */
