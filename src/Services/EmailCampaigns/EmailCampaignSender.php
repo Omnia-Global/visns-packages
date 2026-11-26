@@ -92,10 +92,8 @@ class EmailCampaignSender
             return ['ok' => false, 'message' => 'This campaign cannot be sent yet.', 'blockers' => $blockers];
         }
 
-        $blocks = (array) $campaign->content;
         $meta = ['subject' => $campaign->subject, 'preview_text' => $campaign->preview_text];
-        $html = $this->renderer->render($blocks, $meta);
-        $text = $this->renderer->text($blocks);
+        ['html' => $html, 'text' => $text] = $this->renderer->compose((array) $campaign->content, $meta);
 
         $created = $this->resend->createBroadcast(array_filter([
             'segment_id' => $campaign->list->resend_segment_id,
@@ -181,14 +179,19 @@ class EmailCampaignSender
             return ['ok' => false, 'message' => 'Set who it is from before sending a test.'];
         }
 
-        $blocks = (array) $campaign->content;
+        $email = $this->renderer->compose(
+            (array) $campaign->content,
+            ['subject' => $campaign->subject, 'preview_text' => $campaign->preview_text],
+            $sample,
+        );
+
         $result = $this->resend->sendEmail([
             'from' => $this->from($campaign),
             'to' => [$to],
             'subject' => '[Test] ' . ($campaign->subject ?: $campaign->name),
             'reply_to' => $this->replyTo($campaign),
-            'html' => $this->renderer->render($blocks, ['subject' => $campaign->subject, 'preview_text' => $campaign->preview_text], $sample),
-            'text' => $this->renderer->text($blocks, $sample),
+            'html' => $email['html'],
+            'text' => $email['text'],
         ]);
 
         return $result->ok
@@ -218,17 +221,7 @@ class EmailCampaignSender
 
     private function hasContent(EmailCampaign $campaign): bool
     {
-        foreach ((array) $campaign->content as $block) {
-            $type = $block['type'] ?? null;
-
-            if (($type === 'heading' && trim((string) ($block['text'] ?? '')) !== '')
-                || ($type === 'text' && trim(strip_tags((string) ($block['html'] ?? ''))) !== '')
-                || ($type === 'columns' && trim(strip_tags((string) ($block['left'] ?? '') . ($block['right'] ?? ''))) !== '')) {
-                return true;
-            }
-        }
-
-        return false;
+        return $this->renderer->hasContent((array) $campaign->content);
     }
 
     /** @return array{ok: bool, message: string} */

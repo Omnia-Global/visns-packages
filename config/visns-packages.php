@@ -2094,6 +2094,15 @@ return [
         */
         'contact_source' => null,
 
+        /*
+        | The editor a NEW campaign opens in: 'blocks' (the block editor, whose
+        | content is a list of blocks) or 'editor' (Resend's React Email editor,
+        | whose content is {format: "editor", doc, html, text}). Existing
+        | campaigns and templates keep the format they were saved in; both
+        | render and send.
+        */
+        'editor' => env('EMAIL_CAMPAIGNS_EDITOR', 'blocks'),
+
         // The house look every campaign is wrapped in. `address` is required by
         // anti-spam law in most places (the Spam Act asks for accurate sender
         // identification) and is printed in every footer.

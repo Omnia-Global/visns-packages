@@ -33,6 +33,13 @@ class EmailCampaignRenderer
 
     private const ALLOWED_TAGS = ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'a', 'ul', 'ol', 'li', 'span'];
 
+    private EmailEditorHtml $editorHtml;
+
+    public function __construct(?EmailEditorHtml $editorHtml = null)
+    {
+        $this->editorHtml = $editorHtml ?? new EmailEditorHtml();
+    }
+
     /**
      * @param  array<int, array<string, mixed>>  $blocks
      * @param  array{preview_text?: ?string, subject?: ?string}  $meta
@@ -49,12 +56,139 @@ class EmailCampaignRenderer
             }
         }
 
-        $preview = trim((string) ($meta['preview_text'] ?? ''));
-        $unsubscribe = $sample === null ? '{{{RESEND_UNSUBSCRIBE_URL}}}' : '#';
-
         $header = $brand['logo_url'] !== ''
             ? '<img src="' . e($brand['logo_url']) . '" alt="' . e($brand['company']) . '" style="display:block; max-height:40px; max-width:220px; border:0;">'
             : '<span style="font-size:20px; font-weight:700; color:' . $brand['ink'] . ';">' . e($brand['company']) . '</span>';
+
+        return '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
+            . '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+            . '<meta name="x-apple-disable-message-reformatting">'
+            . '<title>' . e((string) ($meta['subject'] ?? '')) . '</title></head>'
+            . '<body style="margin:0; padding:0; background-color:' . $brand['background'] . '; -webkit-font-smoothing:antialiased;">'
+            . $this->previewHtml($meta)
+            . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:' . $brand['background'] . ';"><tr><td align="center" style="padding:24px 12px;">'
+            . '<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:600px; background-color:#ffffff; border-radius:8px;">'
+            . '<tr><td style="padding:24px 32px 8px 32px;">' . $header . '</td></tr>'
+            . $body
+            . '<tr>' . $this->footerCell($brand, $sample) . '</tr>'
+            . '</table></td></tr></table></body></html>';
+    }
+
+    /**
+     * The email and its plain-text part, whichever format the content is in:
+     * the one place a reader of `content` turns it into what is sent.
+     *
+     * @param  array<int|string, mixed>  $content  blocks, or the editor's object
+     * @param  array{preview_text?: ?string, subject?: ?string}  $meta
+     * @param  array<string, string>|null  $sample  fill merge tags from this; null = Resend syntax
+     * @return array{html: string, text: string}
+     */
+    public function compose(array $content, array $meta = [], ?array $sample = null): array
+    {
+        if (EmailContent::isEditor($content)) {
+            return $this->composeEditor($content, $meta, $sample);
+        }
+
+        return ['html' => $this->render($content, $meta, $sample), 'text' => $this->text($content, $sample)];
+    }
+
+    /** Does this content say anything worth sending? */
+    public function hasContent(array $content): bool
+    {
+        if (EmailContent::isEditor($content)) {
+            return $this->editorHtml->hasContent((string) ($content['html'] ?? ''));
+        }
+
+        foreach ($content as $block) {
+            $type = $block['type'] ?? null;
+
+            if (($type === 'heading' && trim((string) ($block['text'] ?? '')) !== '')
+                || ($type === 'text' && trim(strip_tags((string) ($block['html'] ?? ''))) !== '')
+                || ($type === 'columns' && trim(strip_tags((string) ($block['left'] ?? '') . ($block['right'] ?? ''))) !== '')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The React Email editor's document, cleaned again (it was cleaned on save;
+     * record HTML is cleaned on read too), with the preview text first in the
+     * body, the same footer as the block emails last, and the merge tags mapped.
+     *
+     * @return array{html: string, text: string}
+     */
+    private function composeEditor(array $content, array $meta, ?array $sample): array
+    {
+        $brand = $this->brand();
+        $source = (string) ($content['html'] ?? '');
+
+        $html = $this->editorHtml->isDocument($source)
+            ? $this->editorHtml->clean($source)
+            : $this->editorWrapper($this->editorHtml->cleanFragment($source), $brand, $meta);
+
+        // Our serialiser writes exactly one <body …> and one </body>, and text
+        // and attribute values are escaped, so these two edits cannot land
+        // inside the editor's own markup.
+        $preview = $this->previewHtml($meta);
+
+        if ($preview !== '') {
+            $html = preg_replace_callback('/<body\b[^>]*>/', fn ($m) => $m[0] . $preview, $html, 1);
+        }
+
+        $footer = '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="padding:0 12px 24px 12px;">'
+            . '<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:600px;">'
+            . '<tr>' . $this->footerCell($brand, $sample) . '</tr>'
+            . '</table></td></tr></table>';
+
+        $at = strrpos($html, '</body>');
+        $html = $at === false ? $html . $footer : substr($html, 0, $at) . $footer . substr($html, $at);
+
+        $text = trim((string) ($content['text'] ?? ''));
+
+        if ($text === '') {
+            $text = $this->editorHtml->text($source);
+        }
+
+        $out = [trim($this->tags($text, $sample, false))];
+        array_push($out, ...$this->footerText($brand, $sample));
+
+        return [
+            'html' => $this->tags($html, $sample),
+            'text' => implode("\n\n", array_filter($out, fn ($line) => $line !== '')),
+        ];
+    }
+
+    /** A body fragment (the starter) inside the house frame: 600px, centred, brand colours. */
+    private function editorWrapper(string $inner, array $brand, array $meta): string
+    {
+        return EmailEditorHtml::DOCTYPE
+            . '<html lang="en"><head><meta content="text/html; charset=UTF-8" http-equiv="Content-Type">'
+            . '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+            . '<meta name="x-apple-disable-message-reformatting">'
+            . '<title>' . e((string) ($meta['subject'] ?? '')) . '</title></head>'
+            . '<body style="margin:0; padding:0; background-color:' . $brand['background'] . ';">'
+            . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:' . $brand['background'] . ';"><tr><td align="center" style="padding:24px 12px 0 12px;">'
+            . '<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:600px; background-color:#ffffff; border-radius:8px;">'
+            . '<tr><td style="padding:24px 32px; font-family:' . self::FONT . '; font-size:15px; line-height:1.65; color:#374151;">' . $inner . '</td></tr>'
+            . '</table></td></tr></table></body></html>';
+    }
+
+    /** The hidden preview-text line, or '' when there is none. */
+    private function previewHtml(array $meta): string
+    {
+        $preview = trim((string) ($meta['preview_text'] ?? ''));
+
+        return $preview !== ''
+            ? '<div style="display:none; font-size:1px; line-height:1px; max-height:0; max-width:0; opacity:0; overflow:hidden;">' . e($preview) . '</div>'
+            : '';
+    }
+
+    /** The footer cell every email carries: who, where, and the unsubscribe link. */
+    private function footerCell(array $brand, ?array $sample): string
+    {
+        $unsubscribe = $sample === null ? '{{{RESEND_UNSUBSCRIBE_URL}}}' : '#';
 
         $footerLines = array_filter([
             $brand['company'] !== '' ? e($brand['company']) : null,
@@ -62,24 +196,20 @@ class EmailCampaignRenderer
             $brand['website'] !== '' ? '<a href="' . e($brand['website']) . '" style="color:' . $brand['muted'] . ';">' . e(preg_replace('#^https?://#', '', $brand['website'])) . '</a>' : null,
         ]);
 
-        return '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
-            . '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
-            . '<meta name="x-apple-disable-message-reformatting">'
-            . '<title>' . e((string) ($meta['subject'] ?? '')) . '</title></head>'
-            . '<body style="margin:0; padding:0; background-color:' . $brand['background'] . '; -webkit-font-smoothing:antialiased;">'
-            . ($preview !== ''
-                ? '<div style="display:none; font-size:1px; line-height:1px; max-height:0; max-width:0; opacity:0; overflow:hidden;">' . e($preview) . '</div>'
-                : '')
-            . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:' . $brand['background'] . ';"><tr><td align="center" style="padding:24px 12px;">'
-            . '<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:600px; background-color:#ffffff; border-radius:8px;">'
-            . '<tr><td style="padding:24px 32px 8px 32px;">' . $header . '</td></tr>'
-            . $body
-            . '<tr><td style="padding:24px 32px 28px 32px; font-family:' . self::FONT . '; font-size:12px; line-height:1.6; color:' . $brand['muted'] . '; border-top:1px solid #e5e7eb;">'
+        return '<td style="padding:24px 32px 28px 32px; font-family:' . self::FONT . '; font-size:12px; line-height:1.6; color:' . $brand['muted'] . '; border-top:1px solid #e5e7eb;">'
             . implode('<br>', $footerLines)
             . '<br><br>You are receiving this because you are one of our contacts. '
             . '<a href="' . $unsubscribe . '" style="color:' . $brand['muted'] . '; text-decoration:underline;">Unsubscribe</a>'
-            . '</td></tr>'
-            . '</table></td></tr></table></body></html>';
+            . '</td>';
+    }
+
+    /** @return array<int, string> the plain-text footer lines */
+    private function footerText(array $brand, ?array $sample): array
+    {
+        return [
+            trim($brand['company'] . "\n" . $brand['address']),
+            'Unsubscribe: ' . ($sample === null ? '{{{RESEND_UNSUBSCRIBE_URL}}}' : '#'),
+        ];
     }
 
     /** One line (a subject) with its merge tags filled from `$sample`, or in Resend's syntax. */
@@ -109,9 +239,7 @@ class EmailCampaignRenderer
             }
         }
 
-        $brand = $this->brand();
-        $out[] = trim($brand['company'] . "\n" . $brand['address']);
-        $out[] = 'Unsubscribe: ' . ($sample === null ? '{{{RESEND_UNSUBSCRIBE_URL}}}' : '#');
+        array_push($out, ...$this->footerText($this->brand(), $sample));
 
         return implode("\n\n", array_filter($out, fn ($line) => $line !== ''));
     }
@@ -326,8 +454,8 @@ class EmailCampaignRenderer
         return preg_match('#^https?://[^\s<>"]+$#i', $url) ? $url : null;
     }
 
-    /** @return array<string, string> */
-    private function brand(): array
+    /** @return array<string, string> the house look, colours checked, URLs http(s) only */
+    public function brand(): array
     {
         $brand = (array) ModuleConfig::get('email_campaigns.brand', []);
         $hex = fn ($value, $fallback) => preg_match('/^#[0-9a-f]{3,8}$/i', (string) $value) ? (string) $value : $fallback;

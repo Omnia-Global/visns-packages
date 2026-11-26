@@ -16,6 +16,8 @@ use Visnsstudio\VisnsPackages\Models\EmailTemplate;
 use Visnsstudio\VisnsPackages\Services\EmailCampaigns\EmailCampaignRenderer;
 use Visnsstudio\VisnsPackages\Services\EmailCampaigns\EmailCampaignReport;
 use Visnsstudio\VisnsPackages\Services\EmailCampaigns\EmailCampaignSender;
+use Visnsstudio\VisnsPackages\Services\EmailCampaigns\EmailContent;
+use Visnsstudio\VisnsPackages\Services\EmailCampaigns\EmailEditorHtml;
 use Visnsstudio\VisnsPackages\Services\EmailCampaigns\EmailListBuilder;
 use Visnsstudio\VisnsPackages\Services\EmailCampaigns\ResendClient;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
@@ -35,6 +37,7 @@ class EmailCampaignController extends Controller
         private EmailCampaignReport $reports,
         private EmailListBuilder $lists,
         private ResendClient $resend,
+        private EmailEditorHtml $editorHtml,
     ) {
     }
 
@@ -63,6 +66,14 @@ class EmailCampaignController extends Controller
                 ] : null,
                 'merge_tags' => EmailCampaignRenderer::TAGS,
                 'max_list_size' => (int) ModuleConfig::get('email_campaigns.max_list_size', 20000),
+                // Which editor a new campaign opens in ('blocks' | 'editor'),
+                // and the house colours the editor themes buttons and links
+                // with. Only the look: no address, no keys.
+                'editor' => EmailContent::configuredEditor(),
+                'brand' => array_intersect_key(
+                    $this->renderer->brand(),
+                    array_flip(['company', 'logo_url', 'accent', 'button', 'ink', 'muted', 'background']),
+                ),
             ],
         ]);
     }
@@ -86,7 +97,9 @@ class EmailCampaignController extends Controller
             'template_id' => ['nullable', 'integer'],
         ]);
 
-        $content = self::starterBlocks();
+        $content = EmailContent::configuredEditor() === EmailContent::FORMAT_EDITOR
+            ? EmailContent::editorStarter($this->renderer->brand())
+            : self::starterBlocks();
 
         if (! empty($data['template_id'])) {
             $template = EmailTemplate::query()->find((int) $data['template_id']);
@@ -122,9 +135,7 @@ class EmailCampaignController extends Controller
             'from_email' => ['sometimes', 'nullable', 'email', 'max:191'],
             'reply_to' => ['sometimes', 'nullable', 'email', 'max:191'],
             'list_id' => ['sometimes', 'nullable', 'integer'],
-            'content' => ['sometimes', 'array', 'max:100'],
-            'content.*.type' => ['required_with:content', 'string', 'in:heading,text,image,button,divider,spacer,columns'],
-        ]);
+        ] + EmailContent::rules($request->input('content'), false));
 
         if (array_key_exists('list_id', $data)) {
             $data['list_id'] = $this->existingList($data['list_id']);
@@ -138,7 +149,13 @@ class EmailCampaignController extends Controller
         // and the editor blank on reload (found 2026-09-30). The rule still
         // checks each block's type; the blocks themselves come off the request.
         if (array_key_exists('content', $data)) {
-            $data['content'] = array_values((array) $request->input('content', []));
+            $content = $this->postedContent($request);
+
+            if ($content instanceof JsonResponse) {
+                return $content;
+            }
+
+            $data['content'] = $content;
         }
 
         $campaign->fill($data);
@@ -158,16 +175,18 @@ class EmailCampaignController extends Controller
     public function preview(Request $request, int $id): JsonResponse
     {
         $campaign = EmailCampaign::query()->findOrFail($id);
-        $blocks = $request->has('content') ? (array) $request->input('content', []) : (array) $campaign->content;
+        // Unsaved content from the editor, or what is stored. Either way it is
+        // cleaned on the way out (compose() cleans editor html on read).
+        $content = $request->has('content') ? (array) $request->input('content', []) : (array) $campaign->content;
 
         $sample = $this->sample($request);
         $subject = (string) $request->input('subject', $campaign->subject);
 
         return response()->json([
-            'html' => $this->renderer->render($blocks, [
+            'html' => $this->renderer->compose($content, [
                 'subject' => $subject,
                 'preview_text' => $request->input('preview_text', $campaign->preview_text),
-            ], $sample),
+            ], $sample)['html'],
             // As the recipient's inbox will show it, tags filled.
             'subject' => $this->renderer->line($subject, $sample),
         ]);
@@ -391,7 +410,9 @@ class EmailCampaignController extends Controller
             'templates' => EmailTemplate::query()->orderBy('name')->get()->map(fn (EmailTemplate $template) => [
                 'id' => $template->id,
                 'name' => $template->name,
-                'blocks' => count((array) $template->content),
+                'format' => EmailContent::isEditor((array) $template->content) ? EmailContent::FORMAT_EDITOR : 'blocks',
+                // A block count means nothing for an editor email: null, not a number.
+                'blocks' => EmailContent::isEditor((array) $template->content) ? null : count((array) $template->content),
                 'updated_at' => $template->updated_at?->toIso8601String(),
             ])->values(),
         ]);
@@ -401,12 +422,16 @@ class EmailCampaignController extends Controller
     {
         $data = $request->validate([
             'name' => ['required', 'string', 'max:191'],
-            'content' => ['required', 'array', 'max:100'],
-            'content.*.type' => ['required', 'string', 'in:heading,text,image,button,divider,spacer,columns'],
-        ]);
+        ] + EmailContent::rules($request->input('content'), true));
 
-        // The whole blocks, not the validated keys — see update().
-        $data['content'] = array_values((array) $request->input('content', []));
+        // The whole content, not the validated keys — see update().
+        $content = $this->postedContent($request);
+
+        if ($content instanceof JsonResponse) {
+            return $content;
+        }
+
+        $data['content'] = $content;
 
         $template = EmailTemplate::create($data + ['user_id' => $request->user()?->getAuthIdentifier()]);
 
@@ -596,6 +621,28 @@ class EmailCampaignController extends Controller
         }
 
         return implode(', ', $parts) . '. It is copied to Resend in the background over the next minute or two.';
+    }
+
+    /**
+     * The posted content as it is stored, after validate(): blocks whole off
+     * the request (validate() keeps only the validated keys, see update()), or
+     * the editor's object with its html cleaned.
+     *
+     * @return array<int|string, mixed>|JsonResponse
+     */
+    private function postedContent(Request $request)
+    {
+        $raw = (array) $request->input('content', []);
+
+        if (! EmailContent::isEditor($raw)) {
+            return array_values($raw);
+        }
+
+        if ($problem = EmailContent::docProblem($raw)) {
+            return $this->refuse($problem);
+        }
+
+        return EmailContent::storedEditor($raw, $this->editorHtml);
     }
 
     /** @return array<int, array<string, mixed>> */
