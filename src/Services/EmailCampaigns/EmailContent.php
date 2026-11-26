@@ -69,7 +69,18 @@ class EmailContent
             return [
                 'content' => [$presence, 'array'],
                 'content.format' => ['required', 'string', Rule::in([self::FORMAT_EDITOR])],
-                'content.doc' => ['nullable', 'array'],
+                // An object, or (since 4.30.0) that object as a JSON string:
+                // the browser sends a string so the app's TrimStrings /
+                // ConvertEmptyStringsToNull middleware cannot rewrite the
+                // document's text nodes (a lone " " became null, and Tiptap
+                // then refused the whole document: the editor opened empty).
+                'content.doc' => ['nullable', function (string $attribute, $value, \Closure $fail): void {
+                    if (is_string($value) && strlen($value) > self::DOC_MAX_BYTES) {
+                        $fail('This email is too large to save. Split it into shorter emails or remove some images.');
+                    } elseif (! is_array($value) && self::decodeDoc($value) === null) {
+                        $fail('The email editor sent a document that could not be read. Reload the page and try again.');
+                    }
+                }],
                 'content.html' => ['required', 'string', 'max:' . self::HTML_MAX],
                 'content.text' => ['nullable', 'string', 'max:' . self::TEXT_MAX],
                 'content.mode' => ['nullable', 'string', Rule::in(self::MODES)],
@@ -82,6 +93,27 @@ class EmailContent
         ];
     }
 
+    /**
+     * The posted Tiptap document as an array: an array as it is, a JSON string
+     * of an object decoded, anything else null.
+     *
+     * @param  mixed  $doc
+     */
+    public static function decodeDoc($doc): ?array
+    {
+        if (is_array($doc)) {
+            return $doc;
+        }
+
+        if (! is_string($doc) || $doc === '' || strlen($doc) > self::DOC_MAX_BYTES) {
+            return null;
+        }
+
+        $decoded = json_decode($doc, true);
+
+        return is_array($decoded) && ! array_is_list($decoded) ? $decoded : null;
+    }
+
     /** A sentence when the editor's Tiptap document is too big to keep, else null. */
     public static function docProblem(array $raw): ?string
     {
@@ -89,6 +121,12 @@ class EmailContent
 
         if ($doc === null) {
             return null;
+        }
+
+        if (is_string($doc)) {
+            return strlen($doc) > self::DOC_MAX_BYTES
+                ? 'This email is too large to save. Split it into shorter emails or remove some images.'
+                : null;
         }
 
         $json = json_encode($doc);
@@ -111,7 +149,7 @@ class EmailContent
 
         $stored = [
             'format' => self::FORMAT_EDITOR,
-            'doc' => is_array($raw['doc'] ?? null) ? $raw['doc'] : null,
+            'doc' => self::decodeDoc($raw['doc'] ?? null),
             'html' => $sanitiser->isDocument($html) ? $sanitiser->clean($html) : $sanitiser->cleanFragment($html),
             'text' => (string) ($raw['text'] ?? ''),
         ];

@@ -246,6 +246,36 @@ class EmailEditorContentTest extends EmailCampaignTestCase
         $this->assertSame($this->editorContent(), $campaign->fresh()->content);
     }
 
+    public function test_a_doc_sent_as_a_json_string_keeps_its_whitespace_text_nodes(): void
+    {
+        $campaign = $this->editorCampaign();
+        // A Tiptap document whose text nodes are whitespace only: the app's
+        // TrimStrings / ConvertEmptyStringsToNull middleware would make " " null
+        // inside an array, and Tiptap refuses a document with a null text node.
+        $doc = ['type' => 'doc', 'content' => [['type' => 'paragraph', 'content' => [
+            ['type' => 'text', 'text' => 'Since moving to '],
+            ['type' => 'text', 'text' => 'Verkada', 'marks' => [['type' => 'bold']]],
+            ['type' => 'text', 'text' => ' '],
+            ['type' => 'text', 'text' => 'has seen:'],
+        ]]]];
+
+        $this->actingAs($this->manager())->postJson(self::BASE . '/campaigns/' . $campaign->id, [
+            'content' => ['format' => 'editor', 'doc' => json_encode($doc), 'html' => self::FIXTURE, 'text' => self::TEXT, 'mode' => 'visual'],
+        ])->assertOk()->assertJsonPath('campaign.content.doc.type', 'doc');
+
+        $this->assertSame($doc, $campaign->fresh()->content['doc']);
+
+        // A string that is not a JSON object is refused, and so is a list.
+        $post = fn ($doc) => $this->actingAs($this->manager())->postJson(self::BASE . '/campaigns/' . $campaign->id, [
+            'content' => ['format' => 'editor', 'doc' => $doc, 'html' => '<p>x</p>'],
+        ]);
+        $post('{not json')->assertStatus(422);
+        $post('[1,2]')->assertStatus(422);
+        $post(json_encode(['t' => str_repeat('x', EmailContent::DOC_MAX_BYTES)]))
+            ->assertStatus(422)->assertJsonPath('message', 'This email is too large to save. Split it into shorter emails or remove some images.');
+        $this->assertSame($doc, $campaign->fresh()->content['doc']);
+    }
+
     public function test_mode_round_trips_on_a_campaign_and_a_bad_mode_is_refused(): void
     {
         $campaign = $this->editorCampaign();
