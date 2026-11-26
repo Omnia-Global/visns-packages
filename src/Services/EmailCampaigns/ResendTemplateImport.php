@@ -2,7 +2,7 @@
 
 namespace Visnsstudio\VisnsPackages\Services\EmailCampaigns;
 
-use Carbon\Carbon;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Visnsstudio\VisnsPackages\Models\EmailTemplate;
 use Visnsstudio\VisnsPackages\Support\ModuleConfig;
@@ -18,9 +18,15 @@ use Visnsstudio\VisnsPackages\Support\ModuleConfig;
  *
  * `hash` is the SHA-256 of the html this import wrote. A template whose html
  * no longer matches it was changed here, and a later import leaves it alone;
- * an untouched one is replaced only when Resend's `updated_at` is newer. So the
- * import can be run again at any time, and a run cut short (Resend's 429)
- * simply finishes next time.
+ * an untouched one is replaced whenever what the import would write now
+ * (html, text or subject) differs from what it holds: a change at Resend and
+ * an improvement to the import alike. So the import can be run again at any
+ * time, and a run cut short (Resend's 429) simply finishes next time.
+ *
+ * Images on Resend's CDN (`email_campaigns.import.rehost_hosts`) are copied
+ * onto our public image disk through `EmailImageStore`, content-addressed, so
+ * the same Resend content always produces the same html. An image that cannot
+ * be copied keeps its Resend URL, with a warning.
  *
  * Resend's placeholders are `{{{KEY}}}` / `{{{KEY|fallback}}}`. The contact
  * fields map to our merge tags (`{first_name}` …, mapped back to Resend's
@@ -48,6 +54,16 @@ class ResendTemplateImport
     ];
 
     private const UNSUBSCRIBE = ['resend_unsubscribe_url', 'unsubscribe_url'];
+
+    /** Images copied from one template at most. */
+    public const MAX_IMAGES = 60;
+
+    public const IMAGE_FAILED = 'an image could not be copied (it stays on Resend\'s server)';
+
+    public const IMAGE_CAP = 'has more than 60 images; the rest stay on Resend\'s server';
+
+    /** @var array<string, ?string> this run's copies: source URL => our URL (null = could not copy) */
+    private array $copies = [];
 
     /** @var callable(int): void */
     private $sleep;
@@ -81,6 +97,7 @@ class ResendTemplateImport
     public function run(?int $userId): array
     {
         $this->calls = 0;
+        $this->copies = [];
         $out = [
             'reason' => null,
             'imported' => [],
@@ -198,14 +215,15 @@ class ResendTemplateImport
                     continue;
                 }
 
-                if (! $this->newer($updatedAt, (string) ($source['updated_at'] ?? ''))) {
+                [$fresh, $warnings] = $this->content($template, $id, $updatedAt);
+
+                if ($this->same($fresh, $content)) {
                     $out['unchanged'][] = (string) $row->name;
 
                     continue;
                 }
 
-                [$content, $warnings] = $this->content($template, $id, $updatedAt);
-                $row->content = $content;
+                $row->content = $fresh;
                 $row->save();
 
                 $out['updated'][] = (string) $row->name;
@@ -246,6 +264,7 @@ class ResendTemplateImport
         }
 
         $html = $this->map((string) $template['html'], $fallbacks, true, $warnings);
+        $html = $this->rehost($html, $warnings);
         $text = $this->map((string) ($template['text'] ?? ''), $fallbacks, false, $warnings);
 
         // The same cleaning path an editor save takes.
@@ -307,17 +326,117 @@ class ResendTemplateImport
         }
     }
 
-    private function newer(string $theirs, string $ours): bool
+    /** Would writing $fresh change what a person sees in $stored? (Bookkeeping aside.) */
+    private function same(array $fresh, array $stored): bool
     {
-        if ($ours === '') {
-            return true;
+        foreach (['html', 'text', 'subject'] as $key) {
+            if (($fresh[$key] ?? null) !== ($stored[$key] ?? null)) {
+                return false;
+            }
         }
 
-        try {
-            return Carbon::parse($theirs)->greaterThan(Carbon::parse($ours));
-        } catch (\Throwable) {
-            return $theirs !== $ours;
+        return true;
+    }
+
+    /**
+     * Copy every image on a rehost host (`<img src>`, `background=""`) onto our
+     * image disk and point the html at the copy. Never throws: an image that
+     * cannot be copied keeps its URL and earns a warning.
+     *
+     * @param  array<int, string>  $warnings
+     */
+    private function rehost(string $html, array &$warnings): string
+    {
+        $hosts = array_values(array_filter(array_map(
+            fn ($host) => is_string($host) ? mb_strtolower(trim($host)) : '',
+            (array) ModuleConfig::get('email_campaigns.import.rehost_hosts', ['cdn.resend.app'])
+        )));
+
+        if ($hosts === []) {
+            return $html;
         }
+
+        preg_match_all('/<img\b[^>]*?\ssrc\s*=\s*(["\'])(.*?)\1/is', $html, $sources);
+        preg_match_all('/<[a-z][^>]*?\sbackground\s*=\s*(["\'])(.*?)\1/is', $html, $backgrounds);
+
+        // Raw attribute value => the URL it means (entities decoded).
+        $found = [];
+
+        foreach (array_merge($sources[2], $backgrounds[2]) as $raw) {
+            $url = trim(html_entity_decode($raw, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            $scheme = mb_strtolower((string) parse_url($url, PHP_URL_SCHEME));
+            $host = mb_strtolower((string) parse_url($url, PHP_URL_HOST));
+
+            if (in_array($scheme, ['http', 'https'], true) && in_array($host, $hosts, true)) {
+                $found[$raw] = $url;
+            }
+        }
+
+        $urls = array_values(array_unique($found));
+
+        if (count($urls) > self::MAX_IMAGES) {
+            $warnings[] = self::IMAGE_CAP;
+            $urls = array_slice($urls, 0, self::MAX_IMAGES);
+        }
+
+        $replace = [];
+
+        foreach ($found as $raw => $url) {
+            if (! in_array($url, $urls, true)) {
+                continue;
+            }
+
+            $copy = $this->copy($url);
+
+            if ($copy === null) {
+                $warnings[] = self::IMAGE_FAILED;
+
+                continue;
+            }
+
+            $replace[$raw] = e($copy);
+        }
+
+        // Longest first, so a URL that is a prefix of another never splits it.
+        uksort($replace, fn ($a, $b) => strlen($b) <=> strlen($a));
+
+        return $replace === [] ? $html : strtr($html, $replace);
+    }
+
+    /** Our URL for a copy of this image, fetched once a run; null when it could not be copied. */
+    private function copy(string $url): ?string
+    {
+        if (array_key_exists($url, $this->copies)) {
+            return $this->copies[$url];
+        }
+
+        $max = EmailImageStore::maxBytes();
+        $copy = null;
+
+        try {
+            $response = Http::timeout(10)
+                ->withOptions([
+                    'allow_redirects' => false, // only the listed hosts are fetched; a redirect could point anywhere
+                    // Give up early on a declared size over the limit.
+                    'on_headers' => function ($headers) use ($max) {
+                        $length = $headers->getHeaderLine('Content-Length');
+
+                        if ($length !== '' && (int) $length > $max) {
+                            throw new \RuntimeException('image too large');
+                        }
+                    },
+                ])
+                ->get($url);
+
+            if ($response->successful()) {
+                $bytes = $response->body();
+                $copy = strlen($bytes) <= $max ? EmailImageStore::store($bytes) : null;
+            }
+        } catch (\Throwable) {
+            $copy = null;
+        }
+
+        return $this->copies[$url] = $copy;
     }
 
     private function name($name, string $id): string

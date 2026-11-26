@@ -7,7 +7,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Visnsstudio\VisnsPackages\Models\EmailCampaign;
 use Visnsstudio\VisnsPackages\Models\EmailList;
@@ -18,6 +17,7 @@ use Visnsstudio\VisnsPackages\Services\EmailCampaigns\EmailCampaignReport;
 use Visnsstudio\VisnsPackages\Services\EmailCampaigns\EmailCampaignSender;
 use Visnsstudio\VisnsPackages\Services\EmailCampaigns\EmailContent;
 use Visnsstudio\VisnsPackages\Services\EmailCampaigns\EmailEditorHtml;
+use Visnsstudio\VisnsPackages\Services\EmailCampaigns\EmailImageStore;
 use Visnsstudio\VisnsPackages\Services\EmailCampaigns\EmailListBuilder;
 use Visnsstudio\VisnsPackages\Services\EmailCampaigns\ResendClient;
 use Visnsstudio\VisnsPackages\Services\EmailCampaigns\ResendTemplateImport;
@@ -551,26 +551,12 @@ class EmailCampaignController extends Controller
         $max = (int) ModuleConfig::get('email_campaigns.image_max_kb', 5120);
         $request->validate(['image' => ['required', 'file', 'max:' . $max]]);
 
-        $file = $request->file('image');
-        $mime = (new \finfo(FILEINFO_MIME_TYPE))->file($file->getRealPath()) ?: '';
-        $ext = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'][$mime] ?? null;
+        // Sniffed off the bytes, never the name or the browser's claim; the
+        // types, size and place are EmailImageStore's one rule.
+        $url = EmailImageStore::storeUpload((string) file_get_contents($request->file('image')->getRealPath()));
 
-        // Sniffed, never the name or the browser's claim. No SVG: it is a
-        // document, and most mail clients will not draw one anyway.
-        if ($ext === null) {
+        if ($url === null) {
             return $this->refuse('Use a JPEG, PNG, GIF or WebP image.');
-        }
-
-        $disk = (string) ModuleConfig::get('email_campaigns.image_disk', 'public');
-        $path = trim((string) ModuleConfig::get('email_campaigns.image_directory', 'email-campaigns'), '/')
-            . '/' . now()->format('Y/m') . '/' . Str::random(24) . '.' . $ext;
-
-        Storage::disk($disk)->put($path, file_get_contents($file->getRealPath()), 'public');
-
-        $url = Storage::disk($disk)->url($path);
-
-        if (! preg_match('#^https?://#i', $url)) {
-            $url = rtrim((string) config('app.url'), '/') . '/' . ltrim($url, '/');
         }
 
         return response()->json(['url' => $url], 201);

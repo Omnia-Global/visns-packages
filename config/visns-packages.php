@@ -2136,6 +2136,10 @@ return [
         // allows 10 requests a second a team).
         'import' => [
             'pace_ms' => 200,
+            // Images on these hosts are copied onto image_disk and the
+            // template points at our copy (DNS filters often block Resend's
+            // CDN, so its images draw broken here and for some recipients).
+            'rehost_hosts' => ['cdn.resend.app'],
         ],
 
         'max_list_size' => 20000,

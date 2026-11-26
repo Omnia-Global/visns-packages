@@ -44,6 +44,17 @@ abstract class EmailCampaignTestCase extends TestCase
     /** How many templates one `GET templates` page answers. */
     protected int $templatePageSize = 100;
 
+    /**
+     * Resend's image CDN: URL => [bytes, content type, status]. Requests to it
+     * are answered here and kept out of `$calls` (they are not Resend's API).
+     *
+     * @var array<string, array{0: string, 1?: string, 2?: int}>
+     */
+    protected array $cdn = [];
+
+    /** @var array<int, string> every CDN URL fetched, in order */
+    protected array $cdnFetches = [];
+
     protected function defineEnvironment($app)
     {
         parent::defineEnvironment($app);
@@ -80,6 +91,15 @@ abstract class EmailCampaignTestCase extends TestCase
     protected function fakeResend(): void
     {
         Http::fake(function (ClientRequest $request) {
+            if (parse_url($request->url(), PHP_URL_HOST) === 'cdn.resend.app') {
+                $this->cdnFetches[] = $request->url();
+                $image = $this->cdn[$request->url()] ?? null;
+
+                return $image
+                    ? Http::response($image[0], $image[2] ?? 200, ['Content-Type' => $image[1] ?? 'image/png'])
+                    : Http::response('Not found', 404);
+            }
+
             $path = trim(parse_url($request->url(), PHP_URL_PATH), '/');
             $method = strtoupper($request->method());
             $this->calls[] = $method . ' ' . urldecode($path);
