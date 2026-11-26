@@ -3,6 +3,7 @@
 namespace Visnsstudio\VisnsPackages\Services\EmailCampaigns;
 
 use Illuminate\Support\Facades\DB;
+use Visnsstudio\VisnsPackages\Contracts\EmailContactPicker;
 use Visnsstudio\VisnsPackages\Contracts\EmailContactSource;
 use Visnsstudio\VisnsPackages\Models\EmailList;
 use Visnsstudio\VisnsPackages\Models\EmailListMember;
@@ -33,8 +34,40 @@ class EmailListBuilder
         return null;
     }
 
+    /** The source, when it can also pick people one by one; else null. */
+    public function picker(): ?EmailContactPicker
+    {
+        $source = $this->source();
+
+        return $source instanceof EmailContactPicker ? $source : null;
+    }
+
     /**
-     * Re-read a CRM list from its filters.
+     * The hand-picked people's keys a CRM list's filters carry.
+     *
+     * @return array<int, string>
+     */
+    public static function pickedKeys(?array $filters): array
+    {
+        return array_values(array_unique(array_filter(array_map(
+            fn ($key) => mb_substr(trim((string) $key), 0, 64),
+            (array) (($filters ?? [])['contacts'] ?? [])
+        ), fn ($key) => $key !== '')));
+    }
+
+    /**
+     * Does this CRM list take every contact? Only when it names no group AND
+     * no hand-picked person (a list of picked people alone is just them).
+     */
+    public static function takesEveryone(?array $filters): bool
+    {
+        return ((array) (($filters ?? [])['groups'] ?? [])) === [] && self::pickedKeys($filters) === [];
+    }
+
+    /**
+     * Re-read a CRM list from its filters: the chosen groups' people (or
+     * everybody, when nothing is chosen) plus the hand-picked people, re-read
+     * by key so a changed address follows the contact.
      *
      * @return array{added: int, removed: int, kept: int, total: int}
      */
@@ -46,20 +79,37 @@ class EmailListBuilder
             return ['added' => 0, 'removed' => 0, 'kept' => 0, 'total' => $list->members()->count()];
         }
 
+        $filters = (array) $list->filters;
+        $picked = self::pickedKeys($filters);
+        $max = (int) ModuleConfig::get('email_campaigns.max_list_size', 20000);
         $wanted = [];
 
-        foreach ($source->contacts((array) $list->filters) as $row) {
-            $email = self::email($row['email'] ?? null);
+        $take = function (iterable $rows) use (&$wanted, $max): void {
+            foreach ($rows as $row) {
+                $email = self::email($row['email'] ?? null);
 
-            if ($email === null || isset($wanted[$email])) {
-                continue;
+                if ($email === null || isset($wanted[$email])) {
+                    continue;
+                }
+
+                if (count($wanted) >= $max) {
+                    return;
+                }
+
+                $wanted[$email] = $row;
             }
+        };
 
-            $wanted[$email] = $row;
+        // Picked people first: someone picked by hand is on the list whatever
+        // the groups' options say.
+        $picker = $source instanceof EmailContactPicker ? $source : null;
 
-            if (count($wanted) >= (int) ModuleConfig::get('email_campaigns.max_list_size', 20000)) {
-                break;
-            }
+        if ($picked !== [] && $picker !== null) {
+            $take($picker->peopleByKeys($picked));
+        }
+
+        if (((array) ($filters['groups'] ?? [])) !== [] || $picked === []) {
+            $take($source->contacts($filters));
         }
 
         return $this->apply($list, $wanted);
@@ -97,14 +147,44 @@ class EmailListBuilder
         return $this->apply($list, $wanted) + ['rejected' => $rejected];
     }
 
+    /**
+     * Add people to an import list without taking anybody off it (people
+     * picked from the contact source). Somebody already on it is kept as is.
+     *
+     * @param  iterable<array<string, mixed>>  $rows
+     * @return array{added: int, removed: int, kept: int, total: int}
+     */
+    public function add(EmailList $list, iterable $rows): array
+    {
+        $existing = $list->members()->where('status', '!=', EmailListMember::STATUS_REMOVING)->pluck('email')->flip();
+        $wanted = [];
+
+        foreach ($rows as $row) {
+            $email = self::email($row['email'] ?? null);
+
+            if ($email !== null && ! isset($wanted[$email])) {
+                $wanted[$email] = $row;
+            }
+        }
+
+        $max = (int) ModuleConfig::get('email_campaigns.max_list_size', 20000);
+        $new = array_diff_key($wanted, $existing->all());
+
+        if ($existing->count() + count($new) > $max) {
+            $new = array_slice($new, 0, max(0, $max - $existing->count()), true);
+        }
+
+        return $this->apply($list, $new, false);
+    }
+
     /** @param array<string, array<string, mixed>> $wanted email => row */
-    private function apply(EmailList $list, array $wanted): array
+    private function apply(EmailList $list, array $wanted, bool $removeMissing = true): array
     {
         $added = 0;
         $removed = 0;
         $kept = 0;
 
-        DB::transaction(function () use ($list, $wanted, &$added, &$removed, &$kept) {
+        DB::transaction(function () use ($list, $wanted, $removeMissing, &$added, &$removed, &$kept) {
             $existing = $list->members()->get()->keyBy('email');
 
             foreach ($wanted as $email => $row) {
@@ -139,7 +219,7 @@ class EmailListBuilder
                 $kept++;
             }
 
-            foreach ($existing as $email => $member) {
+            foreach ($removeMissing ? $existing : [] as $email => $member) {
                 if (! isset($wanted[$email]) && $member->status !== EmailListMember::STATUS_REMOVING) {
                     // Never synced: nothing at Resend to take out, just drop it.
                     if ($member->synced_at === null) {

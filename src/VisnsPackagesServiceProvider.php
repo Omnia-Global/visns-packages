@@ -1773,6 +1773,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
             ->group(function () use ($base) {
                 Route::get($base, [EmailCampaignController::class, 'index']);
                 Route::get($base . '/groups', [EmailCampaignController::class, 'groups']);
+                Route::get($base . '/people', [EmailCampaignController::class, 'people']);
                 Route::get($base . '/templates', [EmailCampaignController::class, 'templates']);
                 Route::get($base . '/templates/{id}', [EmailCampaignController::class, 'showTemplate'])->whereNumber('id');
                 Route::post($base . '/templates/{id}/preview', [EmailCampaignController::class, 'previewTemplate'])->whereNumber('id');
@@ -1795,6 +1796,7 @@ class VisnsPackagesServiceProvider extends ServiceProvider
                 Route::post($base . '/lists', [EmailCampaignController::class, 'storeList']);
                 Route::post($base . '/lists/{id}', [EmailCampaignController::class, 'updateList'])->whereNumber('id');
                 Route::post($base . '/lists/{id}/refresh', [EmailCampaignController::class, 'refreshList'])->whereNumber('id');
+                Route::post($base . '/lists/{id}/people', [EmailCampaignController::class, 'listPeople'])->whereNumber('id');
                 Route::delete($base . '/lists/{id}', [EmailCampaignController::class, 'destroyList'])->whereNumber('id');
 
                 Route::post($base . '/templates', [EmailCampaignController::class, 'storeTemplate']);

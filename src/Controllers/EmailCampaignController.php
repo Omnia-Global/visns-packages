@@ -32,6 +32,9 @@ use Visnsstudio\VisnsPackages\Support\ModuleConfig;
  */
 class EmailCampaignController extends Controller
 {
+    /** Hand-picked people a contacts list may carry. */
+    public const MAX_PICKED = 2000;
+
     public function __construct(
         private EmailCampaignSender $sender,
         private EmailCampaignRenderer $renderer,
@@ -64,6 +67,8 @@ class EmailCampaignController extends Controller
                 'source' => $source ? [
                     'noun' => $source->groupNoun(),
                     'options' => $source->options(),
+                    // People can be picked one by one (EmailContactPicker).
+                    'people' => $this->lists->picker() !== null,
                 ] : null,
                 'merge_tags' => EmailCampaignRenderer::TAGS,
                 'max_list_size' => (int) ModuleConfig::get('email_campaigns.max_list_size', 20000),
@@ -297,9 +302,106 @@ class EmailCampaignController extends Controller
             'list' => $this->listRow($list) + [
                 'filters' => $list->filters,
                 'group_labels' => $source && $groups ? $source->groupLabels($groups) : [],
+                'picked' => $this->pickedPeople($list),
+                'takes_everyone' => $list->kind === EmailList::KIND_CRM && EmailListBuilder::takesEveryone($list->filters),
             ],
             'members' => $members,
         ]);
+    }
+
+    /** `GET {base}/people?search=` — the contact source's people, to pick one by one. */
+    public function people(Request $request): JsonResponse
+    {
+        $picker = $this->lists->picker();
+
+        return response()->json([
+            'people' => $picker ? $picker->people(mb_substr(trim((string) $request->query('search', '')), 0, 100), 25) : [],
+        ]);
+    }
+
+    /**
+     * `POST {base}/lists/{id}/people` `{add: [keys], remove: [keys]}` — put
+     * people from the contacts on a list, or (a contacts list) take a
+     * hand-picked person off it again. A contacts list keeps them in its
+     * filters and re-reads them on every refresh; an imported list just gains
+     * them as members.
+     */
+    public function listPeople(Request $request, int $id): JsonResponse
+    {
+        $list = EmailList::query()->findOrFail($id);
+        $picker = $this->lists->picker();
+
+        if ($picker === null) {
+            return $this->refuse('This application offers no contacts to pick from.');
+        }
+
+        $request->validate([
+            'add' => ['sometimes', 'array', 'max:500'],
+            'add.*' => ['string', 'max:64'],
+            'remove' => ['sometimes', 'array', 'max:500'],
+            'remove.*' => ['string', 'max:64'],
+        ]);
+
+        $add = EmailListBuilder::pickedKeys(['contacts' => (array) $request->input('add', [])]);
+        $remove = EmailListBuilder::pickedKeys(['contacts' => (array) $request->input('remove', [])]);
+
+        if ($list->kind === EmailList::KIND_CRM) {
+            if ($add !== [] && EmailListBuilder::takesEveryone($list->filters)) {
+                return $this->refuse('This list already takes every contact with an email address, so there is nobody to add.');
+            }
+
+            $filters = (array) $list->filters;
+            $picked = array_values(array_diff(array_unique(array_merge(EmailListBuilder::pickedKeys($filters), $add)), $remove));
+
+            if (count($picked) > self::MAX_PICKED) {
+                return $this->refuse('A list can hold ' . number_format(self::MAX_PICKED) . ' hand-picked people. Pick a client instead.');
+            }
+
+            if ($picked === [] && ((array) ($filters['groups'] ?? [])) === []) {
+                return $this->refuse('That would leave the list with nobody picked, which means every contact. Delete the list instead, or pick someone else first.');
+            }
+
+            $filters['contacts'] = $picked;
+            $list->filters = $filters;
+            $list->save();
+            $counts = $this->lists->refresh($list);
+        } else {
+            if ($remove !== []) {
+                return $this->refuse('People leave an imported list by importing a new file.');
+            }
+
+            $counts = $this->lists->add($list, $add === [] ? [] : $picker->peopleByKeys($add));
+        }
+
+        return response()->json([
+            'list' => $this->listRow($list->fresh()),
+            'counts' => $counts,
+            'message' => $this->countsSentence($counts),
+        ]);
+    }
+
+    /**
+     * A contacts list's hand-picked people, for its chips.
+     *
+     * @return array<int, array{key: string, label: string, email: string}>
+     */
+    private function pickedPeople(EmailList $list): array
+    {
+        $picker = $this->lists->picker();
+        $keys = $list->kind === EmailList::KIND_CRM ? EmailListBuilder::pickedKeys($list->filters) : [];
+
+        if ($picker === null || $keys === []) {
+            return [];
+        }
+
+        $out = [];
+
+        foreach ($picker->peopleByKeys($keys) as $row) {
+            $name = trim(($row['first_name'] ?? '') . ' ' . ($row['last_name'] ?? ''));
+            $out[] = ['key' => (string) $row['key'], 'label' => $name !== '' ? $name : (string) $row['email'], 'email' => (string) $row['email']];
+        }
+
+        return $out;
     }
 
     /** `GET {base}/groups?search=` — the contact source's groups (clients). */
@@ -345,8 +447,15 @@ class EmailCampaignController extends Controller
 
         $list->fill($data);
 
-        if ($list->kind === EmailList::KIND_CRM && ($request->has('groups') || $request->has('options'))) {
-            $list->filters = $this->filters($request);
+        if ($list->kind === EmailList::KIND_CRM && ($request->has('groups') || $request->has('options') || $request->has('contacts'))) {
+            $filters = $this->filters($request);
+
+            // Not posted = unchanged: a rename of the groups keeps the picked people.
+            if (! $request->has('contacts')) {
+                $filters['contacts'] = EmailListBuilder::pickedKeys($list->filters);
+            }
+
+            $list->filters = $filters;
         }
 
         $list->save();
@@ -675,7 +784,7 @@ class EmailCampaignController extends Controller
         ];
     }
 
-    /** @return array{groups: array<int, string>, options: array<string, bool>} */
+    /** @return array{groups: array<int, string>, options: array<string, bool>, contacts: array<int, string>} */
     private function filters(Request $request): array
     {
         $source = $this->lists->source();
@@ -684,6 +793,10 @@ class EmailCampaignController extends Controller
         return [
             'groups' => collect((array) $request->input('groups', []))->map(fn ($id) => mb_substr((string) $id, 0, 64))->filter()->unique()->values()->all(),
             'options' => collect((array) $request->input('options', []))->only($known)->map(fn ($on) => (bool) $on)->all(),
+            // Hand-picked people (EmailContactPicker keys), re-read on refresh.
+            'contacts' => $this->lists->picker() !== null
+                ? array_slice(EmailListBuilder::pickedKeys(['contacts' => (array) $request->input('contacts', [])]), 0, self::MAX_PICKED)
+                : [],
         ];
     }
 
